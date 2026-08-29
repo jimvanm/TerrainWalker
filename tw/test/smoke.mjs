@@ -12,7 +12,7 @@ const GLC = {
 export const log = {
   calls: {}, uniforms: new Set(), badUniform: [], nan: [],
   draws: 0, tris: 0, buffers: 0, deleted: 0, clears: 0,
-  textures: 0, texUploads: 0, texDeleted: 0, texSizes: new Set(),
+  textures: 0, mipmaps: 0, texUploads: 0, texDeleted: 0, texSizes: new Set(),
 };
 
 function makeGL() {
@@ -24,6 +24,9 @@ function makeGL() {
     createVertexArray: () => ({ id: ++uid }),
     createBuffer: () => { log.buffers++; return { id: ++uid }; },
     createTexture: () => { log.textures++; return { id: ++uid }; },
+    generateMipmap: () => { log.mipmaps++; },
+    getExtension: () => null,
+    getParameter: () => 1,
     deleteTexture: () => { log.texDeleted++; },
     texImage2D: (t, l, ifmt, w, h) => { log.texUploads++; log.texSizes.add(w + 'x' + h); },
     deleteVertexArray: () => { log.deleted++; },
@@ -64,15 +67,17 @@ function btn(hold, act) {
 // Mirrors the real pad in index.html, so a missing handler shows up as a crash.
 const PAD = [
   btn('down'), btn('boost'), btn('up'),
-  btn(undefined, 'fly'), btn(undefined, 'slower'), btn(undefined, 'water'),
-  btn(undefined, 'faster'), btn(undefined, 'fog'), btn(undefined, 'grab'),
+  btn(undefined, 'fly'), btn(undefined, 'slower'), btn(undefined, 'fog'),
+  btn(undefined, 'faster'), btn(undefined, 'grab'),
 ];
 function el() {
   return {
     style: {}, textContent: '', value: '9', max: '9', innerHTML: '',
     classList: { toggle() {}, add() {}, remove() {} },
-    addEventListener() {}, requestPointerLock() {}, setAttribute() {},
+    addEventListener(t, f) { (this._h = this._h || []).push([t, f]); },
+    requestPointerLock() {}, setAttribute() {},
     querySelectorAll: () => PAD,
+    appendChild(c) { (this._kids = this._kids || []).push(c); },
     getContext: () => makeGL(), width: 0, height: 0,
   };
 }
@@ -91,6 +96,7 @@ globalThis.history = { replaceState() {} };
 const ELS = {};
 globalThis.document = {
   getElementById: (id) => (ELS[id] = ELS[id] || el()),
+  createElement: () => el(),
   documentElement: { requestFullscreen: async () => {} },
   exitPointerLock() {}, exitFullscreen: async () => {},
   fullscreenElement: null,
@@ -122,8 +128,10 @@ globalThis.Worker = class {
       data: {
         id: m.id, ok: true, positions, indices, centre, nw,
         size: geo.tileSizeMerc(m.z), heights: m.keepHeights ? h : null,
-        water: m.vurl ? (() => { const a = new Uint8Array(256 * 256);
-          for (let i = 0; i < a.length; i++) a[i] = (i % 256) < 90 ? 255 : 0; return a; })() : null,
+        mask: m.vurl ? (() => { const a = new Uint8Array(256 * 256 * 4);
+          for (let i = 0; i < 256 * 256; i++) { a[i*4] = (i % 256) < 90 ? 255 : 0;
+            a[i*4+1] = i % 37 === 0 ? 255 : 0; a[i*4+3] = 200; } return a; })() : null,
+        cover: m.vurl ? new Uint8Array(256 * 256 * 3).fill(90) : null,
       },
     }), 0);
   }
@@ -158,14 +166,22 @@ for (const b of PAD) {
   }
 }
 
+// Flip layer buttons and confirm the uniform actually changes.
+const layerBtns = (ELS['layers'] && ELS['layers']._kids) || [];
+let toggled = 0;
+for (const b of layerBtns) for (const [t, f] of (b._h || [])) { try { f({ preventDefault(){} }); toggled++; } catch (e) { console.log('LAYER HANDLER THREW ' + e.message); process.exitCode = 1; } }
+
 const R = [];
 const ok = (c, m) => { R.push((c ? 'PASS  ' : 'FAIL  ') + m); if (!c) process.exitCode = 1; };
 
+ok(layerBtns.length === 4, `layer panel built ${layerBtns.length} buttons (expect 4)`);
+ok(toggled === 4, `all ${toggled} layer toggles fired cleanly`);
+ok(log.mipmaps > 0, `generated mipmaps for ${log.mipmaps} textures`);
 ok(log.textures > 0, `uploaded ${log.texUploads} textures across ${log.textures} objects`);
 ok(log.texSizes.has('256x256'), `mask textures are 256x256 (${[...log.texSizes].join(', ')})`);
 ok(padFired >= 8, `fired ${padFired} pad handlers without throwing`);
 ok(workerCount === 3, `spawned ${workerCount} workers`);
-ok(log.uniforms.size === 13, `resolved ${log.uniforms.size} uniform locations (expect 13)`);
+ok(log.uniforms.size === 16, `resolved ${log.uniforms.size} uniform locations (expect 16)`);
 ok(log.badUniform.length === 0, `no null uniform locations (${log.badUniform.length})`);
 ok(log.nan.length === 0, `no NaN/Inf uniform values (${log.nan.length}${log.nan.length ? ': ' + log.nan.slice(0, 3) : ''})`);
 ok(log.draws > 0, `issued ${log.draws} draw calls over ${FRAMES} frames`);

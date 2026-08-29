@@ -1,6 +1,6 @@
 // All tunables live here.
 
-export const BUILD = '0.4.3';
+export const BUILD = '0.7.1';
 
 // Resolved at runtime to a {z}/{x}/{y} template. Never hardcode the tile URL:
 // the style points at a TileJSON, and that indirection is how the service is
@@ -34,14 +34,34 @@ export const LEVELS = [
 export const SKIRT = 150;            // metres each tile edge drops, hides LOD cracks
 export const EYE_HEIGHT = 1.7;
 export const WALK_SPEED = 5.6;
-export const FLY_SPEED = 60;         // base, adjustable with the wheel
-export const FLY_BOOST = 8;
+// Flight speed follows altitude, which keeps ANGULAR rate roughly constant:
+// the ground sweeps beneath you at the same degrees per second at 300 m and at
+// 400 km. That is what the eye actually measures; nobody perceives m/s.
+//
+//   cruise = FLY_K * max(agl, FLY_FLOOR)
+//
+// Calibrated against two anchors that agree: ~270 km/h cruise and ~1080 km/h
+// boosted at ground level, and a few hundred km/s in orbit. Aircraft altitude
+// deliberately comes out far faster than a real aircraft — real cruise at 10 km
+// is a boring experience however impressive the number.
+//
+// The floor matters as much as the ratio: pure proportionality would give
+// 1.6 m/s at head height. Below a few hundred metres you stop looking at your
+// feet and start looking at the middle distance, so speed stops shrinking.
+export const FLY_K = 0.25;
+export const FLY_FLOOR = 300;
+export const FLY_BOOST = 4;
+export const FLY_MULT_MIN = 0.1;
+export const FLY_MULT_MAX = 10;
 export const GROUND_SMOOTH = 12;     // higher = snappier ground following
 export const DOUBLE_TAP_MS = 450;
 export const MOUSE_SENS = 0.0022;
 
 export const WORKERS = 3;
-export const MAX_INFLIGHT = 6;       // be polite to a free public endpoint
+// Each job now makes two fetches (elevation + vector) against two different
+// hosts, so 6 jobs meant only 3 elevation requests in flight and load times
+// roughly doubled. 10 keeps both services comfortable.
+export const MAX_INFLIGHT = 10;
 export const CACHE_TILES = 512;
 
 export const FOV = 68;

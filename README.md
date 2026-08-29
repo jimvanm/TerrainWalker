@@ -41,11 +41,13 @@ whole deployment.
 | click | capture the mouse, `esc` releases |
 | `W` `A` `S` `D` | move |
 | `shift` | run (walking) |
-| `space` `space` | toggle flight |
+| `G` or `space` `space` | toggle flight |
 | `space` / `shift` | up / down (flying) |
 | `ctrl` | boost, 8x |
 | wheel | flight speed |
 | `R` | return to the spawn point |
+| `V` `X` `B` `C` | toggle water, roads, built-up, land cover |
+| `F` | fog on/off (off by default) |
 | `H` | hide the help panel |
 
 The view slider sets render distance, from about 27 km to about 600 km.
@@ -63,6 +65,7 @@ A few to start with:
 
 | Place | Hash |
 | --- | --- |
+| Lake Ontario (default spawn) | `#lat=43.87172&lon=-77.68043` |
 | Lauterbrunnen, Switzerland | `#lat=46.5590&lon=7.9310` |
 | Everest, from the south | `#lat=27.9500&lon=86.9250&alt=6000&mode=fly` |
 | Grand Canyon | `#lat=36.0600&lon=-112.1100&alt=2200&mode=fly` |
@@ -110,6 +113,52 @@ a `vec4`. Flat shading comes from screen-space derivatives and the colour ramp
 is computed from elevation in the fragment shader, then quantised to 5 bits per
 channel.
 
+## Overlay layers
+
+Elevation cannot tell you what water is. Lake Superior sits at 183 m, Erie at
+174 m, Ontario at 74 m, so a colour ramp renders one lake system as three
+different greens, while the Caspian comes out correctly blue purely because it
+happens to be 28 m below sea level. Water is a category, not a height.
+
+The same is true of forests, farmland, ice and cities. So they all arrive as
+vectors from one OpenStreetMap tile and are draped as textures.
+
+Two images per tile, channel-packed so a layer can be switched off with a single
+uniform — nothing is refetched and nothing is re-rasterised:
+
+| Image | Channels |
+| --- | --- |
+| `mask` RGBA | R water, G roads, B built-up, A land-cover coverage |
+| `cover` RGB | land-cover colour |
+
+Land cover is baked as **colour**, not as a class index. The textures are
+sampled with LINEAR filtering, and interpolating between two index values would
+invent a third class that is not there. Interpolating between two colours is
+exactly what is wanted.
+
+The pipeline:
+
+1. Fetch the OpenStreetMap vector tile alongside the elevation tile. The tile
+   URL comes from OpenFreeMap's TileJSON at runtime, never hardcoded.
+2. Decode it with a hand-written MVT reader in `src/mvt.js`, about 130 lines and
+   no dependencies. Water polygons, waterway lines, and the `class` tag.
+3. Rasterise to a 256x256 single-channel mask in the worker with Canvas 2D path
+   fills. Nonzero winding gives island holes for free.
+4. Upload per tile as an `R8` texture and sample it in the fragment shader.
+
+Vectors travel over the wire; pixels are materialised at load time and never
+stored or transmitted. All 76 tiles cost about 5 MB of GPU memory. UVs fall out
+of the tile-local vertex positions, so there is no extra attribute, and skirt
+vertices inherit their edge's UV so shorelines do not tear at LOD seams.
+
+**Not flattened.** Rivers are not level — the St. Clair drops about a metre over
+40 km — and OSM stores wide rivers as polygons, so a blanket flatten would level
+them. NASADEM already flattened large lakes during processing anyway.
+
+**This is the general overlay mechanism.** Roads, built-up areas, borders and
+chart symbology are all the same path: rasterise vectors, drape on terrain. What
+remains is drawing code, not architecture.
+
 ## Performance
 
 About 690k triangles across 72 draw calls of static buffers, which any GPU from
@@ -122,11 +171,17 @@ Requests are capped at six in flight. This endpoint is a free public good and
 does not deserve to be hammered. Please do not point automated flythroughs at
 it.
 
+## Outstanding work
+
+See [TODO.md](TODO.md). Bugs, untested areas, and decisions waiting on a
+human are all tracked there rather than in anyone memory.
+
 ## Tests
 
 ```
 node test/behaviour.mjs   # movement, ground clamping, flight, height sampling
 node test/coverage.mjs    # depth pass coverage across latitudes and settings
+node test/rings.mjs       # exact tiling, including mid-load substitution
 node test/smoke.mjs       # whole app against a mocked WebGL2 context
 ```
 
@@ -165,10 +220,93 @@ Stated plainly, because you will notice all of these within a minute:
 7. A native port to Rust and wgpu. Every line of tile, clipmap and shader logic
    ports across unchanged.
 
-## Attribution and licence
+## Data sources, attribution and courtesy
 
-Elevation data: Mapzen / AWS Open Data Terrain Tiles, derived from NASADEM,
-SRTM and USGS 3DEP. Attribution is required by the data licence and is shown
-in the corner of the view. Please keep it there.
+Everything this renders is streamed from two free public services. Neither
+charges anything, neither asks for an API key, and both deserve to be treated
+carefully rather than merely legally.
 
-Code is MIT. See `LICENSE`.
+**Elevation** — [Mapzen / AWS Open Data Terrain
+Tiles](https://registry.opendata.aws/terrain-tiles/), derived from NASADEM,
+SRTM and USGS 3DEP. A funded AWS Open Data dataset serving tens of millions of
+requests a day. No SLA, no rate limit.
+
+**Water, land cover, roads and built-up areas** — OpenStreetMap via
+[OpenFreeMap](https://openfreemap.org/), in the OpenMapTiles schema.
+OpenFreeMap is one person's project, funded by donations, offering unlimited
+free tile hosting with no registration. "No limits" is a generous policy, not
+an invitation to test it. If this project is useful to you, [sponsor
+OpenFreeMap](https://github.com/sponsors/hyperknot).
+
+Attribution for both is displayed in the corner of the view and is required by
+the licences. Please keep it there.
+
+### What this client does to stay polite
+
+- At most 10 requests in flight, and requests are only made when the visible
+  tile set actually changes. Standing still costs nothing.
+- Roughly 107 KB per kilometre travelled, across both hosts. Comparable to one
+  person browsing a map site.
+- Detail levels that cannot finish loading before they are superseded are not
+  requested at all, so nothing is fetched and then discarded.
+- Browser HTTP caching does the rest; flying back over ground you have already
+  seen costs no requests.
+
+### What would not be polite
+
+- **Automated flythroughs.** A script, or leaving this running unattended at
+  100 km/s, turns one person browsing into a crawler. Don't.
+- **Bulk downloading through the tile endpoints.** Both projects publish full
+  planet dumps for exactly this purpose: OpenFreeMap ships weekly planet
+  downloads, and the terrain tiles are a public S3 bucket you can sync.
+- **Pointing significant traffic at them from a popular deployment.** If this
+  ever got real traffic, the right move is to self-host tiles rather than let
+  someone else's donation-funded server absorb it.
+
+## About this project
+
+This started as a thought while driving: the topography of the Earth is
+essentially mapped, most of it is freely available, and so is the knowledge of
+how to build 3D worlds. How hard would it be to join the two and go for a walk
+anywhere?
+
+It turns out: not very. That is the interesting result. A walkable, flyable
+planet built from open data is about a thousand lines and no dependencies.
+
+I am genuinely pleased with how it turned out — considerably better than I dared
+hope when I started. But I have no big plans for it. It was an experiment in
+whether the idea worked, and it does. It is unmaintained, not intended to be
+depended on, and the [outstanding work](TODO.md) is longer than the finished
+work. Fork it freely.
+
+### Built with an AI
+
+This was written collaboratively with Claude (Anthropic) in a single working
+session. I set the direction, made the design calls, and did all the testing;
+the AI wrote the code, did the maths, and researched the data sources.
+
+That division mattered more than it might sound, because **every significant bug
+was found by a human looking at the screen.** The AI could not see the output.
+Several were invisible to a passing test suite:
+
+- A depth-precision bug that made distant terrain flicker survived six versions
+  because the tests checked that geometry fell *inside* the clip range and never
+  asked whether the depth buffer could *resolve* anything out there. It was found
+  by noticing that the view-distance slider changed the effect.
+- A loader deadlock that pinned the whole view to coarse tiles was found by
+  reading a tile count in the HUD that did not match the expected number.
+- Flickering tiles were narrowed down by toggling layers off one at a time, which
+  separated three independent causes that had been assumed to be one.
+- A Windows-specific MIME type quirk stopped every line of code from running,
+  and was invisible to a test suite that imports modules directly.
+
+The [TODO](TODO.md) opens with the patterns behind the worst of them, because
+they are more useful than the fixes.
+
+Repository: <https://github.com/jimvanm/TerrainWalker>
+
+## Licence
+
+Code is MIT. See `LICENSE`. Map data licences belong to the sources above:
+OpenStreetMap data is ODbL, and the terrain tiles carry the licences of their
+underlying public-domain sources.

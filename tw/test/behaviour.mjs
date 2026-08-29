@@ -147,3 +147,28 @@ console.log(R.join('\n'));
 }
 
 console.log(R.slice(-8).join('\n'));
+
+// --- flight speed must follow altitude, and the wheel must be a multiplier ---
+{
+  const cam = mkCam(46.5, 8.0, 0); cam.fly = 1;
+  const c = new Controls(canvas, cam);
+  const at = (agl) => { cam.alt = 1000 + agl; c.update(1/60, 1000); return c.cruise; };
+  const kmh = (v) => v * 3.6;
+  const cases = [[1.7, 270], [300, 270], [1000, 900], [10000, 9000]];
+  let bad = 0;
+  for (const [agl, want] of cases) {
+    const got = kmh(at(agl));
+    if (Math.abs(got - want) > 1) { bad++; console.log(`  agl ${agl}: ${got.toFixed(0)} km/h, want ${want}`); }
+  }
+  ok(bad === 0, 'cruise follows altitude: 270 km/h at ground, 900 at 1 km, 9000 at 10 km');
+  ok(Math.abs(at(400000) / 1000 - 100) < 0.1, `100 km/s cruise at 400 km (${(at(400000)/1000).toFixed(1)})`);
+  ok(at(1.7) === at(300), 'floor holds speed constant below 300 m');
+
+  // The multiplier must survive a change of altitude; an absolute speed did not.
+  c.flyMult = 4;
+  const lo = at(300), hi = at(30000);
+  ok(Math.abs(lo * 3.6 - 1080) < 1, `multiplier x4 at ground = ${(lo*3.6).toFixed(0)} km/h`);
+  ok(Math.abs(hi / lo - 100) < 0.01, 'multiplier is scale-free: same ratio at any altitude');
+  c.flyMult = 1;
+}
+console.log(R.slice(-6).join('\n'));

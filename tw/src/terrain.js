@@ -11,17 +11,44 @@ export class Terrain {
   constructor(gl, loader) {
     this.gl = gl;
     // Bound wherever a tile has no water data, so the shader needs no branch.
-    this.blank = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, this.blank);
+    this.aniso = gl.getExtension('EXT_texture_filter_anisotropic');
+    this.anisoMax = this.aniso
+      ? gl.getParameter(this.aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT) : 1;
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, 1, 1, 0, gl.RED, gl.UNSIGNED_BYTE,
-                  new Uint8Array([0]));
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    this.blank = this._tex(1, 1, gl.RGBA8, gl.RGBA, new Uint8Array(4));
+    this.blankRGB = this._tex(1, 1, gl.RGB8, gl.RGB, new Uint8Array(3));
     this.loader = loader;
     this.tiles = new Map();     // key -> record, iteration order is LRU order
     this.visible = [];
     loader.onTile = (key, spec, msg) => this._upload(key, spec, msg);
+  }
+
+  _tex(w, h, internal, format, data) {
+    const gl = this.gl;
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, internal, w, h, 0, format, gl.UNSIGNED_BYTE, data);
+    // Mipmaps matter more here than usual. Roads are one or two texels wide and
+    // pale; without mipmaps a distant screen pixel point-samples whichever texel
+    // it happens to land on, and that choice changes every frame as the camera
+    // moves. That is the sparkle.
+    if (w > 1) {
+      gl.generateMipmap(gl.TEXTURE_2D);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      // Terrain is viewed at grazing angles, where plain mipmapping over-blurs
+      // along one axis. Anisotropy is what keeps roads readable into the distance.
+      if (this.aniso) {
+        gl.texParameterf(gl.TEXTURE_2D, this.aniso.TEXTURE_MAX_ANISOTROPY_EXT,
+                         Math.min(8, this.anisoMax));
+      }
+    } else {
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    }
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return t;
   }
 
   _upload(key, spec, msg) {
@@ -39,22 +66,15 @@ export class Terrain {
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, msg.indices, gl.STATIC_DRAW);
     gl.bindVertexArray(null);
 
-    let tex = null;
-    if (msg.water) {
-      const n = Math.round(Math.sqrt(msg.water.length));
-      tex = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_2D, tex);
-      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, n, n, 0, gl.RED, gl.UNSIGNED_BYTE, msg.water);
-      // LINEAR gives a soft shoreline instead of 26 m stair steps.
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    let tex = null, cover = null;
+    if (msg.mask) {
+      const n = Math.round(Math.sqrt(msg.mask.length / 4));
+      tex = this._tex(n, n, gl.RGBA8, gl.RGBA, msg.mask);
+      cover = this._tex(n, n, gl.RGB8, gl.RGB, msg.cover);
     }
 
     this.tiles.set(key, {
-      tex,
+      tex, cover,
       key, vao, vbo, ibo,
       count: msg.indices.length,
       z: spec.z, level: spec.level,
@@ -68,7 +88,11 @@ export class Terrain {
   _evict() {
     const gl = this.gl;
     if (this.tiles.size <= CACHE_TILES) return;
-    const live = new Set(this.visible.map((t) => t.key));
+    // Protect everything WANTED, not merely everything currently drawn. A tile
+    // held back by substitution is not in `visible`, but it is about to be
+    // needed — evicting it forces a refetch at exactly the wrong moment, which
+    // looks like something being destroyed with nothing to replace it.
+    const live = this.wantedKeys || new Set(this.visible.map((t) => t.key));
     for (const [k, t] of this.tiles) {
       if (this.tiles.size <= CACHE_TILES) break;
       if (live.has(k)) continue;
@@ -76,45 +100,75 @@ export class Terrain {
       gl.deleteBuffer(t.vbo);
       gl.deleteBuffer(t.ibo);
       if (t.tex) gl.deleteTexture(t.tex);
+      if (t.cover) gl.deleteTexture(t.cover);
       this.tiles.delete(k);
+      this._evicted = (this._evicted || 0) + 1;
     }
   }
 
   // Work out which tiles should be on screen, request the missing ones,
   // and record what is drawable this frame.
-  update(mercX, mercY, activeLevels) {
-    const levels = LEVELS.slice(0, activeLevels);
-    const blocks = computeBlocks(mercX, mercY, levels);
+  update(mercX, mercY, minLevel, activeLevels) {
+    // Three separate questions. Conflating any two of them has now caused a
+    // bug each time:
+    //
+    //   FETCH  - levels we can sustain at this speed. A tile replaced before it
+    //            loads never converges, so requesting it just thrashes.
+    //   DRAW   - every level, down to the finest ALREADY IN MEMORY. Speed is no
+    //            reason to throw away detail we already hold.
+    //   HOLD   - a coarse tile stays until its replacements have actually
+    //            arrived, so nothing is ever destroyed without a stand-in.
+    this.minLevel = minLevel;
+    const fetchLevels = LEVELS.slice(minLevel, activeLevels);
+    const drawLevels = LEVELS.slice(0, activeLevels);
+    if (!fetchLevels.length) return 0;
+
+    const has = (z, x, y) => this.tiles.has(keyOf(z, x, y));
+    const fetchList = computeBlocks(mercX, mercY, fetchLevels);
+    for (const b of fetchList) b.level += minLevel;
+    const blocks = computeBlocks(mercX, mercY, drawLevels, has);
+
     const wanted = new Set();
     this.visible = [];
     this.missing = 0;
+    this.holes = 0;
 
+    // Draw whatever is loaded, finest first.
     for (const b of blocks) {
       const key = keyOf(b.z, b.x, b.y);
-      wanted.add(key);
       const t = this.tiles.get(key);
       if (t) {
         t.used = performance.now();
-        // Refresh LRU position.
         this.tiles.delete(key); this.tiles.set(key, t);
         this.visible.push(t);
       } else {
-        this.missing++;
-        // Coarse levels first, so the whole scene appears immediately and then
-        // sharpens. Within a level, nearest tile wins.
-        const ct = mercToTile(mercX, mercY, b.z);
-        const dist = Math.hypot(b.rawX + 0.5 - ct.x, b.rawY + 0.5 - ct.y);
-        this.loader.want({
-          key, z: b.z, x: b.x, y: b.y, rawX: b.rawX, rawY: b.rawY,
-          grid: b.grid, level: b.level,
-          keepHeights: b.level === 0,
-          priority: (levels.length - 1 - b.level) * 100 + dist,
-        });
+        this.holes++;
       }
     }
+
+    // Request only the sustainable levels.
+    for (const b of fetchList) {
+      const key = keyOf(b.z, b.x, b.y);
+      wanted.add(key);
+      if (this.tiles.has(key)) continue;
+      this.missing++;
+      const ct = mercToTile(mercX, mercY, b.z);
+      const dist = Math.hypot(b.rawX + 0.5 - ct.x, b.rawY + 0.5 - ct.y);
+      this.loader.want({
+        key, z: b.z, x: b.x, y: b.y, rawX: b.rawX, rawY: b.rawY,
+        grid: b.grid, level: b.level,
+        keepHeights: b.level === minLevel,
+        priority: (activeLevels - 1 - b.level) * 100 + dist,
+      });
+    }
+
+    // Anything on screen must survive eviction, whether or not we would
+    // re-request it at this speed.
+    for (const t of this.visible) wanted.add(t.key);
+    this.wantedKeys = wanted;
     this.loader.keepOnly(wanted);
     this.loader.pump();
-    return blocks.length;
+    return fetchList.length;
   }
 
   draw(u, camMercX, camMercY, k, levelMin, levelMax) {
@@ -126,7 +180,11 @@ export class Terrain {
         (t.centre.x - camMercX) * k,
         (camMercY - t.centre.y) * k);
       gl.uniform1f(u.uTileSize, t.size);
+      gl.uniform1f(u.uLevel, t.level);
+      gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, t.tex || this.blank);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, t.cover || this.blankRGB);
       gl.bindVertexArray(t.vao);
       gl.drawElements(gl.TRIANGLES, t.count, gl.UNSIGNED_SHORT, 0);
       drawn++;
@@ -137,7 +195,7 @@ export class Terrain {
   // Ground elevation at a mercator position, bilinear from the level-0 tile
   // that contains it. Returns null when that tile has not arrived yet.
   heightAt(mercX, mercY) {
-    const z = LEVELS[0].z;
+    const z = LEVELS[this.minLevel || 0].z;
     const s = tileSizeMerc(z);
     const n = Math.pow(2, z);
     const fx = (mercX + HALF) / s;
@@ -159,6 +217,8 @@ export class Terrain {
   }
 
   get loaded() { return this.tiles.size; }
+
+  get evicted() { return this._evicted || 0; }
 
   // How many visible tiles actually got a water mask. If this reads 0/N the
   // vector fetch is failing and the overlay is silently doing nothing.

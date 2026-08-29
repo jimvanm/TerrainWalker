@@ -32,31 +32,38 @@
     background: rgba(255,255,255,.65); border-radius: 50%; pointer-events: none; display: none;
   }
   body.locked #cross { display: block; }
-  /* Aviation directional gyro: the card turns, the lubber line stays put. */
-  #compass { position:fixed; right:14px; bottom:52px; width:136px; height:136px;
-             pointer-events:none; }
+  /* One bottom-anchored column. The old version positioned each block with its
+     own hardcoded bottom offset, so adding a row silently overlapped the next
+     block. Flex makes that impossible rather than merely unlikely. */
+  #ui { position:fixed; right:14px; bottom:44px; width:136px;
+        display:flex; flex-direction:column; gap:6px; align-items:stretch; }
+  #ui .grid { display:grid; gap:5px; }
+  #layers { grid-template-columns:repeat(2,1fr); }
+  #pad    { grid-template-columns:repeat(3,1fr); }
+  #ui button { font:600 11px ui-monospace,monospace; color:#8b97a6; cursor:pointer;
+               background:rgba(12,16,22,.78); border:1px solid #3a4552;
+               border-radius:4px; padding:7px 0; text-align:center; }
+  #ui button:hover { border-color:#6d7d90; }
+  #pad button { color:#dbe3ec; }
+  #pad button.on { background:#2f6b45; border-color:#4ac07a; color:#fff; }
+  #layers button.on { background:#2a4f6b; border-color:#5aa0d0; color:#fff; }
+  #ui button.wide { grid-column:1 / -1; }
+  body.locked #ui button { cursor:default; opacity:.9; }
+
+  /* Aviation directional gyro. The card is sized to fill the column width so
+     its outer ring lines up with the buttons above it. */
+  #compass { position:relative; width:136px; height:136px; }
   #compass svg { width:100%; height:100%; display:block; }
   #compass .face { fill:rgba(12,16,22,.78); stroke:#4a5666; stroke-width:1.5; }
   #compass .tick { stroke:#c9d4e0; stroke-width:1.4; }
   #compass .tickmaj { stroke:#fff; stroke-width:2.2; }
-  #compass .lab { fill:#e8eef5; font:400 11px ui-monospace,monospace; text-anchor:middle; }
-  #compass .card { fill:#ffd479; font:400 13px ui-monospace,monospace; text-anchor:middle; }
+  #compass .lab { fill:#e8eef5; font:400 12px ui-monospace,monospace; text-anchor:middle; }
+  #compass .card { fill:#ffd479; font:400 14px ui-monospace,monospace; text-anchor:middle; }
   #compass .lub { fill:#ffd479; }
-  #hdg { position:absolute; left:0; right:0; top:58px; text-align:center;
-         font:400 20px ui-monospace,monospace; color:#fff; letter-spacing:.5px; }
+  #hdg { position:absolute; left:0; right:0; top:57px; text-align:center;
+         font:400 21px ui-monospace,monospace; color:#fff; letter-spacing:.5px; }
   #hdgsub { position:absolute; left:0; right:0; top:82px; text-align:center;
-            font:11px ui-monospace,monospace; color:#93a1b2; }
-
-  /* Clickable when the pointer is free, a state readout when it is captured. */
-  #pad { position:fixed; right:14px; bottom:196px; display:grid; gap:5px;
-         grid-template-columns:repeat(3,42px); }
-  #pad button { font:600 11px ui-monospace,monospace; color:#dbe3ec; cursor:pointer;
-                background:rgba(12,16,22,.78); border:1px solid #3a4552;
-                border-radius:4px; padding:7px 0; }
-  #pad button:hover { border-color:#6d7d90; }
-  #pad button.on { background:#2f6b45; border-color:#4ac07a; color:#fff; }
-  #pad button.wide { grid-column:span 3; }
-  body.locked #pad button { cursor:default; opacity:.85; }
+            font:10px ui-monospace,monospace; color:#93a1b2; }
 
   #loading {
     position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%);
@@ -79,7 +86,7 @@
   <b>WASD</b> move &middot; <b>Q</b>/<b>E</b> down/up &middot; <b>shift</b> run<br>
   <b>G</b> or <b>space space</b> toggle fly &middot; <b>space</b>/<b>shift</b> up/down<br>
   <b>ctrl</b> boost (safe once keys are locked) &middot; <b>wheel</b> fly speed &middot; <b>R</b> reset<br>
-  <b>V</b> water on/off &middot; <b>F</b> fog on/off &middot; <b>H</b> hide this
+  <b>V</b> water &middot; <b>X</b> roads &middot; <b>B</b> built &middot; <b>C</b> cover &middot; <b>F</b> fog &middot; <b>1</b> grid &middot; <b>2</b> freeze &middot; <b>3</b> flat &middot; <b>H</b> hide this
 </div>
 
 <div id="ctrl">
@@ -87,26 +94,29 @@
   <input id="levels" type="range" min="2" max="9" step="1" value="9">
 </div>
 
-<div id="pad">
-  <button data-hold="down" title="descend (Q or shift)">DN</button>
-  <button data-hold="boost" title="boost (ctrl)">BOOST</button>
-  <button data-hold="up" title="ascend (E or space)">UP</button>
-  <button data-act="fly" class="wide" title="walk / fly (G)">FLY</button>
-  <button data-act="slower">SPD &minus;</button>
-  <button data-act="water">WATER</button>
-  <button data-act="faster">SPD +</button>
-  <button data-act="fog" class="wide">FOG</button>
-  <button data-act="grab" class="wide" title="fullscreen + keyboard lock">CAPTURE</button>
-</div>
+<div id="ui">
+  <div id="layers" class="grid"></div>
 
-<div id="compass">
-  <svg viewBox="-60 -60 120 120" aria-hidden="true">
-    <circle class="face" cx="0" cy="0" r="53"></circle>
-    <g id="card"></g>
-    <polygon class="lub" points="0,-53 -6,-42 6,-42"></polygon>
-  </svg>
-  <div id="hdg">---</div>
-  <div id="hdgsub">HDG</div>
+  <div id="pad" class="grid">
+    <button data-hold="down" title="descend (Q or shift)">DN</button>
+    <button data-hold="boost" title="boost 4x (ctrl)">BOOST</button>
+    <button data-hold="up" title="ascend (E or space)">UP</button>
+    <button data-act="fly" class="wide" title="walk / fly (G)">FLY</button>
+    <button data-act="slower" title="slower (wheel down)">SPD &minus;</button>
+    <button data-act="fog" title="fog (F)">FOG</button>
+    <button data-act="faster" title="faster (wheel up)">SPD +</button>
+    <button data-act="grab" class="wide" title="fullscreen + keyboard lock">CAPTURE</button>
+  </div>
+
+  <div id="compass">
+    <svg viewBox="-68 -68 136 136" aria-hidden="true">
+      <circle class="face" cx="0" cy="0" r="66"></circle>
+      <g id="card"></g>
+      <polygon class="lub" points="0,-66 -7,-53 7,-53"></polygon>
+    </svg>
+    <div id="hdg">---</div>
+    <div id="hdgsub">HDG</div>
+  </div>
 </div>
 
 <div id="hud" class="panel">starting&hellip;</div>

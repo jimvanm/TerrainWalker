@@ -111,57 +111,122 @@ export function buildMesh(heights, z, grid) {
   return { positions, indices };
 }
 
-// Rasterise the OpenMapTiles water polygons and waterway lines into a
-// single-channel mask. Vectors travel over the wire; pixels are materialised
-// here, at load time, and never stored or transmitted.
-function rasterWater(layers) {
-  const cv = new OffscreenCanvas(MASK, MASK);
-  const cx = cv.getContext('2d', { willReadFrequently: true });
-  cx.fillStyle = '#000';
-  cx.fillRect(0, 0, MASK, MASK);
-  cx.fillStyle = '#fff';
-  cx.strokeStyle = '#fff';
-  cx.lineCap = 'round';
-  cx.lineJoin = 'round';
+// Land cover colours. Baked into RGB rather than stored as a class index,
+// because the texture is sampled with LINEAR filtering and interpolating
+// between two index values would invent a third class that is not there.
+// Interpolating between two colours is exactly what we want instead.
+const COVER = {
+  wood:      [ 51,  86,  46],
+  forest:    [ 51,  86,  46],
+  grass:     [107, 140,  71],
+  grassland: [107, 140,  71],
+  meadow:    [107, 140,  71],
+  farmland:  [148, 148,  87],
+  rock:      [115, 110, 102],
+  bare_rock: [115, 110, 102],
+  sand:      [204, 189, 140],
+  beach:     [204, 189, 140],
+  ice:       [235, 240, 245],
+  glacier:   [235, 240, 245],
+  snow:      [235, 240, 245],
+  wetland:   [ 89, 115,  89],
+  swamp:     [ 89, 115,  89],
+};
+
+const BUILT = ['residential', 'industrial', 'commercial', 'retail',
+               'suburb', 'quarter', 'neighbourhood'];
+
+function path(cx, parts, k, close) {
+  for (const g of parts) {
+    cx.moveTo(g[0] * k, g[1] * k);
+    for (let i = 2; i < g.length; i += 2) cx.lineTo(g[i] * k, g[i + 1] * k);
+    if (close) cx.closePath();
+  }
+}
+
+// Two draped images per tile:
+//   mask  RGBA - R water, G roads, B built-up, A land-cover coverage
+//   cover RGB  - land-cover colour
+// Channels rather than one composited image, so a layer can be switched off
+// with a uniform instead of a refetch and a re-rasterise.
+function rasterOverlays(layers) {
+  const maskCv = new OffscreenCanvas(MASK, MASK);
+  const mx = maskCv.getContext('2d', { willReadFrequently: true });
+  mx.fillStyle = '#000';
+  mx.fillRect(0, 0, MASK, MASK);
+  // Additive, so each layer lands in its own channel without erasing the others.
+  mx.globalCompositeOperation = 'lighter';
+  mx.lineCap = 'round';
+  mx.lineJoin = 'round';
 
   const w = layers.water;
   if (w) {
     const k = MASK / w.extent;
-    // Nonzero fill plus MVT winding (exterior clockwise, holes anticlockwise)
-    // gives island and lake-in-island holes for free.
-    cx.beginPath();
-    for (const f of w.features) {
-      if (f.type !== POLYGON) continue;
-      for (const ring of f.parts) {
-        cx.moveTo(ring[0] * k, ring[1] * k);
-        for (let i = 2; i < ring.length; i += 2) cx.lineTo(ring[i] * k, ring[i + 1] * k);
-        cx.closePath();
-      }
-    }
-    cx.fill('nonzero');
+    mx.fillStyle = '#f00';
+    mx.beginPath();
+    for (const f of w.features) if (f.type === POLYGON) path(mx, f.parts, k, true);
+    // Nonzero winding plus MVT ring order gives island holes for free.
+    mx.fill('nonzero');
   }
-
   const ww = layers.waterway;
   if (ww) {
     const k = MASK / ww.extent;
-    // Rivers are narrower than a 30 m DEM cell, so they cannot be carved into
-    // the terrain. Drawing them is what a sectional chart does anyway.
+    mx.strokeStyle = '#f00';
     for (const f of ww.features) {
       if (f.type !== LINESTRING) continue;
-      cx.lineWidth = f.cls === 'river' ? 1.8 : 0.9;
-      cx.beginPath();
-      for (const ln of f.parts) {
-        cx.moveTo(ln[0] * k, ln[1] * k);
-        for (let i = 2; i < ln.length; i += 2) cx.lineTo(ln[i] * k, ln[i + 1] * k);
-      }
-      cx.stroke();
+      mx.lineWidth = f.cls === 'river' ? 1.8 : 0.9;
+      mx.beginPath(); path(mx, f.parts, k, false); mx.stroke();
+    }
+  }
+  const tr = layers.transportation;
+  if (tr) {
+    const k = MASK / tr.extent;
+    mx.strokeStyle = '#0f0';
+    for (const f of tr.features) {
+      if (f.type !== LINESTRING) continue;
+      const major = f.cls === 'motorway' || f.cls === 'trunk' || f.cls === 'primary';
+      if (!major && f.cls !== 'secondary' && f.cls !== 'tertiary') continue;
+      mx.lineWidth = major ? 1.4 : 0.7;
+      mx.beginPath(); path(mx, f.parts, k, false); mx.stroke();
+    }
+  }
+  const lu = layers.landuse;
+  if (lu) {
+    const k = MASK / lu.extent;
+    mx.fillStyle = '#00f';
+    mx.beginPath();
+    for (const f of lu.features) {
+      if (f.type === POLYGON && BUILT.includes(f.cls)) path(mx, f.parts, k, true);
+    }
+    mx.fill('nonzero');
+  }
+
+  const coverCv = new OffscreenCanvas(MASK, MASK);
+  const cxx = coverCv.getContext('2d', { willReadFrequently: true });
+  const lc = layers.landcover;
+  if (lc) {
+    const k = MASK / lc.extent;
+    for (const f of lc.features) {
+      if (f.type !== POLYGON) continue;
+      const c = COVER[f.cls];
+      if (!c) continue;
+      cxx.fillStyle = `rgb(${c[0]},${c[1]},${c[2]})`;
+      cxx.beginPath(); path(cxx, f.parts, k, true); cxx.fill('nonzero');
     }
   }
 
-  const src = cx.getImageData(0, 0, MASK, MASK).data;
-  const out = new Uint8Array(MASK * MASK);
-  for (let i = 0, p = 0; i < out.length; i++, p += 4) out[i] = src[p];
-  return out;
+  const md = mx.getImageData(0, 0, MASK, MASK).data;
+  const cd = cxx.getImageData(0, 0, MASK, MASK).data;
+  const mask = new Uint8Array(MASK * MASK * 4);
+  const cover = new Uint8Array(MASK * MASK * 3);
+  let any = false;
+  for (let i = 0, p = 0, q = 0; i < MASK * MASK; i++, p += 4, q += 3) {
+    mask[p] = md[p]; mask[p + 1] = md[p + 1]; mask[p + 2] = md[p + 2];
+    mask[p + 3] = cd[p + 3];
+    cover[q] = cd[p]; cover[q + 1] = cd[p + 1]; cover[q + 2] = cd[p + 2];
+    if (!any && (md[p] || md[p + 1] || md[p + 2] || cd[p + 3])) any = true;
+  }
+  return any ? { mask, cover } : null;
 }
 
 async function loadVector(url) {
@@ -170,7 +235,8 @@ async function loadVector(url) {
   if (!res.ok) throw new Error('vector HTTP ' + res.status);
   const buf = new Uint8Array(await res.arrayBuffer());
   if (buf.length === 0) return null;
-  return rasterWater(decodeMVT(buf, ['water', 'waterway']));
+  return rasterOverlays(decodeMVT(buf,
+    ['water', 'waterway', 'landcover', 'landuse', 'transportation']));
 }
 
 async function loadTile(url) {
@@ -192,7 +258,7 @@ self.onmessage = async (ev) => {
   const { id, url, vurl, z, x, y, grid, keepHeights } = ev.data;
   try {
     // Water is optional: a failure here must never cost us the terrain.
-    const [heights, water] = await Promise.all([
+    const [heights, ov] = await Promise.all([
       loadTile(url),
       vurl ? loadVector(vurl).catch(() => null) : Promise.resolve(null),
     ]);
@@ -200,12 +266,12 @@ self.onmessage = async (ev) => {
     const centre = tileCentreMerc(x, y, z);
     const nw = tileToMerc(x, y, z);
     const transfer = [positions.buffer, indices.buffer];
-    if (water) transfer.push(water.buffer);
+    if (ov) transfer.push(ov.mask.buffer, ov.cover.buffer);
     let hcopy = null;
     if (keepHeights) { hcopy = heights; transfer.push(hcopy.buffer); }
     self.postMessage(
       { id, ok: true, positions, indices, centre, nw, size: tileSizeMerc(z),
-        heights: hcopy, water },
+        heights: hcopy, mask: ov && ov.mask, cover: ov && ov.cover },
       transfer
     );
   } catch (e) {

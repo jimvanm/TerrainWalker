@@ -114,8 +114,11 @@ in vec2  vUV;
 uniform vec3  uFogColor;
 uniform float uFogDensity;
 uniform vec3  uSunDir;
-uniform sampler2D uWater;
-uniform float uWaterOn;
+uniform sampler2D uMask;    // R water, G roads, B built-up, A land-cover alpha
+uniform sampler2D uCover;   // land-cover colour
+uniform vec4  uLayers;      // on/off for water, roads, built-up, land cover
+uniform float uDebug;       // 0 off, 1 tile grid + level tint
+uniform float uLevel;
 
 out vec4 frag;
 
@@ -143,14 +146,31 @@ void main() {
   if (n.y < 0.0) n = -n;
 
   float lit = 0.55 + 0.45 * max(dot(n, uSunDir), 0.0);
-  lit = mix(lit, 0.72, vSkirt);
+  // Derivatives are evaluated per 2x2 pixel quad, so a quad straddling the
+  // surface-to-skirt seam sees a 150 m jump and produces a garbage normal —
+  // a bright speckle that crawls along every tile edge as the camera moves.
+  // fwidth() detects exactly those quads.
+  lit = mix(lit, 0.72, max(vSkirt, step(0.001, fwidth(vSkirt))));
 
   vec3 c = hypso(vHeight) * lit;
 
-  // Water arrives as a draped mask rasterised from vectors, so a lake reads as
-  // water regardless of its elevation. Lake Superior sits at 183 m; nothing in
-  // an elevation ramp could ever have known it was not a hillside.
-  float wet = texture(uWater, vUV).r * uWaterOn * (1.0 - vSkirt);
+  vec4 m = texture(uMask, vUV) * (1.0 - vSkirt);
+
+  // Painted in cartographic order: ground cover, then what is built on it,
+  // then water, which wins because it is the one thing that is never under
+  // anything else.
+  float cov = m.a * uLayers.w;
+  c = mix(c, texture(uCover, vUV).rgb * lit, smoothstep(0.15, 0.55, cov));
+
+  float built = m.b * uLayers.z;
+  c = mix(c, vec3(0.46, 0.44, 0.42) * lit, smoothstep(0.2, 0.6, built) * 0.8);
+
+  float road = m.g * uLayers.y;
+  c = mix(c, vec3(0.80, 0.76, 0.68) * lit, smoothstep(0.25, 0.7, road) * 0.9);
+
+  // Elevation alone can never know this: Lake Superior is at 183 m and would
+  // otherwise read as a hillside.
+  float wet = m.r * uLayers.x;
   vec3 deep = mix(vec3(0.16, 0.34, 0.52), vec3(0.09, 0.20, 0.33),
                   clamp(vHeight / 400.0, 0.0, 1.0));
   c = mix(c, deep * (0.82 + 0.18 * lit), smoothstep(0.35, 0.65, wet));
@@ -162,5 +182,23 @@ void main() {
   // Quantise to 5 bits per channel. A deliberate look, and it hides the
   // banding that a smooth ramp would show anyway.
   c = floor(c * 31.0 + 0.5) / 31.0;
+  if (uDebug > 1.5) {
+    // Flat mode: no textures, no derivative lighting, one solid colour per
+    // level. If squares still flash here, the cause is geometry or depth, not
+    // anything sampled or shaded.
+    vec3 t = 0.5 + 0.5 * cos(6.2831 * (uLevel / 9.0) + vec3(0.0, 2.1, 4.2));
+    frag = vec4(t * (0.6 + 0.4 * vSkirt), 1.0);
+    return;
+  }
+  if (uDebug > 0.5) {
+    // Tile grid and per-level tint, so a screenshot shows whether an artefact
+    // lines up with tile edges and which LOD level owns it.
+    vec3 tint = 0.5 + 0.5 * cos(6.2831 * (uLevel / 9.0) + vec3(0.0, 2.1, 4.2));
+    c = mix(c, tint, 0.30);
+    vec2 g = min(vUV, 1.0 - vUV);
+    float edge = 1.0 - smoothstep(0.0, max(fwidth(vUV.x), fwidth(vUV.y)) * 1.5,
+                                  min(g.x, g.y));
+    c = mix(c, vec3(1.0, 0.0, 1.0), edge * 0.9);
+  }
   frag = vec4(c, 1.0);
 }`;

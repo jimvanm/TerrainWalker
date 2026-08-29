@@ -1,6 +1,6 @@
 import {
-  EYE_HEIGHT, WALK_SPEED, FLY_SPEED, FLY_BOOST, GROUND_SMOOTH,
-  DOUBLE_TAP_MS, MOUSE_SENS,
+  EYE_HEIGHT, WALK_SPEED, FLY_K, FLY_FLOOR, FLY_BOOST, FLY_MULT_MIN,
+  FLY_MULT_MAX, GROUND_SMOOTH, DOUBLE_TAP_MS, MOUSE_SENS,
 } from './config.js';
 import { mercScale, mercYToLat } from './geo.js';
 
@@ -10,7 +10,10 @@ export class Controls {
   constructor(canvas, cam) {
     this.cam = cam;              // { mercX, mercY, alt, yaw, pitch, fly }
     this.keys = new Set();
-    this.flySpeed = FLY_SPEED;
+    // A multiplier, not an absolute speed. As an absolute it stayed at whatever
+    // you last set at altitude, so descending left you at ludicrous speed.
+    this.flyMult = 1;
+    this.cruise = 0;
     this.locked = false;
     // -Infinity, not 0: performance.now() is small just after page load, so a
     // zero sentinel makes the very first space press look like a double tap.
@@ -97,16 +100,18 @@ export class Controls {
 
     window.addEventListener('wheel', (e) => {
       if (!this.cam.fly) return;
-      this.flySpeed *= Math.exp(-e.deltaY * 0.0012);
-      this.flySpeed = Math.max(2, Math.min(20000, this.flySpeed));
+      this.flyMult *= Math.exp(-e.deltaY * 0.0012);
+      this.flyMult = Math.max(FLY_MULT_MIN, Math.min(FLY_MULT_MAX, this.flyMult));
     }, { passive: true });
   }
 
   update(dt, ground) {
     const c = this.cam;
     const k = this.keys;
+    const agl = ground === null ? c.alt : c.alt - ground;
+    this.cruise = FLY_K * Math.max(agl, FLY_FLOOR) * this.flyMult;
     const boost = (k.has('ControlLeft') || k.has('ControlRight') || this.btn.boost) ? FLY_BOOST : 1;
-    const base = c.fly ? this.flySpeed * boost : WALK_SPEED * (k.has('ShiftLeft') ? 2 : 1);
+    const base = c.fly ? this.cruise * boost : WALK_SPEED * (k.has('ShiftLeft') ? 2 : 1);
 
     // Horizontal movement is relative to yaw only, so looking up does not slow
     // you down. Standard first-person behaviour and it matters more than it sounds.
