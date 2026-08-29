@@ -123,6 +123,73 @@ fetch(URLT, { mode: 'cors', cache: 'no-store' }).then(function (r) {
     'blocking s3.amazonaws.com. Try a private window with extensions disabled.');
 });
 
+// 5b. The water vector pipeline, tested layer by layer.
+var t5b = add('5b. Water: OpenFreeMap TileJSON');
+var t5c = add('5c. Water: vector tile fetch (Lake Ontario, z9)');
+var t5d = add('5d. Water: MVT decode');
+(function () {
+  fetch('https://tiles.openfreemap.org/planet', { mode: 'cors', cache: 'no-store' })
+    .then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
+    .then(function (j) {
+      if (!j.tiles || !j.tiles[0]) throw new Error('TileJSON has no tiles[] array');
+      t5b.pass('template = ' + j.tiles[0] + '  (minzoom ' + j.minzoom + ', maxzoom ' + j.maxzoom + ')');
+      // Tile covering Lake Ontario at zoom 9.
+      var z = 9, x = 145, y = 186;
+      var url = j.tiles[0].replace('{z}', z).replace('{x}', x).replace('{y}', y);
+      var t0 = performance.now();
+      return fetch(url, { mode: 'cors', cache: 'no-store' }).then(function (r) {
+        var ce = r.headers.get('content-encoding') || '(none)';
+        var ct = r.headers.get('content-type') || '(none)';
+        if (!r.ok) { t5c.fail('HTTP ' + r.status + ' for ' + url); return null; }
+        return r.arrayBuffer().then(function (b) {
+          var ms = (performance.now() - t0).toFixed(0);
+          var u = new Uint8Array(b);
+          var gz = u[0] === 0x1f && u[1] === 0x8b;
+          if (gz) {
+            t5c.fail((b.byteLength / 1024).toFixed(1) + ' KB, but the body is still GZIP ' +
+              '(magic 1f 8b). content-encoding: ' + ce,
+              'The server did not mark it as gzip, so the browser did not inflate it. ' +
+              'The MVT decoder is being handed compressed bytes and silently failing.');
+            return null;
+          }
+          t5c.pass((b.byteLength / 1024).toFixed(1) + ' KB in ' + ms + ' ms. ' +
+                   'content-type: ' + ct + ', content-encoding: ' + ce);
+          return u;
+        });
+      });
+    })
+    .then(function (u) {
+      if (!u) return;
+      return import('./src/mvt.js').then(function (m) {
+        var r = m.decodeMVT(u, ['water', 'waterway']);
+        var names = Object.keys(r);
+        if (!names.length) {
+          t5d.fail('decoded, but neither a water nor a waterway layer was present in this tile.');
+          return;
+        }
+        var parts = names.map(function (n) {
+          var f = r[n].features;
+          var poly = f.filter(function (x) { return x.type === 3; }).length;
+          var line = f.filter(function (x) { return x.type === 2; }).length;
+          var cls = {};
+          f.forEach(function (x) { cls[x.cls || '?'] = (cls[x.cls || '?'] || 0) + 1; });
+          return n + ': ' + f.length + ' features (' + poly + ' polygon, ' + line + ' line), ' +
+                 'extent ' + r[n].extent + ', classes ' + JSON.stringify(cls);
+        });
+        t5d.pass(parts.join('\n'));
+      });
+    })
+    .catch(function (e) {
+      var msg = 'failed: ' + e.message;
+      if (t5b.done) t5c.fail(msg); else t5b.fail(msg,
+        'If this says CORS or "Failed to fetch", an ad blocker or proxy may be ' +
+        'blocking tiles.openfreemap.org. Try a private window with extensions off.');
+    });
+})();
+
 // 6. OffscreenCanvas, which the worker relies on for decoding
 var t6 = add('6. OffscreenCanvas 2D (used for PNG decode inside the worker)');
 try {

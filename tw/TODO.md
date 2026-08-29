@@ -52,6 +52,7 @@ a much larger job.
 - **Controls: DONE in 0.3.0.** Keyboard Lock plus fullscreen, Q/E bound, and an
   on-screen pad. Note the pad is only clickable when the pointer is free; while
   pointer lock is held it acts as a state readout instead.
+- **Water: DONE in 0.4.0.** Vector, draped as a texture. No flattening.
 - **Compass: DONE in 0.3.0.** Aviation directional gyro — rotating card, fixed
   lubber line, labels in degrees/10.
 - **Labels: must be toggleable.** Not always-on.
@@ -111,6 +112,10 @@ a much larger job.
       heading here: the real disorientation this session was vertical, not
       lateral. **DECISION 5: compass strip, corner rose, or combined
       heading-plus-horizon?**
+
+- [x] ~~**Water as a vector layer.**~~ Shipped in 0.4.0. See README. Left open:
+      lake/river colour differentiation using the `class` tag (decoded but
+      unused), and whether `waterway` line widths should scale with zoom.
 
 ## Features discussed, not started
 

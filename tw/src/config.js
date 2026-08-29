@@ -1,6 +1,12 @@
 // All tunables live here.
 
-export const BUILD = '0.3.0';
+export const BUILD = '0.4.3';
+
+// Resolved at runtime to a {z}/{x}/{y} template. Never hardcode the tile URL:
+// the style points at a TileJSON, and that indirection is how the service is
+// allowed to move its tiles.
+export const VECTOR_TILEJSON = 'https://tiles.openfreemap.org/planet';
+export const VECTOR_MAXZOOM = 14;
 
 export const TILE_URL =
   'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
@@ -41,7 +47,10 @@ export const CACHE_TILES = 512;
 export const FOV = 68;
 export const NEAR = 0.5;
 
-const SPAWN = { lat: 46.5590, lon: 7.9310, alt: null, yaw: 155, pitch: -6, fly: 0 };
+// Lake Ontario, facing north toward the Prince Edward County shore. Chosen to
+// land you on water, since a lake at 74 m is exactly what an elevation ramp
+// cannot render and the vector overlay can.
+const SPAWN = { lat: 43.871722, lon: -77.680430, alt: 2500, yaw: 0, pitch: -8, fly: 1 };
 
 export function readHash() {
   const c = { ...SPAWN, levels: LEVELS.length };

@@ -1,5 +1,6 @@
 import * as G from './gl.js';
 import { Loader } from './tiles.js';
+import { VECTOR_TILEJSON } from './config.js';
 import { Terrain } from './terrain.js';
 import { Controls } from './controls.js';
 import {
@@ -20,12 +21,15 @@ const prog = G.program(gl, G.VS, G.FS);
 gl.useProgram(prog);
 const U = {};
 for (const n of ['uProj', 'uView', 'uTileOffset', 'uScale', 'uCamAlt',
-                 'uCurv', 'uSkirt', 'uFogColor', 'uFogDensity', 'uSunDir']) {
+                 'uCurv', 'uSkirt', 'uFogColor', 'uFogDensity', 'uSunDir',
+                 'uTileSize', 'uWater', 'uWaterOn']) {
   U[n] = gl.getUniformLocation(prog, n);
 }
 
 // Back-face culling stays off. Skirt winding is then irrelevant, and the
 // derivative-based normals in the fragment shader do not care either.
+gl.uniform1i(U.uWater, 0);
+gl.activeTexture(gl.TEXTURE0);
 gl.disable(gl.CULL_FACE);
 gl.enable(gl.DEPTH_TEST);
 gl.depthFunc(gl.LEQUAL);
@@ -55,6 +59,17 @@ window.addEventListener('unhandledrejection', (e) => {
 const loader = new Loader(() => {}, fatal);
 const terrain = new Terrain(gl, loader);
 const controls = new Controls(canvas, cam);
+
+// Resolve the vector tile template from the service's TileJSON. Terrain still
+// loads if this fails; water is an enhancement, never a dependency.
+let vectorReady = false;
+fetch(VECTOR_TILEJSON, { mode: 'cors' })
+  .then((r) => r.json())
+  .then((j) => {
+    if (j && j.tiles && j.tiles[0]) loader.vectorTemplate = j.tiles[0];
+  })
+  .catch(() => { /* no water this session */ })
+  .finally(() => { vectorReady = true; });
 controls.onReset = () => {
   const s = readHash();
   cam.mercX = lonToMercX(s.lon); cam.mercY = latToMercY(s.lat);
@@ -80,9 +95,15 @@ const card = document.getElementById('card');
   const cardinal = { 0: 'N', 90: 'E', 180: 'S', 270: 'W' };
   for (let d = 0; d < 360; d += 30) {
     const a = d * Math.PI / 180, r = 24;
-    const x = Math.sin(a) * r, y = -Math.cos(a) * r + 4.5;
+    const x = Math.sin(a) * r, y = -Math.cos(a) * r;
     const txt = cardinal[d] || String(d / 10);
-    out += `<text class="${cardinal[d] ? 'card' : 'lab'}" x="${x.toFixed(2)}" y="${y.toFixed(2)}">${txt}</text>`;
+    // Each label is rotated by its own bearing, so once the card turns by -hdg
+    // the label under the lubber line lands at zero rotation and reads upright.
+    // dy is applied in the label's own rotated frame, which centres it after
+    // the rotation rather than before.
+    out += `<text class="${cardinal[d] ? 'card' : 'lab'}" x="${x.toFixed(2)}" ` +
+           `y="${y.toFixed(2)}" dy="0.35em" ` +
+           `transform="rotate(${d} ${x.toFixed(2)} ${y.toFixed(2)})">${txt}</text>`;
   }
   card.innerHTML = out;
 }
@@ -104,6 +125,7 @@ pad.querySelectorAll('button').forEach((b) => {
     b.addEventListener('click', () => {
       if (act === 'fly') cam.fly = cam.fly ? 0 : 1;
       else if (act === 'fog') fogOn = !fogOn;
+      else if (act === 'water') waterOn = !waterOn;
       else if (act === 'grab') controls.grab();
       else if (act === 'faster') controls.flySpeed = Math.min(2e4, controls.flySpeed * 1.6);
       else if (act === 'slower') controls.flySpeed = Math.max(2, controls.flySpeed / 1.6);
@@ -132,7 +154,9 @@ let last = performance.now();
 const startTime = last;
 let viewDist = 20000;
 let fogOn = false;
-addEventListener('keydown', (e) => { if (e.code === 'KeyF') fogOn = !fogOn; });
+let waterOn = true;
+addEventListener('keydown', (e) => { if (e.code === 'KeyF') fogOn = !fogOn;
+  if (e.code === 'KeyV') waterOn = !waterOn; });
 let frames = 0, fpsTime = 0, fps = 0, hashTime = 0;
 const hud = document.getElementById('hud');
 const loading = document.getElementById('loading');
@@ -172,7 +196,11 @@ function frame(now) {
            tileSizeMerc(LEVELS[drawLevels - 1].z) * k * 2 < hz) drawLevels++;
   }
 
-  terrain.update(cam.mercX, cam.mercY, drawLevels);
+  // Wait for the TileJSON before the first fetch, otherwise the opening tiles
+  // arrive without water and would need refetching.
+  if (vectorReady || now - startTime > 4000) {
+    terrain.update(cam.mercX, cam.mercY, drawLevels);
+  }
 
   const outer = tileSizeMerc(LEVELS[drawLevels - 1].z) * k * 2;
   const far = outer * 1.6;
@@ -191,6 +219,7 @@ function frame(now) {
   // Density 0 disables fog exactly: 1 - exp(0) = 0, no branch needed.
   gl.uniform1f(U.uFogDensity, fogOn ? 2.4 / viewDist : 0);
   gl.uniform3f(U.uSunDir, 0.40, 0.82, 0.41);
+  gl.uniform1f(U.uWaterOn, waterOn ? 1 : 0);
 
   const aspect = canvas.width / canvas.height;
   const fov = FOV * Math.PI / 180;
@@ -202,9 +231,12 @@ function frame(now) {
   // square block whose half-extent is two tiles of level 1, so the near pass
   // must reach its DIAGONAL, and the far pass must start inside its EDGE or a
   // gap ring opens up where level 2 begins.
+  // These are true 3D distances. Deriving them from horizontal extent alone
+  // works on the ground and fails in the air: at 43 km up the corner of the
+  // level-0/1 block is 59 km away, not 40, and the near pass clips it off.
   const l1 = 2 * tileSizeMerc(LEVELS[Math.min(1, drawLevels - 1)].z) * k;
-  const nearFar = l1 * 1.55;   // covers the block diagonal (sqrt2 = 1.414)
-  const farNear = l1 * 0.85;   // starts before level 2 does
+  const nearFar = Math.hypot(l1 * Math.SQRT2, hAgl) * 1.1;  // furthest level-0/1 vertex
+  const farNear = Math.hypot(l1, hAgl) * 0.9;               // nearest level-2 vertex
 
   gl.uniformMatrix4fv(U.uProj, false, G.perspective(proj, fov, aspect, farNear, far));
   const farDrawn = terrain.draw(U, cam.mercX, cam.mercY, k, 2, drawLevels - 1);
@@ -221,7 +253,7 @@ function frame(now) {
     `${cam.alt.toFixed(0)} m` + (agl === null ? '' : ` (${agl.toFixed(0)} agl)`) +
     `  |  ${controls.speed < 1 ? '0' : controls.speed.toFixed(0)} m/s  |  ` +
     `${cam.fly ? 'FLY ' + controls.flySpeed.toFixed(0) : 'WALK'}${fogOn ? ' +fog' : ''}  |  ` +
-    `${nearDrawn + farDrawn} tiles  |  view ${(viewDist / 1000).toFixed(0)} km  |  ${fps.toFixed(0)} fps  |  v${BUILD} (${LEVELS.length}L)` +
+    `${nearDrawn + farDrawn} tiles  |  water ${terrain.waterCount}/${terrain.visible.length}  |  view ${(viewDist / 1000).toFixed(0)} km  |  ${fps.toFixed(0)} fps  |  v${BUILD} (${LEVELS.length}L)` +
     (loader.queued ? `  |  loading ${loader.queued}` : '') +
     (loader.stats.failed ? `  |  ${loader.stats.failed} failed` : '');
 
@@ -254,6 +286,7 @@ function frame(now) {
   hdgEl.textContent = String(Math.round(hdg) === 0 ? 360 : Math.round(hdg)).padStart(3, '0');
   btnEls.fly.classList.toggle('on', !!cam.fly);
   btnEls.fog.classList.toggle('on', fogOn);
+  if (btnEls.water) btnEls.water.classList.toggle('on', waterOn);
   btnEls.up.classList.toggle('on', controls.btn.up || controls.keys.has('KeyE') || controls.keys.has('Space'));
   btnEls.down.classList.toggle('on', controls.btn.down || controls.keys.has('KeyQ') || controls.keys.has('ShiftLeft'));
   btnEls.boost.classList.toggle('on', controls.btn.boost || controls.keys.has('ControlLeft'));

@@ -10,6 +10,14 @@ const PX = 256;
 export class Terrain {
   constructor(gl, loader) {
     this.gl = gl;
+    // Bound wherever a tile has no water data, so the shader needs no branch.
+    this.blank = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, this.blank);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, 1, 1, 0, gl.RED, gl.UNSIGNED_BYTE,
+                  new Uint8Array([0]));
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     this.loader = loader;
     this.tiles = new Map();     // key -> record, iteration order is LRU order
     this.visible = [];
@@ -31,7 +39,22 @@ export class Terrain {
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, msg.indices, gl.STATIC_DRAW);
     gl.bindVertexArray(null);
 
+    let tex = null;
+    if (msg.water) {
+      const n = Math.round(Math.sqrt(msg.water.length));
+      tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, n, n, 0, gl.RED, gl.UNSIGNED_BYTE, msg.water);
+      // LINEAR gives a soft shoreline instead of 26 m stair steps.
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    }
+
     this.tiles.set(key, {
+      tex,
       key, vao, vbo, ibo,
       count: msg.indices.length,
       z: spec.z, level: spec.level,
@@ -52,6 +75,7 @@ export class Terrain {
       gl.deleteVertexArray(t.vao);
       gl.deleteBuffer(t.vbo);
       gl.deleteBuffer(t.ibo);
+      if (t.tex) gl.deleteTexture(t.tex);
       this.tiles.delete(k);
     }
   }
@@ -101,6 +125,8 @@ export class Terrain {
       gl.uniform2f(u.uTileOffset,
         (t.centre.x - camMercX) * k,
         (camMercY - t.centre.y) * k);
+      gl.uniform1f(u.uTileSize, t.size);
+      gl.bindTexture(gl.TEXTURE_2D, t.tex || this.blank);
       gl.bindVertexArray(t.vao);
       gl.drawElements(gl.TRIANGLES, t.count, gl.UNSIGNED_SHORT, 0);
       drawn++;
@@ -133,4 +159,12 @@ export class Terrain {
   }
 
   get loaded() { return this.tiles.size; }
+
+  // How many visible tiles actually got a water mask. If this reads 0/N the
+  // vector fetch is failing and the overlay is silently doing nothing.
+  get waterCount() {
+    let n = 0;
+    for (const t of this.visible) if (t.tex) n++;
+    return n;
+  }
 }

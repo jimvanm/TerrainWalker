@@ -12,6 +12,7 @@ const GLC = {
 export const log = {
   calls: {}, uniforms: new Set(), badUniform: [], nan: [],
   draws: 0, tris: 0, buffers: 0, deleted: 0, clears: 0,
+  textures: 0, texUploads: 0, texDeleted: 0, texSizes: new Set(),
 };
 
 function makeGL() {
@@ -22,6 +23,9 @@ function makeGL() {
     createProgram: () => ({ id: ++uid }),
     createVertexArray: () => ({ id: ++uid }),
     createBuffer: () => { log.buffers++; return { id: ++uid }; },
+    createTexture: () => { log.textures++; return { id: ++uid }; },
+    deleteTexture: () => { log.texDeleted++; },
+    texImage2D: (t, l, ifmt, w, h) => { log.texUploads++; log.texSizes.add(w + 'x' + h); },
     deleteVertexArray: () => { log.deleted++; },
     deleteBuffer: () => {},
     getShaderParameter: () => true,
@@ -60,8 +64,8 @@ function btn(hold, act) {
 // Mirrors the real pad in index.html, so a missing handler shows up as a crash.
 const PAD = [
   btn('down'), btn('boost'), btn('up'),
-  btn(undefined, 'fly'), btn(undefined, 'slower'), btn(undefined, 'fog'),
-  btn(undefined, 'faster'), btn(undefined, 'grab'),
+  btn(undefined, 'fly'), btn(undefined, 'slower'), btn(undefined, 'water'),
+  btn(undefined, 'faster'), btn(undefined, 'fog'), btn(undefined, 'grab'),
 ];
 function el() {
   return {
@@ -81,6 +85,8 @@ globalThis.devicePixelRatio = 1;
 globalThis.innerWidth = 1920;
 globalThis.innerHeight = 1080;
 globalThis.location = { hash: '' };
+// Stands in for the OpenFreeMap TileJSON.
+globalThis.fetch = async () => ({ json: async () => ({ tiles: ['https://x/{z}/{x}/{y}.pbf'] }) });
 globalThis.history = { replaceState() {} };
 const ELS = {};
 globalThis.document = {
@@ -116,6 +122,8 @@ globalThis.Worker = class {
       data: {
         id: m.id, ok: true, positions, indices, centre, nw,
         size: geo.tileSizeMerc(m.z), heights: m.keepHeights ? h : null,
+        water: m.vurl ? (() => { const a = new Uint8Array(256 * 256);
+          for (let i = 0; i < a.length; i++) a[i] = (i % 256) < 90 ? 255 : 0; return a; })() : null,
       },
     }), 0);
   }
@@ -153,9 +161,11 @@ for (const b of PAD) {
 const R = [];
 const ok = (c, m) => { R.push((c ? 'PASS  ' : 'FAIL  ') + m); if (!c) process.exitCode = 1; };
 
+ok(log.textures > 0, `uploaded ${log.texUploads} textures across ${log.textures} objects`);
+ok(log.texSizes.has('256x256'), `mask textures are 256x256 (${[...log.texSizes].join(', ')})`);
 ok(padFired >= 8, `fired ${padFired} pad handlers without throwing`);
 ok(workerCount === 3, `spawned ${workerCount} workers`);
-ok(log.uniforms.size === 10, `resolved ${log.uniforms.size} uniform locations (expect 10)`);
+ok(log.uniforms.size === 13, `resolved ${log.uniforms.size} uniform locations (expect 13)`);
 ok(log.badUniform.length === 0, `no null uniform locations (${log.badUniform.length})`);
 ok(log.nan.length === 0, `no NaN/Inf uniform values (${log.nan.length}${log.nan.length ? ': ' + log.nan.slice(0, 3) : ''})`);
 ok(log.draws > 0, `issued ${log.draws} draw calls over ${FRAMES} frames`);

@@ -3,26 +3,29 @@
 import { LEVELS } from '../src/config.js';
 import { tileSizeMerc, mercScale } from '../src/geo.js';
 let bad = 0;
-for (const lat of [0, 20, 46.5, 60, 75]) {
+for (const lat of [0, 20, 43.3, 60, 75]) {
+ for (const agl of [1.7, 100, 2500, 43741, 200000, 700000]) {
   for (let act = 2; act <= LEVELS.length; act++) {
     const k = mercScale(lat);
     const l1 = 2 * tileSizeMerc(LEVELS[Math.min(1, act - 1)].z) * k;
-    const nearFar = l1 * 1.55, farNear = l1 * 0.85;
-    const nearMax = l1 * Math.SQRT2;                 // furthest near-pass vertex
-    const farMin  = l1;                              // where level 2 starts
+    const nearFar = Math.hypot(l1 * Math.SQRT2, agl) * 1.1;
+    const farNear = Math.hypot(l1, agl) * 0.9;
+    const nearMax = Math.hypot(l1 * Math.SQRT2, agl);  // furthest near-pass vertex
+    const farMin  = Math.hypot(l1, agl);               // nearest level-2 vertex
     const outer = tileSizeMerc(LEVELS[act - 1].z) * k * 2, far = outer * 1.6;
-    const farMax = outer * Math.SQRT2;               // furthest far-pass vertex
+    const farMax = Math.hypot(outer * Math.SQRT2, agl);               // furthest far-pass vertex
     const okNear = nearFar >= nearMax;
     const okGap  = farNear <= farMin;
     const okFar  = act < 3 ? true : far >= farMax;
     const okOverlap = farNear < nearFar;
     if (!(okNear && okGap && okFar && okOverlap)) {
       bad++;
-      console.log(`FAIL lat ${lat} levels ${act}: near ${okNear} gap ${okGap} far ${okFar} overlap ${okOverlap}`);
+      console.log(`FAIL lat ${lat} agl ${agl} levels ${act}: near ${okNear} gap ${okGap} far ${okFar} overlap ${okOverlap}`);
     }
   }
+ }
 }
 console.log(bad === 0
-  ? 'PASS  depth passes cover all geometry, no gap ring (5 latitudes x 5 settings)'
+  ? 'PASS  depth passes cover all geometry at every altitude (5 lat x 6 agl x 8 settings = 240 cases)'
   : `${bad} FAILURES`);
 if (bad) process.exitCode = 1;

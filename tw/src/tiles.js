@@ -2,7 +2,7 @@
 // Only MAX_INFLIGHT requests are ever outstanding: this endpoint is a free
 // public good and does not deserve to be hammered.
 
-import { TILE_URL, WORKERS, MAX_INFLIGHT } from './config.js';
+import { TILE_URL, WORKERS, MAX_INFLIGHT, VECTOR_MAXZOOM } from './config.js';
 
 export const keyOf = (z, x, y) => z + '/' + x + '/' + y;
 
@@ -11,6 +11,7 @@ export class Loader {
     this.onTile = onTile;
     this.fatal = fatal || ((m) => console.error(m));
     this.lastError = null;
+    this.vectorTemplate = null;   // set once the TileJSON resolves
     this.pool = [];
     this.free = [];
     this.queue = new Map();     // key -> spec, waiting
@@ -73,9 +74,11 @@ export class Loader {
       const w = this.free.pop();
       const id = this.nextId++;
       this.inflight.set(id, best.key);
-      const url = TILE_URL.replace('{z}', best.z).replace('{x}', best.x).replace('{y}', best.y);
+      const sub = (t) => t.replace('{z}', best.z).replace('{x}', best.x).replace('{y}', best.y);
+      const url = sub(TILE_URL);
+      const vurl = this.vectorTemplate && best.z <= VECTOR_MAXZOOM ? sub(this.vectorTemplate) : null;
       w.postMessage({
-        id, url, z: best.z, x: best.rawX, y: best.rawY,
+        id, url, vurl, z: best.z, x: best.rawX, y: best.rawY,
         grid: best.grid, keepHeights: best.keepHeights,
       });
       this._specById = this._specById || new Map();

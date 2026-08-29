@@ -33,18 +33,18 @@
   }
   body.locked #cross { display: block; }
   /* Aviation directional gyro: the card turns, the lubber line stays put. */
-  #compass { position:fixed; right:14px; bottom:52px; width:132px; height:132px;
+  #compass { position:fixed; right:14px; bottom:52px; width:136px; height:136px;
              pointer-events:none; }
   #compass svg { width:100%; height:100%; display:block; }
   #compass .face { fill:rgba(12,16,22,.78); stroke:#4a5666; stroke-width:1.5; }
   #compass .tick { stroke:#c9d4e0; stroke-width:1.4; }
   #compass .tickmaj { stroke:#fff; stroke-width:2.2; }
-  #compass .lab { fill:#e8eef5; font:600 11px ui-monospace,monospace; text-anchor:middle; }
-  #compass .card { fill:#ffd479; font:700 13px ui-monospace,monospace; text-anchor:middle; }
+  #compass .lab { fill:#e8eef5; font:400 11px ui-monospace,monospace; text-anchor:middle; }
+  #compass .card { fill:#ffd479; font:400 13px ui-monospace,monospace; text-anchor:middle; }
   #compass .lub { fill:#ffd479; }
-  #hdg { position:absolute; left:0; right:0; top:56px; text-align:center;
-         font:700 19px ui-monospace,monospace; color:#fff; letter-spacing:.5px; }
-  #hdgsub { position:absolute; left:0; right:0; top:78px; text-align:center;
+  #hdg { position:absolute; left:0; right:0; top:58px; text-align:center;
+         font:400 20px ui-monospace,monospace; color:#fff; letter-spacing:.5px; }
+  #hdgsub { position:absolute; left:0; right:0; top:82px; text-align:center;
             font:11px ui-monospace,monospace; color:#93a1b2; }
 
   /* Clickable when the pointer is free, a state readout when it is captured. */
@@ -79,7 +79,7 @@
   <b>WASD</b> move &middot; <b>Q</b>/<b>E</b> down/up &middot; <b>shift</b> run<br>
   <b>G</b> or <b>space space</b> toggle fly &middot; <b>space</b>/<b>shift</b> up/down<br>
   <b>ctrl</b> boost (safe once keys are locked) &middot; <b>wheel</b> fly speed &middot; <b>R</b> reset<br>
-  <b>F</b> fog on/off &middot; <b>H</b> hide this
+  <b>V</b> water on/off &middot; <b>F</b> fog on/off &middot; <b>H</b> hide this
 </div>
 
 <div id="ctrl">
@@ -93,8 +93,9 @@
   <button data-hold="up" title="ascend (E or space)">UP</button>
   <button data-act="fly" class="wide" title="walk / fly (G)">FLY</button>
   <button data-act="slower">SPD &minus;</button>
-  <button data-act="fog">FOG</button>
+  <button data-act="water">WATER</button>
   <button data-act="faster">SPD +</button>
+  <button data-act="fog" class="wide">FOG</button>
   <button data-act="grab" class="wide" title="fullscreen + keyboard lock">CAPTURE</button>
 </div>
 
@@ -109,7 +110,7 @@
 </div>
 
 <div id="hud" class="panel">starting&hellip;</div>
-<div id="attrib" class="panel">Elevation: Mapzen / AWS Open Data Terrain Tiles</div>
+<div id="attrib" class="panel">Elevation: Mapzen / AWS Open Data Terrain Tiles &middot; Water: &copy; OpenStreetMap contributors, &copy; OpenMapTiles via OpenFreeMap</div>
 <div id="error"></div>
 
 <script>

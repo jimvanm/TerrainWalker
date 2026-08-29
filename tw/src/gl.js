@@ -78,10 +78,12 @@ uniform float uScale;        // cos(camera latitude)
 uniform float uCamAlt;
 uniform float uCurv;         // 1 / (2 * earth radius), 0 disables
 uniform float uSkirt;
+uniform float uTileSize;    // tile width in unscaled mercator metres
 
 out float vHeight;
 out float vSkirt;
 out vec3  vPos;
+out vec2  vUV;
 
 void main() {
   float x = aPos.x * uScale + uTileOffset.x;
@@ -91,6 +93,9 @@ void main() {
   vHeight = aPos.y;
   vSkirt  = aPos.w;
   vPos    = vec3(x, y, z);
+  // Positions are tile-local, so UV falls straight out of them. No extra
+  // attribute, and skirt vertices inherit the UV of the edge they hang from.
+  vUV     = aPos.xz / uTileSize + 0.5;
 
   // Drop distant terrain below the horizon. Without this you can see hundreds
   // of kilometres of ground that should be over the curve.
@@ -104,10 +109,13 @@ precision highp float;
 in float vHeight;
 in float vSkirt;
 in vec3  vPos;
+in vec2  vUV;
 
 uniform vec3  uFogColor;
 uniform float uFogDensity;
 uniform vec3  uSunDir;
+uniform sampler2D uWater;
+uniform float uWaterOn;
 
 out vec4 frag;
 
@@ -138,6 +146,14 @@ void main() {
   lit = mix(lit, 0.72, vSkirt);
 
   vec3 c = hypso(vHeight) * lit;
+
+  // Water arrives as a draped mask rasterised from vectors, so a lake reads as
+  // water regardless of its elevation. Lake Superior sits at 183 m; nothing in
+  // an elevation ramp could ever have known it was not a hillside.
+  float wet = texture(uWater, vUV).r * uWaterOn * (1.0 - vSkirt);
+  vec3 deep = mix(vec3(0.16, 0.34, 0.52), vec3(0.09, 0.20, 0.33),
+                  clamp(vHeight / 400.0, 0.0, 1.0));
+  c = mix(c, deep * (0.82 + 0.18 * lit), smoothstep(0.35, 0.65, wet));
 
   float d = length(vPos);
   float f = clamp(1.0 - exp(-pow(d * uFogDensity, 2.0)), 0.0, 1.0);

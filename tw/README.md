@@ -46,6 +46,7 @@ whole deployment.
 | `ctrl` | boost, 8x |
 | wheel | flight speed |
 | `R` | return to the spawn point |
+| `V` | water overlay on/off |
 | `F` | fog on/off (off by default) |
 | `H` | hide the help panel |
 
@@ -64,6 +65,7 @@ A few to start with:
 
 | Place | Hash |
 | --- | --- |
+| Lake Ontario (default spawn) | `#lat=43.87172&lon=-77.68043` |
 | Lauterbrunnen, Switzerland | `#lat=46.5590&lon=7.9310` |
 | Everest, from the south | `#lat=27.9500&lon=86.9250&alt=6000&mode=fly` |
 | Grand Canyon | `#lat=36.0600&lon=-112.1100&alt=2200&mode=fly` |
@@ -110,6 +112,36 @@ opens a visible gap ring on the horizon.
 a `vec4`. Flat shading comes from screen-space derivatives and the colour ramp
 is computed from elevation in the fragment shader, then quantised to 5 bits per
 channel.
+
+## Water
+
+Elevation cannot tell you what water is. Lake Superior sits at 183 m, Erie at
+174 m, Ontario at 74 m, so a colour ramp renders one lake system as three
+different greens, while the Caspian comes out correctly blue purely because it
+happens to be 28 m below sea level. Water is a category, not a height.
+
+So it arrives as vectors and is draped as a texture:
+
+1. Fetch the OpenStreetMap vector tile alongside the elevation tile. The tile
+   URL comes from OpenFreeMap's TileJSON at runtime, never hardcoded.
+2. Decode it with a hand-written MVT reader in `src/mvt.js`, about 130 lines and
+   no dependencies. Water polygons, waterway lines, and the `class` tag.
+3. Rasterise to a 256x256 single-channel mask in the worker with Canvas 2D path
+   fills. Nonzero winding gives island holes for free.
+4. Upload per tile as an `R8` texture and sample it in the fragment shader.
+
+Vectors travel over the wire; pixels are materialised at load time and never
+stored or transmitted. All 76 tiles cost about 5 MB of GPU memory. UVs fall out
+of the tile-local vertex positions, so there is no extra attribute, and skirt
+vertices inherit their edge's UV so shorelines do not tear at LOD seams.
+
+**Not flattened.** Rivers are not level — the St. Clair drops about a metre over
+40 km — and OSM stores wide rivers as polygons, so a blanket flatten would level
+them. NASADEM already flattened large lakes during processing anyway.
+
+**This is the general overlay mechanism.** Roads, built-up areas, borders and
+chart symbology are all the same path: rasterise vectors, drape on terrain. What
+remains is drawing code, not architecture.
 
 ## Performance
 

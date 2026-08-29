@@ -11,8 +11,10 @@
 // ever changes uniforms. Vertex buffers are built once and never touched again.
 
 import { tileSizeMerc, tileCentreMerc, tileToMerc } from './geo.js';
+import { decodeMVT, POLYGON, LINESTRING } from './mvt.js';
 
 const PX = 256;
+const MASK = 256;   // water mask resolution, independent of mesh density
 
 export function decodeTerrarium(rgba) {
   const h = new Float32Array(PX * PX);
@@ -109,6 +111,68 @@ export function buildMesh(heights, z, grid) {
   return { positions, indices };
 }
 
+// Rasterise the OpenMapTiles water polygons and waterway lines into a
+// single-channel mask. Vectors travel over the wire; pixels are materialised
+// here, at load time, and never stored or transmitted.
+function rasterWater(layers) {
+  const cv = new OffscreenCanvas(MASK, MASK);
+  const cx = cv.getContext('2d', { willReadFrequently: true });
+  cx.fillStyle = '#000';
+  cx.fillRect(0, 0, MASK, MASK);
+  cx.fillStyle = '#fff';
+  cx.strokeStyle = '#fff';
+  cx.lineCap = 'round';
+  cx.lineJoin = 'round';
+
+  const w = layers.water;
+  if (w) {
+    const k = MASK / w.extent;
+    // Nonzero fill plus MVT winding (exterior clockwise, holes anticlockwise)
+    // gives island and lake-in-island holes for free.
+    cx.beginPath();
+    for (const f of w.features) {
+      if (f.type !== POLYGON) continue;
+      for (const ring of f.parts) {
+        cx.moveTo(ring[0] * k, ring[1] * k);
+        for (let i = 2; i < ring.length; i += 2) cx.lineTo(ring[i] * k, ring[i + 1] * k);
+        cx.closePath();
+      }
+    }
+    cx.fill('nonzero');
+  }
+
+  const ww = layers.waterway;
+  if (ww) {
+    const k = MASK / ww.extent;
+    // Rivers are narrower than a 30 m DEM cell, so they cannot be carved into
+    // the terrain. Drawing them is what a sectional chart does anyway.
+    for (const f of ww.features) {
+      if (f.type !== LINESTRING) continue;
+      cx.lineWidth = f.cls === 'river' ? 1.8 : 0.9;
+      cx.beginPath();
+      for (const ln of f.parts) {
+        cx.moveTo(ln[0] * k, ln[1] * k);
+        for (let i = 2; i < ln.length; i += 2) cx.lineTo(ln[i] * k, ln[i + 1] * k);
+      }
+      cx.stroke();
+    }
+  }
+
+  const src = cx.getImageData(0, 0, MASK, MASK).data;
+  const out = new Uint8Array(MASK * MASK);
+  for (let i = 0, p = 0; i < out.length; i++, p += 4) out[i] = src[p];
+  return out;
+}
+
+async function loadVector(url) {
+  const res = await fetch(url, { mode: 'cors' });
+  if (res.status === 404 || res.status === 204) return null;   // no data here
+  if (!res.ok) throw new Error('vector HTTP ' + res.status);
+  const buf = new Uint8Array(await res.arrayBuffer());
+  if (buf.length === 0) return null;
+  return rasterWater(decodeMVT(buf, ['water', 'waterway']));
+}
+
 async function loadTile(url) {
   const res = await fetch(url, { mode: 'cors' });
   if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -125,17 +189,23 @@ async function loadTile(url) {
 // there is no worker global scope.
 if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
 self.onmessage = async (ev) => {
-  const { id, url, z, x, y, grid, keepHeights } = ev.data;
+  const { id, url, vurl, z, x, y, grid, keepHeights } = ev.data;
   try {
-    const heights = await loadTile(url);
+    // Water is optional: a failure here must never cost us the terrain.
+    const [heights, water] = await Promise.all([
+      loadTile(url),
+      vurl ? loadVector(vurl).catch(() => null) : Promise.resolve(null),
+    ]);
     const { positions, indices } = buildMesh(heights, z, grid);
     const centre = tileCentreMerc(x, y, z);
     const nw = tileToMerc(x, y, z);
     const transfer = [positions.buffer, indices.buffer];
+    if (water) transfer.push(water.buffer);
     let hcopy = null;
     if (keepHeights) { hcopy = heights; transfer.push(hcopy.buffer); }
     self.postMessage(
-      { id, ok: true, positions, indices, centre, nw, size: tileSizeMerc(z), heights: hcopy },
+      { id, ok: true, positions, indices, centre, nw, size: tileSizeMerc(z),
+        heights: hcopy, water },
       transfer
     );
   } catch (e) {
