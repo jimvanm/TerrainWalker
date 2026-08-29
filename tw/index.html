@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Terrain Walker</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #9eb3cc; }
+  body { font: 12px/1.5 ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace; color: #fff; }
+  #c { display: block; width: 100vw; height: 100vh; cursor: pointer; }
+  /* :has() means the cursor can only hide while a lock is actually held. */
+  body.locked #c { cursor: none; }
+  html:not(:has(#c)) , body:not(.locked) #c { cursor: pointer; }
+  .panel {
+    position: fixed; background: rgba(12,16,22,.72); padding: 6px 10px;
+    border-radius: 4px; pointer-events: none; white-space: nowrap;
+  }
+  #hud { left: 10px; bottom: 10px; }
+  #attrib { right: 10px; bottom: 10px; opacity: .75; font-size: 11px; }
+  #help { left: 10px; top: 10px; line-height: 1.7; }
+  #help b { color: #ffd479; font-weight: 600; }
+  #help.hide { display: none; }
+  #ctrl {
+    position: fixed; right: 10px; top: 10px; background: rgba(12,16,22,.72);
+    padding: 6px 10px; border-radius: 4px; display: flex; gap: 8px; align-items: center;
+  }
+  #ctrl input { width: 90px; }
+  #cross {
+    position: fixed; left: 50%; top: 50%; width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px;
+    background: rgba(255,255,255,.65); border-radius: 50%; pointer-events: none; display: none;
+  }
+  body.locked #cross { display: block; }
+  /* Aviation directional gyro: the card turns, the lubber line stays put. */
+  #compass { position:fixed; right:14px; bottom:52px; width:132px; height:132px;
+             pointer-events:none; }
+  #compass svg { width:100%; height:100%; display:block; }
+  #compass .face { fill:rgba(12,16,22,.78); stroke:#4a5666; stroke-width:1.5; }
+  #compass .tick { stroke:#c9d4e0; stroke-width:1.4; }
+  #compass .tickmaj { stroke:#fff; stroke-width:2.2; }
+  #compass .lab { fill:#e8eef5; font:600 11px ui-monospace,monospace; text-anchor:middle; }
+  #compass .card { fill:#ffd479; font:700 13px ui-monospace,monospace; text-anchor:middle; }
+  #compass .lub { fill:#ffd479; }
+  #hdg { position:absolute; left:0; right:0; top:56px; text-align:center;
+         font:700 19px ui-monospace,monospace; color:#fff; letter-spacing:.5px; }
+  #hdgsub { position:absolute; left:0; right:0; top:78px; text-align:center;
+            font:11px ui-monospace,monospace; color:#93a1b2; }
+
+  /* Clickable when the pointer is free, a state readout when it is captured. */
+  #pad { position:fixed; right:14px; bottom:196px; display:grid; gap:5px;
+         grid-template-columns:repeat(3,42px); }
+  #pad button { font:600 11px ui-monospace,monospace; color:#dbe3ec; cursor:pointer;
+                background:rgba(12,16,22,.78); border:1px solid #3a4552;
+                border-radius:4px; padding:7px 0; }
+  #pad button:hover { border-color:#6d7d90; }
+  #pad button.on { background:#2f6b45; border-color:#4ac07a; color:#fff; }
+  #pad button.wide { grid-column:span 3; }
+  body.locked #pad button { cursor:default; opacity:.85; }
+
+  #loading {
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%);
+    background: rgba(12,16,22,.85); padding: 14px 22px; border-radius: 5px;
+  }
+  #error {
+    position: fixed; inset: 24px; display: none; overflow: auto; z-index: 10;
+    background: #2a1212; color: #ffb4b4; padding: 20px; border-radius: 6px;
+    white-space: pre-wrap; border: 1px solid #6a2b2b;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="cross"></div>
+<div id="loading" class="panel">loading terrain&hellip;</div>
+
+<div id="help" class="panel">
+  <b>click</b> to capture mouse &middot; <b>esc</b> to release<br>
+  <b>WASD</b> move &middot; <b>Q</b>/<b>E</b> down/up &middot; <b>shift</b> run<br>
+  <b>G</b> or <b>space space</b> toggle fly &middot; <b>space</b>/<b>shift</b> up/down<br>
+  <b>ctrl</b> boost (safe once keys are locked) &middot; <b>wheel</b> fly speed &middot; <b>R</b> reset<br>
+  <b>F</b> fog on/off &middot; <b>H</b> hide this
+</div>
+
+<div id="ctrl">
+  <label for="levels">view</label>
+  <input id="levels" type="range" min="2" max="9" step="1" value="9">
+</div>
+
+<div id="pad">
+  <button data-hold="down" title="descend (Q or shift)">DN</button>
+  <button data-hold="boost" title="boost (ctrl)">BOOST</button>
+  <button data-hold="up" title="ascend (E or space)">UP</button>
+  <button data-act="fly" class="wide" title="walk / fly (G)">FLY</button>
+  <button data-act="slower">SPD &minus;</button>
+  <button data-act="fog">FOG</button>
+  <button data-act="faster">SPD +</button>
+  <button data-act="grab" class="wide" title="fullscreen + keyboard lock">CAPTURE</button>
+</div>
+
+<div id="compass">
+  <svg viewBox="-60 -60 120 120" aria-hidden="true">
+    <circle class="face" cx="0" cy="0" r="53"></circle>
+    <g id="card"></g>
+    <polygon class="lub" points="0,-53 -6,-42 6,-42"></polygon>
+  </svg>
+  <div id="hdg">---</div>
+  <div id="hdgsub">HDG</div>
+</div>
+
+<div id="hud" class="panel">starting&hellip;</div>
+<div id="attrib" class="panel">Elevation: Mapzen / AWS Open Data Terrain Tiles</div>
+<div id="error"></div>
+
+<script>
+  window.addEventListener('keydown', function (e) {
+    if (e.code === 'KeyH') document.getElementById('help').classList.toggle('hide');
+    // Last-resort cursor rescue, works even if the module never loaded.
+    if (e.code === 'Escape') {
+      document.body.classList.remove('locked');
+      if (document.pointerLockElement) document.exitPointerLock();
+    }
+  });
+  window.addEventListener('blur', function () {
+    document.body.classList.remove('locked');
+  });
+  window.addEventListener('error', function (e) {
+    var el = document.getElementById('error');
+    el.textContent = 'Error: ' + (e.message || e) + '\n\n' +
+      (e.filename ? e.filename + ':' + e.lineno : '') +
+      '\n\nIf this says "Failed to fetch" or mentions CORS, you are probably ' +
+      'opening the file directly. Serve the folder over HTTP instead:\n\n' +
+      '    python3 -m http.server 8080\n\nthen open http://localhost:8080/';
+    el.style.display = 'block';
+  });
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>

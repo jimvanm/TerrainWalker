@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Terrain Walker — diagnostics</title>
+<style>
+  body { font: 13px/1.6 ui-monospace, Consolas, monospace; background:#12161c; color:#dbe3ec;
+         margin:0; padding:24px; }
+  h1 { font-size:16px; margin:0 0 4px; }
+  p.sub { color:#8b97a6; margin:0 0 20px; }
+  .t { border-left:3px solid #444; padding:8px 12px; margin:8px 0; background:#1a1f27; }
+  .ok   { border-color:#4ac07a; }
+  .bad  { border-color:#e05555; }
+  .warn { border-color:#e0a83c; }
+  .run  { border-color:#4a7ac0; }
+  .name { font-weight:600; }
+  .msg  { color:#a8b4c2; white-space:pre-wrap; margin-top:3px; }
+  .fix  { color:#ffd479; margin-top:6px; white-space:pre-wrap; }
+  code { background:#262c36; padding:1px 5px; border-radius:3px; }
+</style>
+</head>
+<body>
+<h1>Terrain Walker diagnostics</h1>
+<p class="sub">Each layer tested separately. Deliberately uses no modules, so it still runs when module loading is the thing that is broken.</p>
+<div id="out"></div>
+
+<script>
+var out = document.getElementById('out');
+function add(name) {
+  var d = document.createElement('div');
+  d.className = 't run';
+  d.innerHTML = '<span class="name">' + name + '</span><div class="msg">running…</div><div class="fix"></div>';
+  out.appendChild(d);
+  return {
+    pass: function (m) { d.className = 't ok';   d.children[1].textContent = 'OK — ' + m; },
+    fail: function (m, f) { d.className = 't bad';  d.children[1].textContent = m; if (f) d.children[2].textContent = f; },
+    warn: function (m, f) { d.className = 't warn'; d.children[1].textContent = m; if (f) d.children[2].textContent = f; }
+  };
+}
+
+add('Browser').pass(navigator.userAgent);
+
+// 1. THE LIKELY ONE. Browsers refuse ES modules with a non-JS MIME type.
+var t1 = add('1. MIME type of src/main.js');
+fetch('./src/main.js', { cache: 'no-store' }).then(function (r) {
+  var ct = (r.headers.get('content-type') || '(none)').split(';')[0].trim();
+  if (!r.ok) { t1.fail('HTTP ' + r.status + ' — the file is not being served. Are you running the server from inside the tw folder?'); return; }
+  if (/^(text|application)\/(javascript|ecmascript)$/.test(ct)) {
+    t1.pass('served as ' + ct);
+  } else {
+    t1.fail('served as "' + ct + '", which browsers will not execute as a module.',
+      'This is the Windows registry MIME bug in Python\'s http.server.\n' +
+      'Fix: stop that server and run  python serve.py  from the tw folder instead.');
+  }
+}).catch(function (e) { t1.fail('fetch failed: ' + e.message); });
+
+// 2. Do modules actually execute?
+var t2 = add('2. ES module execution');
+window.__modok = false;
+var s = document.createElement('script');
+s.type = 'module';
+s.textContent = 'window.__modok = true;';
+document.head.appendChild(s);
+setTimeout(function () {
+  if (window.__modok) t2.pass('inline module ran');
+  else t2.fail('inline modules do not execute in this browser.');
+}, 300);
+
+// 3. Module workers
+var t3 = add('3. Module worker support');
+try {
+  var blob = new Blob(['self.postMessage("alive");'], { type: 'text/javascript' });
+  var w = new Worker(URL.createObjectURL(blob), { type: 'module' });
+  var got = false;
+  w.onmessage = function () { got = true; t3.pass('module worker started and replied'); w.terminate(); };
+  w.onerror = function (e) { t3.fail('worker error: ' + (e.message || 'unknown')); };
+  setTimeout(function () { if (!got) t3.fail('worker never replied within 1.5 s'); }, 1500);
+} catch (e) { t3.fail('cannot construct a module worker: ' + e.message); }
+
+// 4. WebGL2 plus the real shaders
+var t4 = add('4. WebGL2 and shader compilation');
+(function () {
+  var c = document.createElement('canvas');
+  var gl = c.getContext('webgl2');
+  if (!gl) { t4.fail('no WebGL2 context.', 'Check that hardware acceleration is enabled in the browser settings.'); return; }
+  var vs = '#version 300 es\nprecision highp float;\nin vec4 aPos;\nvoid main(){ gl_Position = aPos; }';
+  var fs = '#version 300 es\nprecision highp float;\nin float vH;\nout vec4 o;\nvoid main(){' +
+           ' vec3 p = vec3(gl_FragCoord.xyz);' +
+           ' vec3 n = cross(dFdx(p), dFdy(p));' +
+           ' o = vec4(normalize(n) * 0.5 + 0.5, 1.0); }';
+  function comp(type, src) {
+    var sh = gl.createShader(type); gl.shaderSource(sh, src); gl.compileShader(sh);
+    return gl.getShaderParameter(sh, gl.COMPILE_STATUS) ? null : gl.getShaderInfoLog(sh);
+  }
+  var e1 = comp(gl.VERTEX_SHADER, vs), e2 = comp(gl.FRAGMENT_SHADER, fs);
+  if (e1 || e2) { t4.fail('shader compile failed:\n' + (e1 || '') + (e2 || '')); return; }
+  var dbg = gl.getExtension('WEBGL_debug_renderer_info');
+  var r = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : 'renderer hidden';
+  t4.pass('GLSL ES 3.00 compiles, derivatives available. GPU: ' + r);
+})();
+
+// 5. Reaching the tile server from the main thread
+var t5 = add('5. Tile fetch and CORS');
+var URLT = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/12/2138/1447.png';
+var t0 = performance.now();
+fetch(URLT, { mode: 'cors', cache: 'no-store' }).then(function (r) {
+  if (!r.ok) { t5.fail('HTTP ' + r.status + ' from the tile server.'); return null; }
+  return r.blob();
+}).then(function (b) {
+  if (!b) return;
+  var ms = (performance.now() - t0).toFixed(0);
+  return createImageBitmap(b).then(function (bmp) {
+    var cv = document.createElement('canvas'); cv.width = cv.height = 256;
+    var cx = cv.getContext('2d'); cx.drawImage(bmp, 0, 0);
+    var d = cx.getImageData(128, 128, 1, 1).data;
+    var h = d[0] * 256 + d[1] + d[2] / 256 - 32768;
+    t5.pass((b.size / 1024).toFixed(0) + ' KB in ' + ms + ' ms. Decoded centre elevation: ' +
+            h.toFixed(1) + ' m (should be roughly 1000–3000 m, this tile is in the Alps).');
+  });
+}).catch(function (e) {
+  t5.fail('fetch failed: ' + e.message,
+    'Usually a blocked network, a corporate proxy, or an extension such as uBlock/NoScript\n' +
+    'blocking s3.amazonaws.com. Try a private window with extensions disabled.');
+});
+
+// 6. OffscreenCanvas, which the worker relies on for decoding
+var t6 = add('6. OffscreenCanvas 2D (used for PNG decode inside the worker)');
+try {
+  var oc = new OffscreenCanvas(8, 8);
+  if (!oc.getContext('2d')) t6.fail('OffscreenCanvas exists but has no 2D context.');
+  else t6.pass('available');
+} catch (e) { t6.fail('not available: ' + e.message); }
+</script>
+</body>
+</html>

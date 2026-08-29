@@ -1,0 +1,166 @@
+// Runs the real application against a mocked WebGL2 context, DOM and Worker.
+// Catches wiring mistakes (bad uniform names, undefined imports, NaN uniforms,
+// runaway allocation) without needing a browser.
+
+const GLC = {
+  VERTEX_SHADER: 1, FRAGMENT_SHADER: 2, COMPILE_STATUS: 3, LINK_STATUS: 4,
+  ARRAY_BUFFER: 5, ELEMENT_ARRAY_BUFFER: 6, STATIC_DRAW: 7, FLOAT: 8,
+  TRIANGLES: 9, UNSIGNED_SHORT: 10, DEPTH_TEST: 11, CULL_FACE: 12,
+  LEQUAL: 13, COLOR_BUFFER_BIT: 16384, DEPTH_BUFFER_BIT: 256,
+};
+
+export const log = {
+  calls: {}, uniforms: new Set(), badUniform: [], nan: [],
+  draws: 0, tris: 0, buffers: 0, deleted: 0, clears: 0,
+};
+
+function makeGL() {
+  let uid = 0;
+  const base = {
+    ...GLC,
+    createShader: () => ({ id: ++uid }),
+    createProgram: () => ({ id: ++uid }),
+    createVertexArray: () => ({ id: ++uid }),
+    createBuffer: () => { log.buffers++; return { id: ++uid }; },
+    deleteVertexArray: () => { log.deleted++; },
+    deleteBuffer: () => {},
+    getShaderParameter: () => true,
+    getProgramParameter: () => true,
+    getShaderInfoLog: () => '',
+    getProgramInfoLog: () => '',
+    getUniformLocation: (p, n) => { log.uniforms.add(n); return { n }; },
+    drawElements: (mode, count) => { log.draws++; log.tris += count / 3; },
+    clear: () => { log.clears++; },
+    uniform1f: (l, v) => chk(l, [v]),
+    uniform2f: (l, a, b) => chk(l, [a, b]),
+    uniform3f: (l, a, b, c) => chk(l, [a, b, c]),
+    uniformMatrix4fv: (l, t, m) => chk(l, m),
+  };
+  function chk(loc, vals) {
+    if (!loc) { log.badUniform.push('null location'); return; }
+    for (const v of vals) {
+      if (!Number.isFinite(v)) { log.nan.push(loc.n + '=' + v); return; }
+    }
+  }
+  return new Proxy(base, {
+    get(t, k) {
+      if (k in t) return t[k];
+      return (...a) => { log.calls[k] = (log.calls[k] || 0) + 1; };
+    },
+  });
+}
+
+function btn(hold, act) {
+  return {
+    dataset: { hold, act }, textContent: '', style: {},
+    classList: { toggle() {}, add() {}, remove() {} },
+    addEventListener(t, f) { (this._h = this._h || []).push([t, f]); },
+  };
+}
+// Mirrors the real pad in index.html, so a missing handler shows up as a crash.
+const PAD = [
+  btn('down'), btn('boost'), btn('up'),
+  btn(undefined, 'fly'), btn(undefined, 'slower'), btn(undefined, 'fog'),
+  btn(undefined, 'faster'), btn(undefined, 'grab'),
+];
+function el() {
+  return {
+    style: {}, textContent: '', value: '9', max: '9', innerHTML: '',
+    classList: { toggle() {}, add() {}, remove() {} },
+    addEventListener() {}, requestPointerLock() {}, setAttribute() {},
+    querySelectorAll: () => PAD,
+    getContext: () => makeGL(), width: 0, height: 0,
+  };
+}
+
+const listeners = {};
+const addL = (o) => (t, f) => { (listeners[t] = listeners[t] || []).push(f); };
+
+globalThis.performance = globalThis.performance || { now: () => Date.now() };
+globalThis.devicePixelRatio = 1;
+globalThis.innerWidth = 1920;
+globalThis.innerHeight = 1080;
+globalThis.location = { hash: '' };
+globalThis.history = { replaceState() {} };
+const ELS = {};
+globalThis.document = {
+  getElementById: (id) => (ELS[id] = ELS[id] || el()),
+  documentElement: { requestFullscreen: async () => {} },
+  exitPointerLock() {}, exitFullscreen: async () => {},
+  fullscreenElement: null,
+  addEventListener: addL(),
+  body: { classList: { toggle() {} } },
+  pointerLockElement: null,
+};
+globalThis.window = globalThis;
+globalThis.addEventListener = addL();
+
+// Worker mock: builds a real mesh from synthetic elevation data.
+const wmod = await import('../src/worker.js');
+const geo = await import('../src/geo.js');
+let workerCount = 0;
+globalThis.Worker = class {
+  constructor() { workerCount++; this.onmessage = null; }
+  postMessage(m) {
+    const px = 256;
+    const h = new Float32Array(px * px);
+    for (let j = 0; j < px; j++) {
+      for (let i = 0; i < px; i++) {
+        h[j * px + i] = 900 + 700 * Math.sin(i / 24) * Math.cos(j / 31) + (m.z * 3);
+      }
+    }
+    const { positions, indices } = wmod.buildMesh(h, m.z, m.grid);
+    const centre = geo.tileCentreMerc(m.x, m.y, m.z);
+    const nw = geo.tileToMerc(m.x, m.y, m.z);
+    setTimeout(() => this.onmessage && this.onmessage({
+      data: {
+        id: m.id, ok: true, positions, indices, centre, nw,
+        size: geo.tileSizeMerc(m.z), heights: m.keepHeights ? h : null,
+      },
+    }), 0);
+  }
+};
+
+let rafCb = null, rafCount = 0;
+globalThis.requestAnimationFrame = (cb) => { rafCb = cb; rafCount++; return rafCount; };
+
+await import('../src/main.js');
+
+// Drive frames manually, letting queued worker messages land between them.
+let t = performance.now();
+const FRAMES = 240;
+for (let i = 0; i < FRAMES; i++) {
+  const cb = rafCb; rafCb = null;
+  t += 16.7;
+  if (cb) cb(t);
+  await new Promise((r) => setTimeout(r, 0));
+  // Hold W down from frame 40, and switch to flight at frame 120.
+  if (i === 40) listeners.keydown && listeners.keydown.forEach((f) => f({ code: 'KeyW', preventDefault() {} }));
+  if (i === 120) {
+    const k = listeners.keydown || [];
+    k.forEach((f) => f({ code: 'Space', preventDefault() {} }));
+    k.forEach((f) => f({ code: 'Space', preventDefault() {} }));
+  }
+}
+
+let padFired = 0;
+for (const b of PAD) {
+  for (const [t, f] of (b._h || [])) {
+    try { f({ preventDefault() {} }); padFired++; } catch (e) { console.log('PAD HANDLER THREW: ' + e.message); process.exitCode = 1; }
+  }
+}
+
+const R = [];
+const ok = (c, m) => { R.push((c ? 'PASS  ' : 'FAIL  ') + m); if (!c) process.exitCode = 1; };
+
+ok(padFired >= 8, `fired ${padFired} pad handlers without throwing`);
+ok(workerCount === 3, `spawned ${workerCount} workers`);
+ok(log.uniforms.size === 10, `resolved ${log.uniforms.size} uniform locations (expect 10)`);
+ok(log.badUniform.length === 0, `no null uniform locations (${log.badUniform.length})`);
+ok(log.nan.length === 0, `no NaN/Inf uniform values (${log.nan.length}${log.nan.length ? ': ' + log.nan.slice(0, 3) : ''})`);
+ok(log.draws > 0, `issued ${log.draws} draw calls over ${FRAMES} frames`);
+ok(log.buffers > 0, `created ${log.buffers} GL buffers`);
+ok(log.clears >= FRAMES, `${log.clears} clears (2 per frame for the depth split)`);
+console.log('\n' + R.join('\n'));
+console.log(`\ntriangles submitted total: ${(log.tris / 1e6).toFixed(1)}M over ${FRAMES} frames`);
+console.log(`≈ ${(log.tris / FRAMES / 1000).toFixed(0)}k tris/frame, ${(log.draws / FRAMES).toFixed(0)} draws/frame`);
