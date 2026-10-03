@@ -1,5 +1,6 @@
 // Owns the GPU buffers for loaded tiles, decides what to request, and draws.
 
+import { probe } from './perf.js';
 import { computeBlocks } from './rings.js';
 import { keyOf } from './tiles.js';
 import { CACHE_TILES, LEVELS } from './config.js';
@@ -52,6 +53,13 @@ export class Terrain {
   }
 
   _upload(key, spec, msg) {
+    const t0 = performance.now();
+    this._uploadInner(key, spec, msg);
+    probe.uploadMs += performance.now() - t0;
+    probe.terrainTiles++;
+  }
+
+  _uploadInner(key, spec, msg) {
     const gl = this.gl;
     if (this.tiles.has(key)) return;
     const vao = gl.createVertexArray();
@@ -108,7 +116,10 @@ export class Terrain {
 
   // Work out which tiles should be on screen, request the missing ones,
   // and record what is drawable this frame.
-  update(mercX, mercY, minLevel, activeLevels) {
+  // `lead*` is where the camera will be in a few seconds. Fetching is centred on
+  // both, drawing only on the real position, so tiles are already there when
+  // you arrive instead of loading after you have passed.
+  update(mercX, mercY, minLevel, activeLevels, leadX, leadY, useLead) {
     // Three separate questions. Conflating any two of them has now caused a
     // bug each time:
     //
@@ -126,6 +137,17 @@ export class Terrain {
     const has = (z, x, y) => this.tiles.has(keyOf(z, x, y));
     const fetchList = computeBlocks(mercX, mercY, fetchLevels);
     for (const b of fetchList) b.level += minLevel;
+    if (useLead) {
+      const seen = new Set(fetchList.map((b) => keyOf(b.z, b.x, b.y)));
+      for (const b of computeBlocks(leadX, leadY, fetchLevels)) {
+        const k = keyOf(b.z, b.x, b.y);
+        if (seen.has(k)) continue;
+        seen.add(k);
+        b.level += minLevel;
+        b.lead = true;
+        fetchList.push(b);
+      }
+    }
     const blocks = computeBlocks(mercX, mercY, drawLevels, has);
 
     const wanted = new Set();
@@ -158,7 +180,7 @@ export class Terrain {
         key, z: b.z, x: b.x, y: b.y, rawX: b.rawX, rawY: b.rawY,
         grid: b.grid, level: b.level,
         keepHeights: b.level === minLevel,
-        priority: (activeLevels - 1 - b.level) * 100 + dist,
+        priority: (activeLevels - 1 - b.level) * 100 + dist + (b.lead ? 50 : 0),
       });
     }
 

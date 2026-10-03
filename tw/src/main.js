@@ -3,7 +3,12 @@ import { Loader } from './tiles.js';
 import { VECTOR_TILEJSON } from './config.js';
 import { Terrain } from './terrain.js';
 import { Controls } from './controls.js';
+import { Perf, probe } from './perf.js';
+import { startCache, cacheUsage } from './cache.js';
+import { initFavourites } from './favourites.js';
+import { NearField } from './nearfield.js';
 import {
+  NF_MAX_AGL, NF_MAX_SPEED, LEAD_SECONDS, FLY_MULT_MAX, WALK_MULT_MAX,
   LEVELS, SKIRT, FOV, NEAR, EYE_HEIGHT, BUILD, readHash, writeHash,
 } from './config.js';
 import {
@@ -22,7 +27,7 @@ gl.useProgram(prog);
 const U = {};
 for (const n of ['uProj', 'uView', 'uTileOffset', 'uScale', 'uCamAlt',
                  'uCurv', 'uSkirt', 'uFogColor', 'uFogDensity', 'uSunDir',
-                 'uTileSize', 'uMask', 'uCover', 'uLayers', 'uDebug', 'uLevel']) {
+                 'uTileSize', 'uMask', 'uCover', 'uLayers', 'uDebug', 'uLevel', 'uNearRect']) {
   U[n] = gl.getUniformLocation(prog, n);
 }
 
@@ -46,6 +51,7 @@ const cam = {
 };
 let activeLevels = cfg.levels;
 let altSettled = cfg.alt !== null;
+let pendingAgl = cfg.agl === null || cfg.agl === undefined ? null : cfg.agl;   // height above ground to settle at
 
 function fatal(msg) {
   const el = document.getElementById('error');
@@ -59,6 +65,7 @@ window.addEventListener('unhandledrejection', (e) => {
 const loader = new Loader(() => {}, fatal);
 const terrain = new Terrain(gl, loader);
 const controls = new Controls(canvas, cam);
+const nearField = new NearField(gl, () => loader.vectorTemplate);
 
 // Resolve the vector tile template from the service's TileJSON. Terrain still
 // loads if this fails; water is an enhancement, never a dependency.
@@ -74,9 +81,40 @@ controls.onReset = () => {
   const s = readHash();
   cam.mercX = lonToMercX(s.lon); cam.mercY = latToMercY(s.lat);
   cam.yaw = s.yaw * Math.PI / 180; cam.pitch = s.pitch * Math.PI / 180;
-  altSettled = false;
+  altSettled = false; pendingAgl = null;
   controls.flyMult = 1;      // R resets speed too, not just position
+  controls.walkMult = 1;
 };
+
+
+// ---- jumping: saved places and editing the address bar ---------------------
+function jumpTo(s) {
+  cam.mercX = lonToMercX(s.lon); cam.mercY = latToMercY(s.lat);
+  cam.yaw = (s.yaw || 0) * Math.PI / 180; cam.pitch = (s.pitch || 0) * Math.PI / 180;
+  cam.fly = s.fly ? 1 : 0;
+  if (s.agl !== null && s.agl !== undefined) { pendingAgl = s.agl; altSettled = false; }
+  else if (s.alt !== null && s.alt !== undefined) { cam.alt = s.alt; altSettled = true; pendingAgl = null; }
+  else { pendingAgl = null; altSettled = false; }
+}
+// Typing a new address (or pasting a link into the same tab) now moves you
+// there. The app's own once-a-second address updates do not fire this event.
+addEventListener('hashchange', () => jumpTo(readHash()));
+initFavourites({
+  root: document.getElementById('favs'),
+  jump: jumpTo,
+  getView: () => {
+    const g = terrain.heightAt(cam.mercX, cam.mercY);
+    return {
+      lat: cam.lat, lon: cam.lon, alt: cam.alt, agl: g === null ? null : cam.alt - g,
+      yaw: ((cam.yaw * 180 / Math.PI) % 360 + 360) % 360, pitch: cam.pitch * 180 / Math.PI,
+      fly: cam.fly,
+    };
+  },
+});
+startCache();
+let cacheMb = null;
+const pollCache = () => cacheUsage().then((u) => { if (u) cacheMb = u; });
+pollCache(); setInterval(pollCache, 15000);
 
 // ---- directional gyro ----------------------------------------------------
 // Card is built once. Aviation convention: labels are degrees/10, cardinals
@@ -127,8 +165,8 @@ pad.querySelectorAll('button').forEach((b) => {
       else if (act === 'fog') fogOn = !fogOn;
 
       else if (act === 'grab') controls.grab();
-      else if (act === 'faster') controls.flyMult = Math.min(10, controls.flyMult * 1.5);
-      else if (act === 'slower') controls.flyMult = Math.max(0.1, controls.flyMult / 1.5);
+      else if (act === 'faster') controls.bump(1.5);
+      else if (act === 'slower') controls.bump(1 / 1.5);
     });
   }
 });
@@ -159,6 +197,10 @@ let holePeak = 0, holeTimer = 0;
 let fogOn = false;
 let debugMode = 0;   // 0 normal, 1 tile grid + level tint, 2 flat (no textures)
 let frozen = false;
+let nearOn = false;
+let nfR = 1;                 // near-field radius in tiles (1 = 3x3, 2 = 5x5)
+let lvx = 0, lvz = 0;
+let useLead = false, leadX = 0, leadY = 0;        // smoothed horizontal velocity for look-ahead loading
 // Order matches uLayers.xyzw in the shader.
 const LAYERS = [
   { id: 'water', key: 'KeyV', label: 'WATER', on: true },
@@ -188,13 +230,20 @@ let frames = 0, fpsTime = 0, fps = 0, hashTime = 0;
 const hud = document.getElementById('hud');
 const loading = document.getElementById('loading');
 
+const perf = new Perf(document.getElementById('perf'));
+let prevNfR = nfR, prevMin = minLevel, prevDraw = drawLevels;
 function frame(now) {
-  const dt = Math.min((now - last) / 1000, 0.1);
+  const t0 = performance.now();
+  const rawMs = now - last;
+  const dt = Math.min(rawMs / 1000, 0.1);
   last = now;
   resize();
 
   const ground = terrain.heightAt(cam.mercX, cam.mercY);
-  if (!altSettled && ground !== null) { cam.alt = ground + EYE_HEIGHT; altSettled = true; }
+  if (!altSettled && ground !== null) {
+    cam.alt = ground + (pendingAgl === null ? EYE_HEIGHT : pendingAgl);
+    pendingAgl = null; altSettled = true;
+  }
   controls.update(dt, ground);
 
   cam.lat = mercYToLat(cam.mercY);
@@ -249,7 +298,31 @@ function frame(now) {
   minLevel = Math.max(0, Math.min(minLevel, drawLevels - 1));
 
   if (!frozen && (vectorReady || now - startTime > 4000)) {
-    terrain.update(cam.mercX, cam.mercY, minLevel, drawLevels);
+    // Look-ahead: also load around where we will be in LEAD_SECONDS. Flight sims
+    // do exactly this; loading only around the present position means you are
+    // always flying into tiles that have not arrived.
+    const va = 1 - Math.exp(-3 * dt);
+    lvx += (controls.vx - lvx) * va;
+    lvz += (controls.vz - lvz) * va;
+    const vmag = Math.hypot(lvx, lvz);
+    const leadDist = Math.min(vmag * LEAD_SECONDS, 60000);
+    useLead = leadDist > 200;
+    leadX = useLead ? cam.mercX + (lvx / vmag) * leadDist / k : cam.mercX;
+    leadY = useLead ? cam.mercY - (lvz / vmag) * leadDist / k : cam.mercY;
+    terrain.update(cam.mercX, cam.mercY, minLevel, drawLevels, leadX, leadY, useLead);
+  }
+
+  // Near field. Three separate questions, same lesson as the terrain:
+  //   DRAW  - whenever we are low enough to see it and it is cached. Height only;
+  //           speed is no reason to throw away geometry we already hold.
+  //   FETCH - only at a horizontal speed where a tile can finish loading.
+  //   RADIUS- grows with height, because you can see further from up there.
+  if (nearOn) { if (hAgl > NF_MAX_AGL * 1.15) nearOn = false; }
+  else if (hAgl < NF_MAX_AGL) nearOn = true;
+  if (nfR === 1 && hAgl > 900) nfR = 2;
+  else if (nfR === 2 && hAgl < 600) nfR = 1;
+  if (!frozen && (vectorReady || now - startTime > 4000)) {
+    nearField.update(cam.mercX, cam.mercY, nearOn, controls.hspeed < NF_MAX_SPEED, nfR, leadX, leadY, useLead);
   }
 
   const outer = tileSizeMerc(LEVELS[drawLevels - 1].z) * k * 2;
@@ -273,6 +346,9 @@ function frame(now) {
   gl.uniform3f(U.uSunDir, 0.40, 0.82, 0.41);
   gl.uniform1f(U.uDebug, debugMode);
   gl.uniform4f(U.uLayers, ...LAYERS.map((L) => (L.on ? 1 : 0)));
+  // Painted roads fade out inside the area the real geometry covers.
+  const nr = nearField.rectUniform(cam.mercX, cam.mercY, k, LAYERS[1].on);
+  gl.uniform4f(U.uNearRect, nr[0], nr[1], nr[2], nr[3]);
 
 
   // Depth split, chosen for PRECISION rather than for level boundaries.
@@ -300,10 +376,12 @@ function frame(now) {
   gl.uniformMatrix4fv(U.uProj, false,
     G.perspective(proj, fov, aspect, Math.min(splitNear, far * 0.5), far));
   const farDrawn = terrain.draw(U, cam.mercX, cam.mercY, k, 0, ALL);
+  nearField.draw(prog, proj, view, k, cam.alt, cam.mercX, cam.mercY, 1 / (2 * R_MEAN), LAYERS[1].on);
   gl.clear(gl.DEPTH_BUFFER_BIT);
   gl.uniformMatrix4fv(U.uProj, false,
     G.perspective(proj, fov, aspect, near, Math.max(splitFar, near * 1000)));
   const nearDrawn = terrain.draw(U, cam.mercX, cam.mercY, k, 0, ALL);
+  nearField.draw(prog, proj, view, k, cam.alt, cam.mercX, cam.mercY, 1 / (2 * R_MEAN), LAYERS[1].on);
 
   // A hole is a tile the draw set says should cover ground but which has not
   // loaded. If this spikes when something flashes, the flashing IS holes.
@@ -323,9 +401,12 @@ function frame(now) {
       ? 'FLY ' + (controls.cruise * 3.6 < 10000
           ? (controls.cruise * 3.6).toFixed(0) + ' km/h'
           : (controls.cruise / 1000).toFixed(1) + ' km/s') +
-        (Math.abs(controls.flyMult - 1) > 0.02 ? ' x' + controls.flyMult.toFixed(1) : '')
-      : 'WALK'}${fogOn ? ' +fog' : ''}${debugMode ? ' +dbg' + debugMode : ''}${frozen ? ' FROZEN' : ''}  |  ` +
-    `${terrain.visible.length}/${terrain.loaded} tiles  |  L${minLevel}-${drawLevels - 1}  |  holes ${terrain.holes}/${holePeak}  |  evict ${terrain.evicted}  |  water ${terrain.waterCount}/${terrain.visible.length}  |  view ${(viewDist / 1000).toFixed(0)} km  |  ${fps.toFixed(0)} fps  |  v${BUILD} (${LEVELS.length}L)` +
+        (Math.abs(controls.flyMult - 1) > 0.02 ? ' x' + controls.flyMult.toFixed(1) : '') +
+        (controls.flyMult >= FLY_MULT_MAX - 0.01 ? ' MAX' : '')
+      : 'WALK ' + (controls.walkCruise * 3.6).toFixed(0) + ' km/h' +
+        (Math.abs(controls.walkMult - 1) > 0.02 ? ' x' + controls.walkMult.toFixed(1) : '') +
+        (controls.walkMult >= WALK_MULT_MAX - 0.01 ? ' MAX' : '')}${fogOn ? ' +fog' : ''}${debugMode ? ' +dbg' + debugMode : ''}${frozen ? ' FROZEN' : ''}  |  ` +
+    `${terrain.visible.length}/${terrain.loaded} tiles  |  L${minLevel}-${drawLevels - 1}  |  holes ${terrain.holes}/${holePeak}  |  evict ${terrain.evicted}  |  water ${terrain.waterCount}/${terrain.visible.length}  |  near ${nearField.status}  |  view ${(viewDist / 1000).toFixed(0)} km  |  ${fps.toFixed(0)} fps  |  ${cacheMb ? 'cache ' + cacheMb.mb.toFixed(0) + ' MB' + (cacheMb.persistent ? '' : '*') + '  |  ' : ''}v${BUILD} (${LEVELS.length}L)` +
     (loader.queued ? `  |  loading ${loader.queued}` : '') +
     (loader.stats.failed ? `  |  ${loader.stats.failed} failed` : '');
 
@@ -369,6 +450,16 @@ function frame(now) {
   hashTime += dt;
   if (hashTime > 1) { hashTime = 0; writeHash(cam); }
 
+  let switched = '';
+  if (nfR !== prevNfR) switched = 'near block ' + (nfR === 2 ? '5x5' : '3x3');
+  else if (minLevel !== prevMin || drawLevels !== prevDraw) switched = 'detail levels L' + minLevel + '-' + (drawLevels - 1);
+  prevNfR = nfR; prevMin = minLevel; prevDraw = drawLevels;
+  perf.frame(now, rawMs, performance.now() - t0, {
+    holes: terrain.holes, queued: loader.queued, alt: cam.alt, agl,
+    speed: controls.speed, near: nearField.status,
+    upMs: probe.uploadMs, nearTiles: probe.nearTiles, terrTiles: probe.terrainTiles, switched,
+  });
+  probe.uploadMs = 0; probe.nearTiles = 0; probe.terrainTiles = 0;
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

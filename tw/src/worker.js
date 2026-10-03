@@ -12,30 +12,12 @@
 
 import { tileSizeMerc, tileCentreMerc, tileToMerc } from './geo.js';
 import { decodeMVT, POLYGON, LINESTRING } from './mvt.js';
+import { decodeTerrarium, sample, PX } from './heightgrid.js';
+import { cachedFetch } from './cache.js';
 
-const PX = 256;
+export { decodeTerrarium };
+
 const MASK = 256;   // water mask resolution, independent of mesh density
-
-export function decodeTerrarium(rgba) {
-  const h = new Float32Array(PX * PX);
-  for (let i = 0, p = 0; i < h.length; i++, p += 4) {
-    h[i] = rgba[p] * 256 + rgba[p + 1] + rgba[p + 2] / 256 - 32768;
-  }
-  return h;
-}
-
-// Bilinear sample of the 256x256 grid at fractional pixel coordinates.
-function sample(h, fx, fy) {
-  const x = Math.max(0, Math.min(PX - 1.001, fx));
-  const y = Math.max(0, Math.min(PX - 1.001, fy));
-  const x0 = x | 0, y0 = y | 0;
-  const x1 = x0 + 1 < PX ? x0 + 1 : x0;
-  const y1 = y0 + 1 < PX ? y0 + 1 : y0;
-  const tx = x - x0, ty = y - y0;
-  const a = h[y0 * PX + x0], b = h[y0 * PX + x1];
-  const c = h[y1 * PX + x0], d = h[y1 * PX + x1];
-  return (a + (b - a) * tx) * (1 - ty) + (c + (d - c) * tx) * ty;
-}
 
 export function buildMesh(heights, z, grid) {
   const N = grid;
@@ -230,7 +212,7 @@ function rasterOverlays(layers) {
 }
 
 async function loadVector(url) {
-  const res = await fetch(url, { mode: 'cors' });
+  const res = await cachedFetch(url, { mode: 'cors' });
   if (res.status === 404 || res.status === 204) return null;   // no data here
   if (!res.ok) throw new Error('vector HTTP ' + res.status);
   const buf = new Uint8Array(await res.arrayBuffer());
@@ -240,7 +222,7 @@ async function loadVector(url) {
 }
 
 async function loadTile(url) {
-  const res = await fetch(url, { mode: 'cors' });
+  const res = await cachedFetch(url, { mode: 'cors' });
   if (!res.ok) throw new Error('HTTP ' + res.status);
   const blob = await res.blob();
   const bmp = await createImageBitmap(blob);

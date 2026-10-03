@@ -1,0 +1,20 @@
+const mem = new Map();
+globalThis.localStorage = { getItem: (k) => mem.has(k) ? mem.get(k) : null, setItem: (k, v) => mem.set(k, String(v)) };
+const P = await import('./places.js');
+const ok = (c, m) => { if (!c) { console.error('FAIL', m); process.exit(1); } console.log('ok  ' + m); };
+
+let l = P.loadPlaces();
+ok(l.length === 4 && P.startPlace().name.startsWith('Lake Ontario'), 'first run seeds four places, Lake Ontario is the start');
+l.splice(1, 1); P.savePlaces(l);
+ok(P.loadPlaces().length === 3, 'a deleted seed stays deleted (not re-seeded)');
+l = P.loadPlaces();
+const p = P.makePlace({ lat: 31.30321, lon: 120.89584, alt: 5645.4, agl: 5644, yaw: 268, pitch: -8, fly: 1 }, 'Suzhou');
+l.push(p); P.savePlaces(l);
+ok(P.loadPlaces().at(-1).name === 'Suzhou' && P.loadPlaces().at(-1).lat === 31.30321, 'a pinned place survives a reload');
+P.setStart(l, p.id); P.savePlaces(l);
+ok(P.startPlace().name === 'Suzhou' && P.loadPlaces().filter((x) => x.start).length === 1, 'only one start point at a time');
+P.setStart(l, p.id); P.savePlaces(l);
+ok(P.startPlace() === null, 'clicking the start star again clears it (default spawn comes back)');
+mem.set('tw.places', '{bad json'); 
+ok(P.loadPlaces().length === 0, 'corrupt storage does not crash');
+console.log('places ok');

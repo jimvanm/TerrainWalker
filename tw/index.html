@@ -17,8 +17,27 @@
     position: fixed; background: rgba(12,16,22,.72); padding: 6px 10px;
     border-radius: 4px; pointer-events: none; white-space: nowrap;
   }
-  #hud { left: 10px; bottom: 10px; }
-  #attrib { right: 10px; bottom: 10px; opacity: .75; font-size: 11px; }
+  #hud { left: 10px; bottom: 34px; }
+  #attrib { left: 10px; bottom: 10px; opacity: .75; font-size: 10px; padding: 3px 10px; }
+  #perf { position: fixed; left: 10px; bottom: 74px; border-radius: 4px; pointer-events: none; }
+  #perf.hide { display: none; }
+  #favs { position: fixed; right: 10px; top: 52px; width: 210px; z-index: 5;
+          background: rgba(12,16,22,.78); border-radius: 4px; font-size: 12px; }
+  #favs button, #favs input { font: inherit; color: #dbe3ec; background: none; border: 0; cursor: pointer; }
+  #favs .fhead { display: flex; justify-content: space-between; padding: 4px 6px; }
+  #favs .ftitle { font-weight: 600; padding: 2px 4px; }
+  #favs .fpin { border: 1px solid #3a4552; border-radius: 3px; padding: 1px 8px; color: #ffd479; }
+  #favs .flist { max-height: 40vh; overflow-y: auto; border-top: 1px solid #2a3340; padding: 3px 0; }
+  #favs .frow { display: flex; align-items: center; }
+  #favs .fgo { flex: 1; text-align: left; padding: 4px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #favs .fgo:hover { background: #2a4f6b; }
+  #favs .fstar { padding: 4px 6px; color: #6d7d90; }
+  #favs .fstar.on { color: #ffd479; }
+  #favs .fdel { padding: 4px 8px; color: #8b97a6; }
+  #favs .fdel:hover, #favs .fdel.armed { color: #ff6b60; }
+  #favs .fname { flex: 1; margin: 2px 6px; padding: 3px 6px; background: #1d2530; border: 1px solid #5aa0d0; border-radius: 3px; cursor: text; min-width: 0; }
+  #favs .fempty { padding: 6px 10px; color: #93a1b2; }
+  body.locked #favs { opacity: .55; }
   #help { left: 10px; top: 10px; line-height: 1.7; }
   #help b { color: #ffd479; font-weight: 600; }
   #help.hide { display: none; }
@@ -86,13 +105,15 @@
   <b>WASD</b> move &middot; <b>Q</b>/<b>E</b> down/up &middot; <b>shift</b> run<br>
   <b>G</b> or <b>space space</b> toggle fly &middot; <b>space</b>/<b>shift</b> up/down<br>
   <b>ctrl</b> boost (safe once keys are locked) &middot; <b>wheel</b> fly speed &middot; <b>R</b> reset<br>
-  <b>V</b> water &middot; <b>X</b> roads &middot; <b>B</b> built &middot; <b>C</b> cover &middot; <b>F</b> fog &middot; <b>1</b> grid &middot; <b>2</b> freeze &middot; <b>3</b> flat &middot; <b>H</b> hide this
+  <b>V</b> water &middot; <b>X</b> roads &middot; <b>B</b> built &middot; <b>C</b> cover &middot; <b>F</b> fog &middot; <b>1</b> grid &middot; <b>2</b> freeze &middot; <b>3</b> flat &middot; <b>P</b> pin place &middot; <b>L</b> copy strain log &middot; <b>H</b> hide this
 </div>
 
 <div id="ctrl">
   <label for="levels">view</label>
   <input id="levels" type="range" min="2" max="9" step="1" value="9">
 </div>
+
+<div id="favs"></div>
 
 <div id="ui">
   <div id="layers" class="grid"></div>
@@ -119,13 +140,14 @@
   </div>
 </div>
 
+<canvas id="perf"></canvas>
 <div id="hud" class="panel">starting&hellip;</div>
 <div id="attrib" class="panel">Elevation: Mapzen / AWS Open Data Terrain Tiles &middot; Water: &copy; OpenStreetMap contributors, &copy; OpenMapTiles via OpenFreeMap</div>
 <div id="error"></div>
 
 <script>
   window.addEventListener('keydown', function (e) {
-    if (e.code === 'KeyH') document.getElementById('help').classList.toggle('hide');
+    if (e.code === 'KeyH') { document.getElementById('help').classList.toggle('hide'); document.getElementById('perf').classList.toggle('hide'); }
     // Last-resort cursor rescue, works even if the module never loaded.
     if (e.code === 'Escape') {
       document.body.classList.remove('locked');

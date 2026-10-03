@@ -1,6 +1,6 @@
 // All tunables live here.
 
-export const BUILD = '0.7.1';
+export const BUILD = '0.9.0';
 
 // Resolved at runtime to a {z}/{x}/{y} template. Never hardcode the tile URL:
 // the style points at a TileJSON, and that indirection is how the service is
@@ -52,17 +52,33 @@ export const FLY_K = 0.25;
 export const FLY_FLOOR = 300;
 export const FLY_BOOST = 4;
 export const FLY_MULT_MIN = 0.1;
-export const FLY_MULT_MAX = 10;
+export const FLY_MULT_MAX = 50;
+// Wheel also scales walking speed, which makes a 'driving' mode when glued to the ground.
+export const WALK_MULT_MIN = 0.25;
+export const WALK_MULT_MAX = 100;
 export const GROUND_SMOOTH = 12;     // higher = snappier ground following
 export const DOUBLE_TAP_MS = 450;
 export const MOUSE_SENS = 0.0022;
+
+// Near field: real road/building geometry for a 3x3 block of fine map tiles.
+export const NF_Z = 14;              // map tile zoom (deepest the service serves)
+export const NF_WORKERS = 4;
+export const NF_MAX_AGL = 4000;      // real roads draw below this height above ground
+export const NF_MAX_SPEED = 2000;    // ...but only FETCH new tiles below this horizontal speed (m/s)
+// Terrain loading is centred this many seconds ahead along the direction of travel.
+export const LEAD_SECONDS = 3;
 
 export const WORKERS = 3;
 // Each job now makes two fetches (elevation + vector) against two different
 // hosts, so 6 jobs meant only 3 elevation requests in flight and load times
 // roughly doubled. 10 keeps both services comfortable.
 export const MAX_INFLIGHT = 10;
-export const CACHE_TILES = 512;
+export const CACHE_TILES = 800;
+
+// Saved raw downloads (see cache.js). Turn off to always fetch fresh.
+export const CACHE_ON = true;
+export const CACHE_MAX_ENTRIES = 20000;
+export const CACHE_MAX_DAYS = 30;
 
 export const FOV = 68;
 export const NEAR = 0.5;
@@ -70,10 +86,19 @@ export const NEAR = 0.5;
 // Lake Ontario, facing north toward the Prince Edward County shore. Chosen to
 // land you on water, since a lake at 74 m is exactly what an elevation ramp
 // cannot render and the vector overlay can.
+import { startPlace } from './places.js';
+
 const SPAWN = { lat: 43.871722, lon: -77.680430, alt: 2500, yaw: 0, pitch: -8, fly: 1 };
 
 export function readHash() {
-  const c = { ...SPAWN, levels: LEVELS.length };
+  // Start point: the place you starred, else the built-in lake spawn.
+  const sp = startPlace();
+  const c = { ...SPAWN, agl: null, levels: LEVELS.length };
+  if (sp) {
+    c.lat = sp.lat; c.lon = sp.lon; c.yaw = sp.yaw; c.pitch = sp.pitch; c.fly = sp.fly ? 1 : 0;
+    if (sp.agl !== null && sp.agl !== undefined) { c.agl = sp.agl; c.alt = null; }
+    else if (sp.alt !== null && sp.alt !== undefined) c.alt = sp.alt;
+  }
   const h = new URLSearchParams(location.hash.slice(1));
   const num = (k, lo, hi) => {
     if (!h.has(k)) return null;
@@ -82,7 +107,7 @@ export function readHash() {
   };
   const lat = num('lat', -85, 85); if (lat !== null) c.lat = lat;
   const lon = num('lon', -180, 180); if (lon !== null) c.lon = lon;
-  const alt = num('alt', -500, 80000); if (alt !== null) c.alt = alt;
+  const alt = num('alt', -500, 80000); if (alt !== null) { c.alt = alt; c.agl = null; }
   const yaw = num('yaw', -3600, 3600); if (yaw !== null) c.yaw = yaw;
   const pit = num('pitch', -89, 89); if (pit !== null) c.pitch = pit;
   // Deliberately NOT read from the hash: a saved link would otherwise pin an

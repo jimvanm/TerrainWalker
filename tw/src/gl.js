@@ -119,6 +119,7 @@ uniform sampler2D uCover;   // land-cover colour
 uniform vec4  uLayers;      // on/off for water, roads, built-up, land cover
 uniform float uDebug;       // 0 off, 1 tile grid + level tint
 uniform float uLevel;
+uniform vec4  uNearRect;    // camera-relative minX, minZ, maxX, maxZ where real road geometry is drawn
 
 out vec4 frag;
 
@@ -166,7 +167,14 @@ void main() {
   c = mix(c, vec3(0.46, 0.44, 0.42) * lit, smoothstep(0.2, 0.6, built) * 0.8);
 
   float road = m.g * uLayers.y;
-  c = mix(c, vec3(0.80, 0.76, 0.68) * lit, smoothstep(0.25, 0.7, road) * 0.9);
+  // Where real road geometry is drawn the painted road must not also show: it
+  // is a fat halo around the true ribbon. Decided per area, not by distance.
+  vec2 rp = vPos.xz;
+  float inRect = step(uNearRect.x, rp.x) * step(rp.x, uNearRect.z) *
+                 step(uNearRect.y, rp.y) * step(rp.y, uNearRect.w);
+  road *= 1.0 - inRect;
+  // Asphalt grey, close to the real ribbons, so the handover is not a colour jump.
+  c = mix(c, vec3(0.37, 0.37, 0.39) * lit, smoothstep(0.25, 0.7, road) * 0.9);
 
   // Elevation alone can never know this: Lake Superior is at 183 m and would
   // otherwise read as a hillside.
