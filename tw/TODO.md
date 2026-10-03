@@ -64,12 +64,41 @@ always with everything loaded.
       cosmetic — a road rasterised into a 26 m texel is a smear, and the thing
       you are standing on has no edge.
 
+      **A raster mask physically cannot draw a road at zoom 12.** One texel is
+      27.7 m of ground and a road is about 10 m wide, so it is 2.8x too wide
+      before any filtering. Correct road width from a raster needs zoom 14,
+      which is 16x the tiles. No amount of tuning fixes this.
+
       **Suggestion: draw roads as vector geometry in the near field.** The MVT
       linestrings are already decoded and then thrown away after rasterising.
-      Keep them for the finest level or two and extrude them into ribbons draped
-      on the terrain, with real width, casing and a small height offset. The
-      raster mask stays for the middle and far distance, where a texture is the
-      right tool. Same data, two renderers, chosen by distance. This is also the
+      Keep them for the finest level or two, extrude them into ribbons, and let
+      the raster mask carry the middle and far distance where a texture is the
+      right tool. Same data, two renderers, chosen by distance.
+
+      Costs, roughly:
+
+      - **Bandwidth: zero.** The geometry is already downloaded and decoded.
+      - **Geometry:** a ribbon segment is 4 vertices and 2 triangles. ~1,500
+        segments per tile (motorway to tertiary) is about 50k triangles across
+        the finest level; ~6,000 segments (adding residential and service, dense
+        urban) is about 200k. Against 839k already drawn, even the generous case
+        is roughly 20%.
+      - **Draping is free.** The worker already holds the 256x256 height grid,
+        so terrain height can be sampled per road vertex and the ribbon follows
+        the ground exactly.
+      - **CPU:** one-time ribbon generation per tile, in the worker.
+
+      **The trap is depth, and this project has hit it twice already.** Do not
+      offset the ribbon by a fixed height. Use `gl.polygonOffset`, which scales
+      the bias with depth slope; a fixed offset that works underfoot z-fights at
+      a kilometre.
+
+      **Width scaling matters more than it sounds.** Constant world width is
+      physically right but distant roads shrink below a pixel and shimmer out.
+      Constant screen width is what charts do, stays legible, and looks wrong up
+      close. The standard answer is world width with a minimum screen width of
+      about one pixel: correct near you, still visible to the horizon. This is
+      most of why vector roads read well at every distance, and it is also the
       natural path toward sectional-style symbology.
 
 - [ ] **Residual white squares.** Much reduced across 0.6.x and 0.7.x but not
