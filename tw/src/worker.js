@@ -12,7 +12,7 @@
 
 import { tileSizeMerc, tileCentreMerc, tileToMerc } from './geo.js';
 import { decodeMVT, POLYGON, LINESTRING } from './mvt.js';
-import { decodeTerrarium, sample, PX } from './heightgrid.js';
+import { decodeTerrarium, pxMetersFor, sample, PX } from './heightgrid.js';
 import { cachedFetch } from './cache.js';
 
 export { decodeTerrarium };
@@ -221,7 +221,7 @@ async function loadVector(url) {
     ['water', 'waterway', 'landcover', 'landuse', 'transportation']));
 }
 
-async function loadTile(url) {
+async function loadTile(url, z, y) {
   const res = await cachedFetch(url, { mode: 'cors' });
   if (!res.ok) throw new Error('HTTP ' + res.status);
   const blob = await res.blob();
@@ -230,7 +230,7 @@ async function loadTile(url) {
   const ctx = cv.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(bmp, 0, 0, PX, PX);
   bmp.close();
-  return decodeTerrarium(ctx.getImageData(0, 0, PX, PX).data);
+  return decodeTerrarium(ctx.getImageData(0, 0, PX, PX).data, pxMetersFor(z, y));
 }
 
 // Guarded so this module can also be imported by the test harness, where
@@ -241,7 +241,7 @@ self.onmessage = async (ev) => {
   try {
     // Water is optional: a failure here must never cost us the terrain.
     const [heights, ov] = await Promise.all([
-      loadTile(url),
+      loadTile(url, z, y),
       vurl ? loadVector(vurl).catch(() => null) : Promise.resolve(null),
     ]);
     const { positions, indices } = buildMesh(heights, z, grid);

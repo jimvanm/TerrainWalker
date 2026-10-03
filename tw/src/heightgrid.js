@@ -7,12 +7,52 @@
 export const PX = 256;      // terrarium tile size in pixels
 export const GRID = 128;    // quads per edge of the finest terrain mesh level
 
-export function decodeTerrarium(rgba) {
+// Ground metres covered by one pixel of the elevation tile (z, y).
+export function pxMetersFor(z, y) {
+  const n = Math.pow(2, z);
+  const lat = Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 0.5) / n)));
+  return (40075016.68 / n) * Math.cos(lat) / PX;
+}
+
+// pxMeters (optional) turns on spike removal; see despike().
+export function decodeTerrarium(rgba, pxMeters) {
   const h = new Float32Array(PX * PX);
   for (let i = 0, p = 0; i < h.length; i++, p += 4) {
     h[i] = rgba[p] * 256 + rgba[p + 1] + rgba[p + 2] / 256 - 32768;
   }
+  if (pxMeters) despike(h, pxMeters);
   return h;
+}
+
+// The elevation data has stray single points thousands of metres wrong, mostly
+// near coasts. A real summit is broad: its neighbours climb toward it. A spike
+// is narrow: its neighbours sit flat and it alone is far off.
+//
+// A pixel is replaced by its 5x5 median only when BOTH hold:
+//   - it is off that median by more than the steepest sensible rise over a few
+//     pixels (never less than 120 m, and growing with pixel size so coarse
+//     tiles leave mountains alone), and
+//   - it is off by more than 3x the spread of its neighbourhood. A steep real
+//     slope or a cliff has a wide spread, so it is protected.
+// Returns how many pixels were fixed.
+export function despike(h, pxMeters) {
+  const T = Math.max(120, 4 * pxMeters);
+  const win = new Float32Array(25);
+  const at = (x, y) => h[Math.max(0, Math.min(PX - 1, y)) * PX + Math.max(0, Math.min(PX - 1, x))];
+  let fixed = 0;
+  for (let y = 0; y < PX; y++) {
+    for (let x = 0; x < PX; x++) {
+      const v = h[y * PX + x];
+      const avg4 = (at(x - 1, y) + at(x + 1, y) + at(x, y - 1) + at(x, y + 1)) / 4;
+      if (Math.abs(v - avg4) < T) continue;           // the cheap common case
+      let k = 0;
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) win[k++] = at(x + dx, y + dy);
+      win.sort();
+      const med = win[12], iqr = win[18] - win[6], off = Math.abs(v - med);
+      if (off > T && off > 3 * iqr) { h[y * PX + x] = med; fixed++; }
+    }
+  }
+  return fixed;
 }
 
 // Bilinear sample of the 256x256 grid at fractional pixel coordinates.

@@ -7,7 +7,7 @@
 
 import { decodeMVT } from './mvt.js';
 import { tileSizeMerc, tileToMerc, tileCentreMerc, mercYToLat } from './geo.js';
-import { decodeTerrarium, meshNodes, PX } from './heightgrid.js';
+import { decodeTerrarium, meshNodes, pxMetersFor, PX } from './heightgrid.js';
 import { buildRoads } from './roads.js';
 import { MeshBuilder } from './meshbuilder.js';
 import { cachedFetch } from './cache.js';
@@ -17,7 +17,7 @@ const EZ = 12;     // elevation tile that the finest terrain level uses
 
 const cache = new Map();   // elevation url -> Promise<Float32Array nodes>
 
-function elevationNodes(url) {
+function elevationNodes(url, y) {
   let p = cache.get(url);
   if (!p) {
     p = (async () => {
@@ -28,7 +28,7 @@ function elevationNodes(url) {
       const ctx = cv.getContext('2d', { willReadFrequently: true });
       ctx.drawImage(bmp, 0, 0, PX, PX);
       bmp.close();
-      return meshNodes(decodeTerrarium(ctx.getImageData(0, 0, PX, PX).data));
+      return meshNodes(decodeTerrarium(ctx.getImageData(0, 0, PX, PX).data, pxMetersFor(EZ, y)));
     })();
     cache.set(url, p);
     p.catch(() => cache.delete(url));
@@ -47,7 +47,7 @@ async function vectorLayers(url) {
 }
 
 export async function buildNearTile({ x, y, vurl, eurl }) {
-  const [layers, nodes] = await Promise.all([vectorLayers(vurl), elevationNodes(eurl)]);
+  const [layers, nodes] = await Promise.all([vectorLayers(vurl), elevationNodes(eurl, y >> (Z - EZ))]);
   const nw12 = tileToMerc(x >> (Z - EZ), y >> (Z - EZ), EZ);
   const c14 = tileCentreMerc(x, y, Z);
   const g = {
