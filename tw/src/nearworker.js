@@ -11,7 +11,7 @@ import { decodeTerrarium, meshNodes, pxMetersFor, PX } from './heightgrid.js';
 import { buildRoads } from './roads.js';
 import { buildBuildings } from './buildings.js';
 import { SITES } from './landmark_sites.js';
-import { lonToMercX, latToMercY } from './geo.js';
+import { lonToMercX, latToMercY, wrapMercDx } from './geo.js';
 import { signedArea } from './earclip.js';
 import { POLYGON } from './mvt.js';
 import { MeshBuilder } from './meshbuilder.js';
@@ -118,8 +118,8 @@ export async function buildNearTile(spec) {
   const mask = [];
   for (const L of SITES) {
     const r = L.maskR / g.cosLat;
-    const mx = lonToMercX(L.lon) - c.x, my = c.y - latToMercY(L.lat);
-    if (Math.abs(mx) < half + r && Math.abs(my) < half + r) mask.push({ x: mx, y: my, r });
+    const mx = wrapMercDx(lonToMercX(L.lon) - c.x), my = c.y - latToMercY(L.lat);
+    if (Math.abs(mx) < half + r && Math.abs(my) < half + r) mask.push({ id: L.id, x: mx, y: my, r });
   }
   const stats = buildBuildings(layers.building, g, bb, undefined,
     { ...(skyline ? { minHeight: skyMin, sunk: SKY_SUNK } : {}), mask });

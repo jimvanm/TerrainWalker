@@ -1,42 +1,41 @@
-# Landmark towers experiment
+# Landmark tools
 
-Toy-resolution models of famous towers, for Terrain Walker. Nothing here is in the app yet.
+Builds the simplified tower models that the app draws. The method is in
+**PLAYBOOK.md**. Read that first.
 
-## What is finished
-- **Eiffel Tower** and **CN Tower**: shapes measured from detailed reference models Jim supplied, then rebuilt as
-  simple solid models (about 750 triangles each). Sizes anchored to published heights.
-  - `eiffel_profile.json`, `cn_profile.json` hold the measured numbers.
-  - Picture checks: `compare_eiffel.png`, `compare_legs.png`, `compare_cn.png`.
-
-## What is only a rough draft
-- The other eight towers (Berlin, Tallinn, Ostankino, Tokyo, Space Needle, Skylon, Oriental Pearl, Canton).
-  Heights are from published sources. Widths and shapes are estimates, so proportions are probably off.
-  See `out_lineup.png` and the `out_*.png` cards.
+In the app now: CN Tower, Eiffel Tower, Canton Tower (toggle with `T`).
 
 ## Files
-- `mesh.mjs` small mesh builder (units: metres, flat colour per part)
-- `towers.mjs` the ten tower builders. `export.mjs` writes `models.json`.
-- `render.py` picture maker used for the previews (a simple software renderer, not the app's look)
-- `glb.py`, `cn_slices.py`, `fit_eiffel_legs.py`, `compare_*.py`, `sections_eiffel.py` measuring and checking scripts
+Building:
+- `towers.mjs`: tower builders. `cn`, `eiffel` and `canton` are measured and used.
+  The other seven (Berlin, Tallinn, Ostankino, Tokyo, Space Needle, Skylon,
+  Oriental Pearl) are rough drafts from published heights only. Not used.
+- `mesh.mjs`: small mesh builder (metres, flat colour per part).
+- `cn_profile.json`, `eiffel_profile.json`, `canton_profile.json`: measured numbers.
+- `../bake_landmarks.mjs`: writes `src/landmark_models.js` for the app.
+- `export.mjs`: writes `models.json`, used by the shadow scripts.
 
-## How a tower was made from a reference model
-1. Load the model, work out units and which way is up.
-2. Cut through the triangles at many heights (not just the mesh corner points; long triangles hide in between).
-3. Read off outline, leg or wing size, platform levels, pod and mast sizes.
-4. Anchor sizes to published heights and widths where the model disagrees with them.
-5. Rebuild from a few solid shapes. Draw it next to the reference and check.
+Measuring and checking (need the reference models, which are not in the repo):
+- `oval_slices.py`: oval size, stretch and long-axis angle per height; tilted rim high point.
+- `cn_slices.py`, `side_cn.py`, `compare_cn_side.py`: CN Tower measuring.
+- `shadow_cn.py`, `shadow_eiffel.py`, `shadow_canton.py`: the shadow test.
+  These have sandbox paths written in.
 
-## Lessons
-- Slicing by mesh corner points gave a false straight CN Tower shaft. Always cut through the triangles.
-- The Eiffel reference model was about 15% wider than the real tower for its height.
+In the app (`src/`): `landmark_sites.js` (where each tower stands and which way it
+faces), `landmarks.js` (drawing and the K-report), `orient.js` (direction from map
+outlines), `landmark_models.js` (generated), `test_landmarks.mjs`.
+
+## Reference models (supplied by Jim, not in the repo)
+- CN Tower: GLB, CC-BY-4.0 by zayshaa on Sketchfab (credited in the main README).
+- Eiffel Tower: `EiffelTower_fixed.stl`.
+- Canton Tower: `____CantonTower_______.zip` (parts: skeleton and main structure),
+  the main source; `Canton_Tower_-_62cm.zip` (full tower), for the oval and twist.
+
+## Lessons from the first experiment
+- Measuring by mesh corner points gave a false straight CN Tower shaft. Always cut
+  through the triangles.
+- The Eiffel reference was about 15% too wide for its height. Check scale against
+  two published numbers.
 - Guessed widths were badly wrong (the CN pod is about 49 m wide, not 72 m).
-- The sandbox cannot reach Wikidata, OpenStreetMap's data service, Wikimedia Commons or model shops.
-  skyscraperpage.com pages were readable (its diagram pages are blocked by robots rules).
-
-## Not started
-The Wikidata landmark list script, the "how far can you see it" rules, and drawing landmarks in the app.
-
-## Credits
-- CN Tower measurements: Sketchfab model "CN Tower" by zayshaa, CC-BY-4.0
-  (https://sketchfab.com/3d-models/cn-tower-532b6478637c4f6894d9070719a45aaa). Only measurements were used.
-- Eiffel Tower measurements: STL file supplied by Jim (source not recorded).
+- The sandbox cannot reach Wikidata, OpenStreetMap's data service, Wikimedia Commons
+  or model shops. Wikipedia works through the web fetch tool.

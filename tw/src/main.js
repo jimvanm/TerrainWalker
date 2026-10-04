@@ -111,6 +111,8 @@ addEventListener('keydown', (e) => {
     at: { lat: +cam.lat.toFixed(5), lon: +cam.lon.toFixed(5), alt: Math.round(cam.alt) },
     near: nearField.report(cam.mercX, cam.mercY), sky: farField.report(cam.mercX, cam.mercY), skyStatus: farField.status, nearStatus: nearField.status,
     landmarks: landmarks.report(cam.mercX, cam.mercY, mercScale(cam.lat)),
+    landmarkOrientation: landmarks.orientation([nearField, farField].flatMap((nf) =>
+      [...nf.tiles.values()].flatMap((t) => (t.stats && t.stats.outlines) || []))),
   };
   window.twReport = rep;
   console.log(JSON.stringify(rep, null, 1));

@@ -87,6 +87,26 @@ export function touchesCircle(ring, c) {
   return inside;
 }
 
+// Keep the outline of a masked building so orient.js can read its heading. Points
+// become true metres east and north of the landmark. Edges that run along the tile
+// edge are cut by the tile, not by the building, so they are left out.
+function recordOutline(stats, c, ring, g) {
+  const half = g.size14 / 2, k = g.cosLat, eps = 0.01;
+  const pt = (i) => [(ring[2 * i] - c.x) * k, -(ring[2 * i + 1] - c.y) * k];
+  const onEdge = (i) => Math.abs(Math.abs(ring[2 * i]) - half) < eps || Math.abs(Math.abs(ring[2 * i + 1]) - half) < eps;
+  const n = ring.length / 2, edges = [];
+  let area = 0;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n, a = pt(i), b = pt(j);
+    area += a[0] * b[1] - b[0] * a[1];
+    const sameSide = onEdge(i) && onEdge(j) &&
+      (Math.abs(Math.abs(ring[2 * i]) - half) < eps && Math.abs(Math.abs(ring[2 * j]) - half) < eps ||
+       Math.abs(Math.abs(ring[2 * i + 1]) - half) < eps && Math.abs(Math.abs(ring[2 * j + 1]) - half) < eps);
+    if (!sameSide) edges.push(Math.round(a[0] * 10) / 10, Math.round(a[1] * 10) / 10, Math.round(b[0] * 10) / 10, Math.round(b[1] * 10) / 10);
+  }
+  (stats.outlines || (stats.outlines = [])).push({ id: c.id, area: Math.round(Math.abs(area) / 2), edges });
+}
+
 // g = { size14, size12, bx, by, cosLat, nodes }, same as roads.
 // opt.minHeight : skip anything not KNOWN to be at least this tall (skyline mode)
 // opt.mask      : circles { x, y, r } (tile-local) where no building is drawn: landmark sites
@@ -125,7 +145,12 @@ export function buildBuildings(layer, g, mb, maxTris = BUILDING_TRIS, opt = {}) 
         rings.push(m);
       }
       if (!rings.length) continue;
-      if (opt.mask && opt.mask.some((c) => touchesCircle(rings[0], c))) { stats.masked = (stats.masked || 0) + 1; continue; }
+      const hit = opt.mask && opt.mask.find((c) => touchesCircle(rings[0], c));
+      if (hit) {
+        stats.masked = (stats.masked || 0) + 1;
+        recordOutline(stats, hit, rings[0], g);
+        continue;
+      }
       let area = Math.abs(signedArea(rings[0]));
       for (let k = 1; k < rings.length; k++) area -= Math.abs(signedArea(rings[k]));
       area *= g.cosLat * g.cosLat;                   // m2 true

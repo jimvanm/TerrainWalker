@@ -305,18 +305,27 @@ function canton() {
   const S = CT.scale, N = 36;
   const BODY = [212, 216, 222], MAST = [236, 236, 232], COLLAR = [168, 170, 176];
   const rAt = (z) => interp(CT.body, z, 1) * S;
-  const ring = (r) => ringPts(0, 0, r, r, N);
+  // Oval rings: same area as the round ring, stretched along a long axis that turns with height.
+  // Angles are in the file frame (ccw from +x, y north); the model's z is mirrored.
+  const OV = CT.oval.rows;
+  const ovalRing = (r, z) => {
+    const k = interp(OV, z, 1), psi = (interp(OV, z, 2) * Math.PI) / 180;
+    const a = r * Math.sqrt(k), b = r / Math.sqrt(k), c = Math.cos(psi), s = Math.sin(psi);
+    return Array.from({ length: N }, (_, i) => {
+      const t = (2 * Math.PI * i) / N, u = a * Math.cos(t), w = b * Math.sin(t);
+      return [u * c - w * s, -(u * s + w * c)];
+    });
+  };
   // straight-sided hyperboloid from the ground to just under the top ring
-  const flat = CT.body.filter(([z]) => z <= 216).map(([z, r]) => ({ y: z * S, pts: ring(r * S), c: BODY }));
+  const flat = CT.body.filter(([z]) => z <= 216).map(([z, r]) => ({ y: z * S, pts: ovalRing(r * S, z), c: BODY }));
   m.loftPts(flat, { capBottom: true });
   // top ring: every point at its own height (a plane tilted about 13 degrees)
   const T = CT.top, last = flat[flat.length - 1];
   const topPts = [], hs = [];
   for (let k = 0; k < N; k++) {
-    const a = (2 * Math.PI * k) / N, th = -a;                       // file angle: z axis is mirrored
+    const q0 = ovalRing(rAt(T.base), T.base)[k], th = Math.atan2(-q0[1], q0[0]);   // true azimuth of this point
     const h = T.base + T.amp * Math.cos(th - (T.phase_deg * Math.PI) / 180);
-    const r = rAt(h);
-    topPts.push([r * Math.cos(a), r * Math.sin(a)]); hs.push(h * S);
+    topPts.push(ovalRing(rAt(h), h)[k]); hs.push(h * S);
   }
   const A = last.pts.map((p) => m.v(p[0], last.y, p[1], BODY));
   const B = topPts.map((p, k) => m.v(p[0], hs[k], p[1], BODY));

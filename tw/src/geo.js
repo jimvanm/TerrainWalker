@@ -26,6 +26,13 @@ export function mercYToLat(y) {
   return (2 * Math.atan(Math.exp(y / R_MAJOR)) - Math.PI / 2) * R2D;
 }
 
+// Shortest east-west distance between two mercator x positions on a round world.
+// The camera's longitude can run past 180 (flying east keeps counting up), while
+// fixed places such as landmarks sit at their usual longitude.
+export function wrapMercDx(dx) {
+  return dx - EQUATOR * Math.round(dx / EQUATOR);
+}
+
 // Width of one tile at this zoom, in mercator metres (square).
 export function tileSizeMerc(z) {
   return EQUATOR / Math.pow(2, z);
