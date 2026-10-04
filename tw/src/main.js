@@ -8,6 +8,7 @@ import { startCache, cacheUsage } from './cache.js';
 import { initFavourites } from './favourites.js';
 import { NearField } from './nearfield.js';
 import { Landmarks } from './landmarks.js';
+import { LOOK, SETS, lookLabel } from './look.js';
 import {
   NF_MAX_AGL, NF_MAX_SPEED, SKY_RADIUS, LEAD_SECONDS, FLY_MULT_MAX, WALK_MULT_MAX,
   LEVELS, SKIRT, FOV, NEAR, EYE_HEIGHT, BUILD, readHash, writeHash,
@@ -109,6 +110,7 @@ addEventListener('keydown', (e) => {
   if (e.code !== 'KeyK' || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
   const rep = {
     at: { lat: +cam.lat.toFixed(5), lon: +cam.lon.toFixed(5), alt: Math.round(cam.alt) },
+    colours: lookLabel(),
     near: nearField.report(cam.mercX, cam.mercY), sky: farField.report(cam.mercX, cam.mercY), skyStatus: farField.status, nearStatus: nearField.status,
     landmarks: landmarks.report(cam.mercX, cam.mercY, mercScale(cam.lat)),
     landmarkOrientation: landmarks.orientation([nearField, farField].flatMap((nf) =>
@@ -247,6 +249,11 @@ addEventListener('keydown', (e) => { if (e.code === 'KeyF') fogOn = !fogOn;
   if (e.code === 'Digit1') debugMode = debugMode === 1 ? 0 : 1;
   if (e.code === 'Digit2') frozen = !frozen;      // stop all tile updates
   if (e.code === 'Digit3') debugMode = debugMode === 2 ? 0 : 2;
+  // Building colours (look.js). Only uniforms change, so this is instant.
+  if (e.code === 'Digit6') LOOK.real = !LOOK.real;
+  if (e.code === 'Digit7') LOOK.type = !LOOK.type;
+  if (e.code === 'Digit8') LOOK.set = (LOOK.set + 1) % SETS.length;
+  if (e.code === 'Digit9') LOOK.bright = !LOOK.bright;
   for (const L of LAYERS) if (e.code === L.key) L.on = !L.on; });
 let frames = 0, fpsTime = 0, fps = 0, hashTime = 0;
 const hud = document.getElementById('hud');
@@ -454,6 +461,7 @@ function frame(now) {
     [`sky ${farField.status}`, farField.complete],
     [`land ${landmarks.resolved}/${landmarks.items.length}`, landmarks.resolved === landmarks.items.length],
     [`view ${(viewDist / 1000).toFixed(0)} km`],
+    [`colours ${lookLabel()}`],
     [`${fps.toFixed(0)} fps`, fps >= 50],
   ];
   if (cacheMb) parts.push([`cache ${cacheMb.mb.toFixed(0)} MB` + (cacheMb.persistent ? '' : '*')]);

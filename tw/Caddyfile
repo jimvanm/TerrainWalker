@@ -1,0 +1,5 @@
+http://localhost:8080 {
+	root * .
+	file_server
+	header Cache-Control "no-store, max-age=0"
+}

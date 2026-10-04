@@ -1,7 +1,9 @@
 // Turns building outlines into plain extruded boxes with flat roofs.
 //
 // The map data gives an outline and, for some buildings, a height. Everything
-// else is guessed: unknown heights get 6 to 9 m, walls get a muted colour picked
+// else is guessed: unknown heights get 6 to 9 m. The final wall colour is picked
+// in the shader (look.js), from facts stored here: the map's colour if a mapper
+// entered one, a type taken from the land use under the building, and a number
 // from the outline's position (so a street does not look cloned, and the same
 // building gets the same colour every time).
 //
@@ -11,7 +13,8 @@
 
 import { POLYGON } from './mvt.js';
 import { nodeHeightAt, GRID } from './heightgrid.js';
-import { rgba } from './meshbuilder.js';
+import { rgba, info, INFO_BUILDING, INFO_REAL } from './meshbuilder.js';
+import { LANDUSE_TYPE, TALL } from './look.js';
 import { triangulate, signedArea } from './earclip.js';
 
 const PALETTE = [
@@ -24,9 +27,58 @@ export const BUILDING_TRIS = 90000;
 
 const shade = (c, f) => rgba(Math.round(c[0] * f), Math.round(c[1] * f), Math.round(c[2] * f));
 
+// The map's building colour: '#rrggbb' or '#rgb'. Anything else is ignored.
+export function parseColour(v) {
+  if (typeof v !== 'string') return null;
+  let m = /^#?([0-9a-f]{6})$/i.exec(v.trim());
+  if (m) { const n = parseInt(m[1], 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+  m = /^#?([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(v.trim());
+  if (m) return [m[1], m[2], m[3]].map((h) => parseInt(h + h, 16));
+  return null;
+}
+
+// Land use areas that say what kind of building stands on them, ready for
+// point tests. Coordinates stay in the land use layer's own tile units.
+export function landuseAreas(layer) {
+  if (!layer) return [];
+  const out = [];
+  for (const f of layer.features) {
+    const type = LANDUSE_TYPE[f.cls];
+    if (f.type !== POLYGON || !type) continue;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const r of f.parts) for (let i = 0; i < r.length; i += 2) {
+      if (r[i] < x0) x0 = r[i]; if (r[i] > x1) x1 = r[i];
+      if (r[i + 1] < y0) y0 = r[i + 1]; if (r[i + 1] > y1) y1 = r[i + 1];
+    }
+    out.push({ type, parts: f.parts, x0, y0, x1, y1, box: (x1 - x0) * (y1 - y0), E: layer.extent });
+  }
+  // Smallest first, so a school inside a housing area counts as a school.
+  out.sort((a, b) => a.box - b.box);
+  return out;
+}
+
+// Type of the land use under a point (x, y in tile units of extent E). Even-odd
+// over all rings, so holes work.
+export function typeAt(areas, x, y, E) {
+  for (const a of areas) {
+    const px = x * a.E / E, py = y * a.E / E;
+    if (px < a.x0 || px > a.x1 || py < a.y0 || py > a.y1) continue;
+    let inside = false;
+    for (const r of a.parts) {
+      const n = r.length / 2;
+      for (let i = 0, j = n - 1; i < n; j = i++) {
+        const xi = r[2 * i], yi = r[2 * i + 1], xj = r[2 * j], yj = r[2 * j + 1];
+        if ((yi > py) !== (yj > py) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
+      }
+    }
+    if (inside) return a.type;
+  }
+  return 0;
+}
+
 // Sutherland-Hodgman against the tile square. Neighbouring tiles each carry a
 // strip past their edge, so without this a building near a seam is drawn twice.
-function clip(r, E) {
+export function clip(r, E) {
   let pts = r;
   const sides = [
     [(x) => x >= 0, (ax, ay, bx, by) => [0, ay + (by - ay) * (0 - ax) / (bx - ax)]],
@@ -56,7 +108,7 @@ function clip(r, E) {
 // An MVT polygon feature is one flat list of rings. A ring that winds the same
 // way as the first starts a new polygon; the opposite way is a hole in the
 // current one.
-function polygons(parts) {
+export function polygons(parts) {
   const out = [];
   let sign = 0;
   for (const raw of parts) {
@@ -111,12 +163,16 @@ function recordOutline(stats, c, ring, g) {
 // opt.minHeight : skip anything not KNOWN to be at least this tall (skyline mode)
 // opt.mask      : circles { x, y, r } (tile-local) where no building is drawn: landmark sites
 // opt.sunk      : how far walls start below the ground, for coarse far terrain
+// opt.landuse   : the tile's land use layer, used to give buildings a type
 export function buildBuildings(layer, g, mb, maxTris = BUILDING_TRIS, opt = {}) {
   const sunk = opt.sunk === undefined ? SUNK : opt.sunk;
   // hist: how the data labels building heights, as a count per band:
   //   none | up to 5 m | 10 | 25 | 50 | 100 | taller. Tells us how much is guesswork.
-  const stats = { tall: [], kept: 0, dropped: 0, tris: 0, ends: [0, 0, 0], seen: 0, hist: [0, 0, 0, 0, 0, 0, 0] };
+  // real: buildings that carry a map colour. types: kept buildings per type.
+  const stats = { tall: [], kept: 0, dropped: 0, tris: 0, ends: [0, 0, 0], seen: 0, hist: [0, 0, 0, 0, 0, 0, 0],
+                  real: 0, types: [0, 0, 0, 0, 0, 0, 0, 0] };
   if (!layer) return stats;
+  const areas = landuseAreas(opt.landuse);
   const E = layer.extent;
   const hAt = (e, s) => nodeHeightAt(g.nodes, (e + g.bx) / g.size12, (g.by + s) / g.size12);
   const cand = [];
@@ -132,6 +188,7 @@ export function buildBuildings(layer, g, mb, maxTris = BUILDING_TRIS, opt = {}) 
       stats.hist[v === 0 ? 0 : v <= 5 ? 1 : v <= 10 ? 2 : v <= 25 ? 3 : v <= 50 ? 4 : v <= 100 ? 5 : 6]++;
     }
     const minh = Number(p.render_min_height) > 0 ? Number(p.render_min_height) : 0;
+    const colour = parseColour(p.colour);
     for (const poly of polygons(f.parts)) {
       const rings = [];
       for (let k = 0; k < poly.length; k++) {
@@ -164,7 +221,13 @@ export function buildBuildings(layer, g, mb, maxTris = BUILDING_TRIS, opt = {}) 
       // Tier 3 is the skyline, tier 2 the large and tall, tier 1 the rest.
       const tier = height >= 60 ? 3 : (height >= 25 || area >= 2500) ? 2 : 1;
       if (known) stats.tall.push([Math.round(h), Math.round(rings[0][0]), Math.round(rings[0][1]), Math.round(area)]);
-      cand.push({ rings, height, minh, area, hash, tier, sunk, tris: 3 * nv, rank: (height + 3) * Math.sqrt(Math.max(area, 1)) });
+      let type = known && height >= TALL ? 5 : 0;
+      if (!type && areas.length) {
+        const r0 = poly[0]; let sx = 0, sy = 0;
+        for (let i = 0; i < r0.length; i += 2) { sx += r0[i]; sy += r0[i + 1]; }
+        type = typeAt(areas, sx / (r0.length / 2), sy / (r0.length / 2), E);
+      }
+      cand.push({ rings, height, minh, area, hash, tier, sunk, colour, type, tris: 3 * nv, rank: (height + 3) * Math.sqrt(Math.max(area, 1)) });
     }
   }
 
@@ -177,6 +240,8 @@ export function buildBuildings(layer, g, mb, maxTris = BUILDING_TRIS, opt = {}) 
     used += b.tris;
     emit(b, mb, hAt);
     stats.kept++;
+    stats.types[b.type]++;
+    if (b.colour) stats.real++;
     if (b.tier === 3) stats.ends[0] = mb.idx.length;
     if (b.tier >= 2) stats.ends[1] = mb.idx.length;
     stats.ends[2] = mb.idx.length;
@@ -191,8 +256,13 @@ export function buildBuildings(layer, g, mb, maxTris = BUILDING_TRIS, opt = {}) 
 }
 
 function emit(b, mb, hAt) {
+  // The vertex colour is the map colour when there is one (the shader shades
+  // it), else the old baked colour, which is only a fallback.
   const base = PALETTE[b.hash % PALETTE.length];
-  const wallTop = shade(base, 1), wallBot = shade(base, 0.78), roof = shade(base, 0.7);
+  const c0 = b.colour ? rgba(b.colour[0], b.colour[1], b.colour[2]) : null;
+  const wallTop = c0 || shade(base, 1), wallBot = c0 || shade(base, 0.78), roof = c0 || shade(base, 0.7);
+  const fl = INFO_BUILDING | (b.colour ? INFO_REAL : 0), num = b.hash & 255;
+  const iTop = info(b.type, num, 255, fl), iBot = info(b.type, num, 199, fl), iRoof = info(b.type, num, 179, fl);
 
   let gMax = -Infinity;
   const ground = b.rings.map((r) => {
@@ -207,8 +277,8 @@ function emit(b, mb, hAt) {
     const first = mb.verts;
     for (let i = 0; i < m; i++) {
       const bottom = b.minh > 0 ? gs[i] + b.minh : gs[i] - b.sunk;
-      mb.vert(r[2 * i], bottom, r[2 * i + 1], wallBot);
-      mb.vert(r[2 * i], top, r[2 * i + 1], wallTop);
+      mb.vert(r[2 * i], bottom, r[2 * i + 1], wallBot, iBot);
+      mb.vert(r[2 * i], top, r[2 * i + 1], wallTop, iTop);
     }
     for (let i = 0; i < m; i++) {
       const j = (i + 1) % m;
@@ -222,7 +292,7 @@ function emit(b, mb, hAt) {
   const roofBase = mb.verts;
   const ids = [];
   for (const r of b.rings) {
-    for (let i = 0; i < r.length / 2; i++) { ids.push(mb.verts - roofBase); mb.vert(r[2 * i], top, r[2 * i + 1], roof); }
+    for (let i = 0; i < r.length / 2; i++) { ids.push(mb.verts - roofBase); mb.vert(r[2 * i], top, r[2 * i + 1], roof, iRoof); }
   }
   const t = triangulate(b.rings);
   for (let i = 0; i < t.tris.length; i += 3) {

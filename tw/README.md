@@ -48,6 +48,10 @@ whole deployment.
 | `R` | return to the spawn point |
 | `V` `X` `B` `C` | toggle water, roads, built-up, land cover |
 | `T` | toggle landmarks (CN Tower, Eiffel Tower, Canton Tower) |
+| `6` | building colours: real map colours on/off (where a mapper entered one) |
+| `7` | building colours: by type on/off (homes, shops/offices, industry, schools/hospitals, tall, public, military) |
+| `8` | building colours: next colour set (stone, brick, pastel, concrete, mixed) |
+| `9` | building colours: brighter on/off |
 | `F` | fog on/off (off by default) |
 | `H` | hide the help panel |
 

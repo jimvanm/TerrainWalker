@@ -1,5 +1,6 @@
 // Near-field worker. For one fine map tile it fetches the vector data and the
-// elevation tile that contains it, and builds draped road geometry.
+// elevation tile that contains it, and builds draped road, railway and
+// airport geometry, and buildings.
 //
 // Heights come from the SAME terrain mesh function the main terrain uses
 // (heightgrid.js), so geometry sits on the rendered surface rather than on the
@@ -78,8 +79,8 @@ const BUILT_CLASSES = ['residential', 'commercial', 'retail', 'suburb', 'quarter
 // caller can decide whether the finer tiles under it are worth fetching.
 async function markTile({ vurl }) {
   const res = await cachedFetch(vurl, { mode: 'cors' });
-  const none = { vertices: new ArrayBuffer(0), indices: new Uint32Array(0), verts: 0,
-                 bVertices: new ArrayBuffer(0), bIndices: new Uint32Array(0), bVerts: 0,
+  const none = { vertices: new ArrayBuffer(0), indices: new Uint32Array(0), verts: 0, info: new Uint32Array(0),
+                 bVertices: new ArrayBuffer(0), bIndices: new Uint32Array(0), bVerts: 0, bInfo: new Uint32Array(0),
                  rEnds: [0, 0, 0] };
   if (res.status === 404 || res.status === 204) return { ...none, stats: { cover: 0, built: 0, seen: 0, kept: 0, dropped: 0, ends: [0, 0, 0] } };
   if (!res.ok) throw new Error('vector HTTP ' + res.status);
@@ -96,7 +97,7 @@ export async function buildNearTile(spec) {
   const { x, y, z = 14, vurl, eurl, skyline = false, skyMin = 50 } = spec;
   const d = z - EZ;
   const [layers, nodes] = await Promise.all([
-    vectorLayers(vurl, skyline ? ['building'] : ['transportation', 'building']),
+    vectorLayers(vurl, skyline ? ['building', 'landuse'] : ['transportation', 'aeroway', 'building', 'landuse']),
     elevationNodes(eurl, y >> d),
   ]);
   const nw12 = tileToMerc(x >> d, y >> d, EZ);
@@ -110,7 +111,8 @@ export async function buildNearTile(spec) {
     nodes,
   };
   const mb = new MeshBuilder();
-  const rEnds = skyline ? [0, 0, 0] : buildRoads(layers.transportation, g, mb);
+  const counts = {};
+  const rEnds = skyline ? [0, 0, 0] : buildRoads(layers.transportation, g, mb, layers.aeroway, counts);
   const bb = new MeshBuilder();
   // Landmark sites in this tile's local units, so the plain building outline under
   // a landmark is left out. Only sites that can reach into this tile are passed.
@@ -122,10 +124,11 @@ export async function buildNearTile(spec) {
     if (Math.abs(mx) < half + r && Math.abs(my) < half + r) mask.push({ id: L.id, x: mx, y: my, r });
   }
   const stats = buildBuildings(layers.building, g, bb, undefined,
-    { ...(skyline ? { minHeight: skyMin, sunk: SKY_SUNK } : {}), mask });
+    { ...(skyline ? { minHeight: skyMin, sunk: SKY_SUNK } : {}), mask, landuse: layers.landuse });
+  Object.assign(stats, counts);
   const r = mb.finish(), b = bb.finish();
-  return { vertices: r.vertices, indices: r.indices, verts: r.verts,
-           bVertices: b.vertices, bIndices: b.indices, bVerts: b.verts, stats, rEnds };
+  return { vertices: r.vertices, indices: r.indices, verts: r.verts, info: r.info,
+           bVertices: b.vertices, bIndices: b.indices, bVerts: b.verts, bInfo: b.info, stats, rEnds };
 }
 
 if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
@@ -133,9 +136,9 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
     const { id } = ev.data;
     try {
       const r = await buildNearTile(ev.data);
-      self.postMessage({ id, ok: true, vertices: r.vertices, indices: r.indices, verts: r.verts,
-        bVertices: r.bVertices, bIndices: r.bIndices, bVerts: r.bVerts, stats: r.stats, rEnds: r.rEnds },
-        [r.vertices, r.indices.buffer, r.bVertices, r.bIndices.buffer]);
+      self.postMessage({ id, ok: true, vertices: r.vertices, indices: r.indices, verts: r.verts, info: r.info,
+        bVertices: r.bVertices, bIndices: r.bIndices, bVerts: r.bVerts, bInfo: r.bInfo, stats: r.stats, rEnds: r.rEnds },
+        [r.vertices, r.indices.buffer, r.info.buffer, r.bVertices, r.bIndices.buffer, r.bInfo.buffer]);
     } catch (e) {
       self.postMessage({ id, ok: false, error: String(e && e.message || e) });
     }

@@ -10,7 +10,7 @@
 // Positions are stored unscaled and camera-independent, so a moving camera only
 // ever changes uniforms. Vertex buffers are built once and never touched again.
 
-import { tileSizeMerc, tileCentreMerc, tileToMerc } from './geo.js';
+import { tileSizeMerc, tileCentreMerc, tileToMerc, mercYToLat } from './geo.js';
 import { decodeMVT, POLYGON, LINESTRING } from './mvt.js';
 import { decodeTerrarium, pxMetersFor, sample, PX } from './heightgrid.js';
 import { cachedFetch } from './cache.js';
@@ -127,11 +127,12 @@ function path(cx, parts, k, close) {
 }
 
 // Two draped images per tile:
-//   mask  RGBA - R water, G roads, B built-up, A land-cover coverage
+//   mask  RGBA - R water, G roads (also railways and airport pavement), B built-up, A land-cover coverage
 //   cover RGB  - land-cover colour
 // Channels rather than one composited image, so a layer can be switched off
 // with a uniform instead of a refetch and a re-rasterise.
-function rasterOverlays(layers) {
+// mPerPx: true metres per mask pixel, so airport widths come out right.
+function rasterOverlays(layers, mPerPx = 10) {
   const maskCv = new OffscreenCanvas(MASK, MASK);
   const mx = maskCv.getContext('2d', { willReadFrequently: true });
   mx.fillStyle = '#000';
@@ -166,9 +167,29 @@ function rasterOverlays(layers) {
     mx.strokeStyle = '#0f0';
     for (const f of tr.features) {
       if (f.type !== LINESTRING) continue;
+      if (f.props && f.props.brunnel === 'tunnel' && (f.cls === 'rail' || f.cls === 'transit')) continue;
       const major = f.cls === 'motorway' || f.cls === 'trunk' || f.cls === 'primary';
-      if (!major && f.cls !== 'secondary' && f.cls !== 'tertiary') continue;
+      // Railways count like secondary roads; sidings, yards and trams are left
+      // to the near field, as minor roads are.
+      const rail = f.cls === 'rail' && !(f.props && (f.props.service || (f.props.subclass && f.props.subclass !== 'rail')));
+      if (!major && !rail && f.cls !== 'secondary' && f.cls !== 'tertiary') continue;
       mx.lineWidth = major ? 1.4 : 0.7;
+      mx.beginPath(); path(mx, f.parts, k, false); mx.stroke();
+    }
+  }
+  // Airport pavement goes in the road channel too, so runways show from afar.
+  const ae = layers.aeroway;
+  if (ae) {
+    const k = MASK / ae.extent;
+    mx.fillStyle = '#0f0';
+    mx.beginPath();
+    for (const f of ae.features) {
+      if (f.type === POLYGON && (f.cls === 'runway' || f.cls === 'taxiway' || f.cls === 'apron' || f.cls === 'helipad')) path(mx, f.parts, k, true);
+    }
+    mx.fill('nonzero');
+    for (const f of ae.features) {
+      if (f.type !== LINESTRING || (f.cls !== 'runway' && f.cls !== 'taxiway')) continue;
+      mx.lineWidth = Math.max(0.7, (f.cls === 'runway' ? 45 : 20) / mPerPx);
       mx.beginPath(); path(mx, f.parts, k, false); mx.stroke();
     }
   }
@@ -211,14 +232,15 @@ function rasterOverlays(layers) {
   return any ? { mask, cover } : null;
 }
 
-async function loadVector(url) {
+async function loadVector(url, mPerPx) {
   const res = await cachedFetch(url, { mode: 'cors' });
   if (res.status === 404 || res.status === 204) return null;   // no data here
   if (!res.ok) throw new Error('vector HTTP ' + res.status);
   const buf = new Uint8Array(await res.arrayBuffer());
   if (buf.length === 0) return null;
+  // Full properties for transportation only, to tell main railways from sidings and tunnels.
   return rasterOverlays(decodeMVT(buf,
-    ['water', 'waterway', 'landcover', 'landuse', 'transportation']));
+    ['water', 'waterway', 'landcover', 'landuse', 'transportation', 'aeroway'], 'class', ['transportation']), mPerPx);
 }
 
 async function loadTile(url, z, y) {
@@ -242,7 +264,7 @@ self.onmessage = async (ev) => {
     // Water is optional: a failure here must never cost us the terrain.
     const [heights, ov] = await Promise.all([
       loadTile(url, z, y),
-      vurl ? loadVector(vurl).catch(() => null) : Promise.resolve(null),
+      vurl ? loadVector(vurl, tileSizeMerc(z) * Math.cos(mercYToLat(tileCentreMerc(x, y, z).y) * Math.PI / 180) / MASK).catch(() => null) : Promise.resolve(null),
     ]);
     const { positions, indices } = buildMesh(heights, z, grid);
     const centre = tileCentreMerc(x, y, z);

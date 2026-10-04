@@ -119,11 +119,19 @@ function tile(layerName, extent, props, line) {
     const expect = 50 + u * N * 0.5;
     assert.ok(h - expect > 0.1 && h - expect < 0.45, 'lift ' + (h - expect));
   }
-  // Tunnel and rail must add nothing: same output as without them.
+  // A tunnel adds nothing. A railway is drawn as two dark rails (0.12.0).
   const mb2 = new MeshBuilder();
-  buildRoads({ extent: 4096, features: [layer.features[0], layer.features[3]] }, g, mb2);
-  assert.equal(mb2.verts, r.verts, 'tunnel or rail was drawn');
-  ok('ribbons: true width, drape follows slope, tunnels and rail skipped (' + r.verts + ' verts)');
+  buildRoads({ extent: 4096, features: [layer.features[0], layer.features[1], layer.features[3]] }, g, mb2);
+  const mb3 = new MeshBuilder();
+  buildRoads({ extent: 4096, features: [layer.features[2]] }, g, mb3);
+  assert.equal(mb2.verts + mb3.verts, r.verts, 'tunnel was drawn, or rail missing');
+  const rr = mb3.finish(), rf = new Float32Array(rr.vertices), pts = rr.verts / 4;
+  const across = (a, b) => Math.hypot(rf[4 * a] - rf[4 * b], rf[4 * a + 2] - rf[4 * b + 2]) * cosLat;
+  // Strip 1 is the first 2*pts verts, strip 2 the rest. Each rail 1.3 m, outer edges 6 m apart.
+  assert.ok(Math.abs(across(0, 1) - 1.3) < 0.01, 'rail width ' + across(0, 1));
+  assert.ok(Math.abs(across(2 * pts + 1, 2 * pts) - 1.3) < 0.01, 'second rail width');
+  assert.ok(Math.abs(across(0, 2 * pts + 1) - 6) < 0.01, 'track width ' + across(0, 2 * pts + 1));
+  ok('ribbons: true width, drape follows slope, tunnels skipped, rail as two 1.3 m rails 6 m apart (' + r.verts + ' verts)');
 }
 
 // 4. bend keeps width (mitre) and does not spike on a hairpin

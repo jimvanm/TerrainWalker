@@ -6,26 +6,44 @@
 import * as G from './gl.js';
 import { probe } from './perf.js';
 import { mercToTile, tileCentreMerc, tileToMerc, mercYToLat, mercXToLon } from './geo.js';
+import { TYPE_NAMES, lookBits, setUniform, TYPE_UNIFORM } from './look.js';
 import { TILE_URL, NF_Z, NF_WORKERS, SKY_MIN_HEIGHT, SKY_RADIUS, SKY_URBAN, SKY_URBAN_BUILT } from './config.js';
 
 const VS = `#version 300 es
 precision highp float;
 in vec3 aPos;
 in vec4 aCol;
+in vec4 aInfo;          // building facts, see meshbuilder.js; all zero = use aCol
 uniform mat4  uProj;
 uniform mat4  uView;
 uniform vec2  uTileOffset;
 uniform float uScale;
 uniform float uCamAlt;
 uniform float uCurv;
+uniform vec3  uPal[8];   // current colour set (look.js)
+uniform vec3  uType[8];  // colour per building type
+uniform int   uLook;     // 1 real colours, 2 by type, 4 brighter
 out vec3 vPos;
 out vec3 vCol;
+vec3 buildingColour() {
+  int fl = int(aInfo.a * 255.0 + 0.5);
+  int num = int(aInfo.g * 255.0 + 0.5);
+  int type = int(aInfo.r * 255.0 + 0.5);
+  vec3 c = uPal[num % 8];
+  if ((uLook & 2) != 0 && type > 0) c = uType[type] * (0.92 + 0.16 * fract(float(num) * 0.618));
+  if ((uLook & 1) != 0 && (fl & 2) != 0) c = aCol.rgb;
+  if ((uLook & 4) != 0) {
+    float l = dot(c, vec3(0.299, 0.587, 0.114));
+    c = clamp(mix(vec3(l), c, 1.8) * 1.1, 0.0, 1.0);
+  }
+  return c * aInfo.b;
+}
 void main() {
   float x = aPos.x * uScale + uTileOffset.x;
   float z = aPos.z * uScale + uTileOffset.y;
   float y = aPos.y - uCamAlt;
   vPos = vec3(x, y, z);
-  vCol = aCol.rgb;
+  vCol = aInfo.a > 0.0 ? buildingColour() : aCol.rgb;
   float drop = (x * x + z * z) * uCurv;
   gl_Position = uProj * uView * vec4(x, y - drop, z, 1.0);
 }`;
@@ -61,11 +79,12 @@ export class NearField {
     this.maxRing = this.skyline ? SKY_RADIUS + 3 : 14;   // never draw tiles farther than this, in tiles
     this.prog = G.program(gl, VS, FS);
     this.u = {};
-    for (const n of ['uProj', 'uView', 'uTileOffset', 'uScale', 'uCamAlt', 'uCurv', 'uSunDir']) {
+    for (const n of ['uProj', 'uView', 'uTileOffset', 'uScale', 'uCamAlt', 'uCurv', 'uSunDir', 'uPal', 'uType', 'uLook']) {
       this.u[n] = gl.getUniformLocation(this.prog, n);
     }
     this.aPos = gl.getAttribLocation(this.prog, 'aPos');
     this.aCol = gl.getAttribLocation(this.prog, 'aCol');
+    this.aInfo = gl.getAttribLocation(this.prog, 'aInfo');
 
     this.tiles = new Map();      // key -> { vao, vbo, ibo, count, centre, verts }
     this.queue = new Map();      // key -> spec, waiting
@@ -133,13 +152,19 @@ export class NearField {
   // plus a close look at the tiles around a point (cx, cy in mercator metres).
   report(cmx, cmy) {
     const hist = [0, 0, 0, 0, 0, 0, 0];
-    let seen = 0, kept = 0, tiles = 0;
+    const types = [0, 0, 0, 0, 0, 0, 0, 0];
+    let seen = 0, kept = 0, tiles = 0, real = 0, rail = 0, aeroAreas = 0, aeroLines = 0;
     for (const t of this.tiles.values()) {
       if (!t.stats || !t.stats.hist) continue;
       tiles++; seen += t.stats.seen; kept += t.stats.kept;
       for (let i = 0; i < 7; i++) hist[i] += t.stats.hist[i];
+      real += t.stats.real || 0;
+      if (t.stats.types) for (let i = 0; i < 8; i++) types[i] += t.stats.types[i];
+      rail += t.stats.rail || 0; aeroAreas += t.stats.aeroAreas || 0; aeroLines += t.stats.aeroLines || 0;
     }
     const out = { tiles, buildingsSeen: seen, buildingsKept: kept,
+             withMapColour: real, byType: Object.fromEntries(TYPE_NAMES.map((n, i) => [n, types[i]])),
+             railLines: rail, airportAreas: aeroAreas, airportLines: aeroLines,
              heightBands: { none: hist[0], upTo5: hist[1], upTo10: hist[2], upTo25: hist[3], upTo50: hist[4], upTo100: hist[5], over100: hist[6] } };
     if (cmx !== undefined) {
       const reach = 6000 / 0.73;                       // about 6 km on the ground, in mercator metres
@@ -397,9 +422,9 @@ export class NearField {
     probe.nearTiles++;
   }
 
-  _buffers(vertices, indices) {
+  _buffers(vertices, indices, info) {
     const gl = this.gl;
-    const b = { count: indices.length, vao: null, vbo: null, ibo: null };
+    const b = { count: indices.length, vao: null, vbo: null, ibo: null, ivbo: null };
     if (!b.count) return b;
     b.vao = gl.createVertexArray();
     b.vbo = gl.createBuffer();
@@ -411,6 +436,15 @@ export class NearField {
     gl.vertexAttribPointer(this.aPos, 3, gl.FLOAT, false, 16, 0);
     gl.enableVertexAttribArray(this.aCol);
     gl.vertexAttribPointer(this.aCol, 4, gl.UNSIGNED_BYTE, true, 16, 12);
+    if (this.aInfo >= 0) {
+      if (info && info.length) {
+        b.ivbo = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, b.ivbo);
+        gl.bufferData(gl.ARRAY_BUFFER, info, gl.STATIC_DRAW);
+        gl.enableVertexAttribArray(this.aInfo);
+        gl.vertexAttribPointer(this.aInfo, 4, gl.UNSIGNED_BYTE, true, 4, 0);
+      } else gl.disableVertexAttribArray(this.aInfo);   // reads the constant set in draw(): zero
+    }
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, b.ibo);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
     gl.bindVertexArray(null);
@@ -418,8 +452,8 @@ export class NearField {
   }
 
   _uploadInner(spec, msg) {
-    const roads = this._buffers(msg.vertices, msg.indices);
-    const bld = msg.bIndices ? this._buffers(msg.bVertices, msg.bIndices) : { count: 0, vao: null };
+    const roads = this._buffers(msg.vertices, msg.indices, null);   // roads need no info
+    const bld = msg.bIndices ? this._buffers(msg.bVertices, msg.bIndices, msg.bInfo) : { count: 0, vao: null };
     this.tiles.set(spec.key, {
       key: spec.key, rawX: spec.rawX, y: spec.y,
       z: spec.z || this.Z,
@@ -435,7 +469,7 @@ export class NearField {
   _free(t) {
     const gl = this.gl;
     for (const b of [t.roads, t.bld]) {
-      if (b && b.vao) { gl.deleteVertexArray(b.vao); gl.deleteBuffer(b.vbo); gl.deleteBuffer(b.ibo); }
+      if (b && b.vao) { gl.deleteVertexArray(b.vao); gl.deleteBuffer(b.vbo); gl.deleteBuffer(b.ibo); if (b.ivbo) gl.deleteBuffer(b.ivbo); }
     }
   }
 
@@ -462,6 +496,10 @@ export class NearField {
     gl.uniform1f(u.uCamAlt, camAlt);
     gl.uniform1f(u.uCurv, curv);
     gl.uniform3f(u.uSunDir, 0.40, 0.82, 0.41);
+    gl.uniform3fv(u.uPal, setUniform());
+    gl.uniform3fv(u.uType, TYPE_UNIFORM);
+    gl.uniform1i(u.uLook, lookBits());
+    if (this.aInfo >= 0) gl.vertexAttrib4f(this.aInfo, 0, 0, 0, 0);
     // Draw everything that is already in memory, not just what is wanted right
     // now. Drawing only the wanted set made far buildings appear while moving
     // (look-ahead tiles were wanted) and vanish the moment you slowed down.
