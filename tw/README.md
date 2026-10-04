@@ -3,8 +3,8 @@
 Walk or fly across the real surface of the Earth, in a browser, with no install
 and no account. Elevation is streamed from open data as you move.
 
-No dependencies. No build step. No package manager. Roughly 1,000 lines of
-plain ES modules and one WebGL2 shader pair.
+No dependencies. No build step. No package manager. About 5,000 lines of
+plain ES modules, run straight from the folder.
 
 ## Run it
 
@@ -187,11 +187,14 @@ human are all tracked there rather than in anyone memory.
 ## Tests
 
 ```
-node test/behaviour.mjs   # movement, ground clamping, flight, height sampling
-node test/coverage.mjs    # depth pass coverage across latitudes and settings
-node test/rings.mjs       # exact tiling, including mid-load substitution
-node test/smoke.mjs       # whole app against a mocked WebGL2 context
+node test/run.mjs          # every test, with a pass/fail summary
+node test/run.mjs near     # only tests whose file name contains "near"
+node test/smoke.mjs        # or run any one test directly
 ```
+
+Every test lives in `test/`. Each runs in its own process, because each fakes a
+different part of the browser. `smoke.mjs` runs the whole app against a fake
+WebGL2 context and fake page, and catches wiring mistakes.
 
 No test framework, no dependencies. There is also a proof that the clipmap tiles
 exactly, checked against 150,000 sampled points.
