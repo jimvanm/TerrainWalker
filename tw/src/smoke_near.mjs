@@ -20,21 +20,24 @@ const tick = (fetchOk, R) => {
   nf.update(mx, my, true, fetchOk, R);
 };
 nf.update(mx, my, true, true, 2);
-assert.equal(nf.want.length, 25);
+assert.ok(nf.want.length >= 25 && nf.want.length <= 36, 'block covers 5x5, stretched to whole z13 tiles: ' + nf.want.length);
 assert.equal(nf.rect, null, 'no cover before anything loaded');
 for (let i = 0; i < 40; i++) tick(true, 2);
 assert.ok(nf.rect && nf.ready, 'cover after load');
 const t = mercToTile(mx, my, 14), cx = Math.floor(t.x), cy = Math.floor(t.y);
-const ex = tileToMerc(cx - 2, cy - 2, 14), ey = tileToMerc(cx + 3, cy + 3, 14);
-assert.ok(Math.abs(nf.rect.w - ex.x) < 1e-6 && Math.abs(nf.rect.e - ey.x) < 1e-6, 'rect spans 5x5');
-console.log('ok  5x5 loads and covered block spans all 25 tiles');
+const ex = tileToMerc(cx - 1, cy - 1, 14), ey = tileToMerc(cx + 2, cy + 2, 14);
+assert.ok(Math.abs(nf.rect.w - ex.x) < 1e-6 && Math.abs(nf.rect.e - ey.x) < 1e-6, 'rect spans the 3x3 full-detail block');
+console.log('ok  5x5 loads; the painted-road cover is the 3x3 full-detail block');
 
 // fetch gating: fast flight asks for nothing new but keeps drawing what it has
 const posted0 = posted.length;
 nf.update(mx + 20000, my, true, false, 2);          // moved ~10 tiles, fetch not allowed
 assert.equal(posted.length, posted0, 'no fetch when too fast');
 assert.equal(nf.queue.size, 0);
-assert.equal(nf.draw({}, new Float32Array(16), new Float32Array(16), 0.7, 0, mx + 20000, my, 0, true), 0);
+nf.update(mx + 60000, my, true, false, 2);          // ~25 tiles away: past the draw limit
+assert.equal(nf.draw({}, new Float32Array(16), new Float32Array(16), 0.7, 0, mx + 60000, my, 0, true), 0, 'tiles beyond the draw limit are not drawn');
+nf.update(mx + 20000, my, true, false, 2);
+assert.ok(nf.draw({}, new Float32Array(16), new Float32Array(16), 0.7, 0, mx + 20000, my, 0, true) > 0, 'tiles already in memory stay drawn after the camera moves on');
 nf.update(mx, my, true, false, 2);
 assert.ok(nf.draw({}, new Float32Array(16), new Float32Array(16), 0.7, 0, mx, my, 0, true) > 0, 'cached tiles still draw at speed');
 console.log('ok  fast flight fetches nothing but still draws cached tiles');

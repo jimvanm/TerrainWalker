@@ -9,10 +9,13 @@ import { decodeMVT } from './mvt.js';
 import { tileSizeMerc, tileToMerc, tileCentreMerc, mercYToLat } from './geo.js';
 import { decodeTerrarium, meshNodes, pxMetersFor, PX } from './heightgrid.js';
 import { buildRoads } from './roads.js';
+import { buildBuildings } from './buildings.js';
+import { signedArea } from './earclip.js';
+import { POLYGON } from './mvt.js';
 import { MeshBuilder } from './meshbuilder.js';
 import { cachedFetch } from './cache.js';
 
-const Z = 14;      // near-field map tile zoom
+const SKY_SUNK = 6;   // far terrain is coarse, so skyline walls start deeper
 const EZ = 12;     // elevation tile that the finest terrain level uses
 
 const cache = new Map();   // elevation url -> Promise<Float32Array nodes>
@@ -37,30 +40,81 @@ function elevationNodes(url, y) {
   return p;
 }
 
-async function vectorLayers(url) {
+async function vectorLayers(url, want) {
   const res = await cachedFetch(url, { mode: 'cors' });
   if (res.status === 404 || res.status === 204) return {};
   if (!res.ok) throw new Error('vector HTTP ' + res.status);
   const buf = new Uint8Array(await res.arrayBuffer());
   if (!buf.length) return {};
-  return decodeMVT(buf, ['transportation'], 'class', ['transportation']);
+  return decodeMVT(buf, want, 'class', want);
 }
 
-export async function buildNearTile({ x, y, vurl, eurl }) {
-  const [layers, nodes] = await Promise.all([vectorLayers(vurl), elevationNodes(eurl, y >> (Z - EZ))]);
-  const nw12 = tileToMerc(x >> (Z - EZ), y >> (Z - EZ), EZ);
-  const c14 = tileCentreMerc(x, y, Z);
+// z is the map tile zoom (14 for the near field, 13 for the far skyline).
+// skyline: buildings only, and only ones known to be at least skyMin metres tall.
+// Fraction of a tile covered by the polygons of a layer (optionally only some classes).
+function coverOf(layer, classes) {
+  if (!layer) return 0;
+  const E = layer.extent;
+  let total = 0;
+  for (const f of layer.features) {
+    if (f.type !== POLYGON || (classes && !classes.includes(f.cls))) continue;
+    let sign = 0, net = 0;
+    for (const raw of f.parts) {
+      const r = raw.slice(0, raw.length - 2);
+      if (r.length < 6) continue;
+      const a = signedArea(r);
+      if (!sign) sign = Math.sign(a) || 1;
+      net += a * sign;
+    }
+    total += net;
+  }
+  return Math.min(1, Math.max(0, total / (E * E)));
+}
+const BUILT_CLASSES = ['residential', 'commercial', 'retail', 'suburb', 'quarter', 'neighbourhood'];
+
+// marker: do not build anything. Just report how built-up the tile is, so the
+// caller can decide whether the finer tiles under it are worth fetching.
+async function markTile({ vurl }) {
+  const res = await cachedFetch(vurl, { mode: 'cors' });
+  const none = { vertices: new ArrayBuffer(0), indices: new Uint32Array(0), verts: 0,
+                 bVertices: new ArrayBuffer(0), bIndices: new Uint32Array(0), bVerts: 0,
+                 rEnds: [0, 0, 0] };
+  if (res.status === 404 || res.status === 204) return { ...none, stats: { cover: 0, built: 0, seen: 0, kept: 0, dropped: 0, ends: [0, 0, 0] } };
+  if (!res.ok) throw new Error('vector HTTP ' + res.status);
+  const buf = new Uint8Array(await res.arrayBuffer());
+  const L = buf.length ? decodeMVT(buf, ['building', 'landuse']) : {};
+  return { ...none, stats: {
+    cover: coverOf(L.building), built: coverOf(L.landuse, BUILT_CLASSES),
+    seen: L.building ? L.building.features.length : 0, kept: 0, dropped: 0, ends: [0, 0, 0],
+  } };
+}
+
+export async function buildNearTile(spec) {
+  if (spec.marker) return markTile(spec);
+  const { x, y, z = 14, vurl, eurl, skyline = false, skyMin = 50 } = spec;
+  const d = z - EZ;
+  const [layers, nodes] = await Promise.all([
+    vectorLayers(vurl, skyline ? ['building'] : ['transportation', 'building']),
+    elevationNodes(eurl, y >> d),
+  ]);
+  const nw12 = tileToMerc(x >> d, y >> d, EZ);
+  const c = tileCentreMerc(x, y, z);
   const g = {
-    size14: tileSizeMerc(Z),
+    size14: tileSizeMerc(z),          // this tile's size (the name dates from when it was always z14)
     size12: tileSizeMerc(EZ),
-    bx: c14.x - nw12.x,
-    by: nw12.y - c14.y,
-    cosLat: Math.cos(mercYToLat(c14.y) * Math.PI / 180),
+    bx: c.x - nw12.x,
+    by: nw12.y - c.y,
+    cosLat: Math.cos(mercYToLat(c.y) * Math.PI / 180),
     nodes,
   };
   const mb = new MeshBuilder();
-  buildRoads(layers.transportation, g, mb);
-  return mb.finish();
+  const rEnds = skyline ? [0, 0, 0] : buildRoads(layers.transportation, g, mb);
+  const bb = new MeshBuilder();
+  const stats = buildBuildings(layers.building, g, bb, undefined,
+    skyline ? { minHeight: skyMin, sunk: SKY_SUNK } : {});
+  const r = mb.finish(), b = bb.finish();
+  return { vertices: r.vertices, indices: r.indices, verts: r.verts,
+           bVertices: b.vertices, bIndices: b.indices, bVerts: b.verts, stats, rEnds };
 }
 
 if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
@@ -68,8 +122,9 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
     const { id } = ev.data;
     try {
       const r = await buildNearTile(ev.data);
-      self.postMessage({ id, ok: true, vertices: r.vertices, indices: r.indices, verts: r.verts },
-        [r.vertices, r.indices.buffer]);
+      self.postMessage({ id, ok: true, vertices: r.vertices, indices: r.indices, verts: r.verts,
+        bVertices: r.bVertices, bIndices: r.bIndices, bVerts: r.bVerts, stats: r.stats, rEnds: r.rEnds },
+        [r.vertices, r.indices.buffer, r.bVertices, r.bIndices.buffer]);
     } catch (e) {
       self.postMessage({ id, ok: false, error: String(e && e.message || e) });
     }

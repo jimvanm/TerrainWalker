@@ -1,6 +1,6 @@
 // All tunables live here.
 
-export const BUILD = '0.9.1';
+export const BUILD = '0.10.9';
 
 // Resolved at runtime to a {z}/{x}/{y} template. Never hardcode the tile URL:
 // the style points at a TileJSON, and that indirection is how the service is
@@ -67,6 +67,16 @@ export const NF_MAX_AGL = 4000;      // real roads draw below this height above 
 export const NF_MAX_SPEED = 2000;    // ...but only FETCH new tiles below this horizontal speed (m/s)
 // Terrain loading is centred this many seconds ahead along the direction of travel.
 export const LEAD_SECONDS = 3;
+
+// Far skyline: zoom-13 tiles out to this many tiles (about 3.5 km each) from the
+// camera, buildings only, and only ones known to be at least this tall (metres).
+export const SKY_RADIUS = 7;
+export const SKY_MIN_HEIGHT = 50;
+// A zoom-13 tile is "built-up" enough to be worth fetching the finer tiles under
+// it when buildings cover this fraction of it (or, if the tile lists no
+// buildings at all, when built-up land use covers SKY_URBAN_BUILT of it).
+export const SKY_URBAN = 0.10;
+export const SKY_URBAN_BUILT = 0.25;
 
 export const WORKERS = 3;
 // Each job now makes two fetches (elevation + vector) against two different

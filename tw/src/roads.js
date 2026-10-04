@@ -31,16 +31,23 @@ const LIFT_STEP = 0.02;
 //   bx, by : offset from the near tile centre to the elevation tile NW corner,
 //            in mercator metres, so local (east, south) maps to tile (u, v).
 export function buildRoads(layer, g, mb) {
-  if (!layer) return;
+  if (!layer) return [0, 0, 0];
   const ext = layer.extent;
   const step = g.size12 / GRID / 3;       // a third of a terrain cell
   const hAt = (e, s) =>
     nodeHeightAt(g.nodes, (e + g.bx) / g.size12, (g.by + s) / g.size12);
 
+  // Emitted in three passes, biggest roads first, so the index buffer reads
+  // motorways and trunks, then primary and secondary, then everything else.
+  // Drawing only the first part of it is how far-away tiles show major roads
+  // alone. Returns where each pass ends, in indices.
+  const passes = [(rank) => rank >= 5, (rank) => rank >= 3 && rank < 5, (rank) => rank < 3];
+  const ends = [];
+  for (const keep of passes) {
   for (const f of layer.features) {
     if (f.type !== LINESTRING) continue;
     const st = ROAD_STYLE[f.cls];
-    if (!st) continue;
+    if (!st || !keep(st.r)) continue;
     const p = f.props || {};
     if (p.brunnel === 'tunnel') continue;
     const oneway = p.oneway === 1 || p.oneway === -1 || p.oneway === true;
@@ -106,4 +113,7 @@ export function buildRoads(layer, g, mb) {
       }
     }
   }
+  ends.push(mb.idx.length);
+  }
+  return ends;
 }

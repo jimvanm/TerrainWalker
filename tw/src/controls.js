@@ -116,7 +116,7 @@ export class Controls {
 
   get walkCruise() { return WALK_SPEED * this.walkMult; }
 
-  update(dt, ground) {
+  update(dt, ground, groundAt) {
     const c = this.cam;
     const k = this.keys;
     const agl = ground === null ? c.alt : c.alt - ground;
@@ -155,7 +155,12 @@ export class Controls {
     if (c.fly) {
       c.alt += dy;
       this.grounded = false;
-      if (ground !== null && c.alt < ground + 1.0) { c.alt = ground + 1.0; }
+      // Judge the floor at the NEW position too. The ground height passed in was
+      // measured before this frame's move, and a fast, low flight can cover
+      // several metres of hillside in one frame.
+      let gnd = ground;
+      if (groundAt) { const g2 = groundAt(c.mercX, c.mercY); if (g2 !== null && (gnd === null || g2 > gnd)) gnd = g2; }
+      if (gnd !== null && c.alt < gnd + 1.5) { c.alt = gnd + 1.5; }
     } else if (ground !== null) {
       // Ground clamping with a time-constant smoothing so stepping between
       // height samples does not jolt the camera. No gravity: walk at a cliff

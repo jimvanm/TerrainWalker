@@ -1,0 +1,188 @@
+// Turns building outlines into plain extruded boxes with flat roofs.
+//
+// The map data gives an outline and, for some buildings, a height. Everything
+// else is guessed: unknown heights get 6 to 9 m, walls get a muted colour picked
+// from the outline's position (so a street does not look cloned, and the same
+// building gets the same colour every time).
+//
+// A budget keeps one dense tile from swamping the others: buildings are ranked
+// by size and height, and the least important are dropped when the tile runs
+// out of triangles.
+
+import { POLYGON } from './mvt.js';
+import { nodeHeightAt, GRID } from './heightgrid.js';
+import { rgba } from './meshbuilder.js';
+import { triangulate, signedArea } from './earclip.js';
+
+const PALETTE = [
+  [214, 208, 196], [204, 198, 190], [222, 216, 206], [196, 192, 188],
+  [210, 200, 184], [190, 196, 200], [226, 222, 214], [200, 190, 178],
+];
+const SUNK = 0.5;          // walls start this far below the ground, so slopes never show a gap
+const MIN_AREA = 12;       // m2: smaller than this is a shed, unless it is tall
+export const BUILDING_TRIS = 90000;
+
+const shade = (c, f) => rgba(Math.round(c[0] * f), Math.round(c[1] * f), Math.round(c[2] * f));
+
+// Sutherland-Hodgman against the tile square. Neighbouring tiles each carry a
+// strip past their edge, so without this a building near a seam is drawn twice.
+function clip(r, E) {
+  let pts = r;
+  const sides = [
+    [(x) => x >= 0, (ax, ay, bx, by) => [0, ay + (by - ay) * (0 - ax) / (bx - ax)]],
+    [(x) => x <= E, (ax, ay, bx, by) => [E, ay + (by - ay) * (E - ax) / (bx - ax)]],
+  ];
+  for (let pass = 0; pass < 2; pass++) {            // pass 0 clips x, pass 1 clips y
+    for (const [inside, cut] of sides) {
+      if (pts.length < 6) return [];
+      const out = [];
+      const n = pts.length / 2;
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n;
+        let ax = pts[2 * i], ay = pts[2 * i + 1], bx = pts[2 * j], by = pts[2 * j + 1];
+        if (pass === 1) { [ax, ay, bx, by] = [ay, ax, by, bx]; }   // work in swapped axes
+        const ia = inside(ax), ib = inside(bx);
+        const push = (u, v) => { if (pass === 1) out.push(v, u); else out.push(u, v); };
+        if (ia && ib) push(bx, by);
+        else if (ia && !ib) { const [cx, cy] = cut(ax, ay, bx, by); push(cx, cy); }
+        else if (!ia && ib) { const [cx, cy] = cut(ax, ay, bx, by); push(cx, cy); push(bx, by); }
+      }
+      pts = out;
+    }
+  }
+  return pts.length >= 6 ? pts : [];
+}
+
+// An MVT polygon feature is one flat list of rings. A ring that winds the same
+// way as the first starts a new polygon; the opposite way is a hole in the
+// current one.
+function polygons(parts) {
+  const out = [];
+  let sign = 0;
+  for (const raw of parts) {
+    const r = raw.slice(0, raw.length - 2);          // drop the closing repeat
+    if (r.length < 6) continue;
+    const a = signedArea(r);
+    if (a === 0) continue;
+    if (!sign) sign = Math.sign(a);
+    if (Math.sign(a) === sign || !out.length) out.push([r]);
+    else out[out.length - 1].push(r);
+  }
+  return out;
+}
+
+// g = { size14, size12, bx, by, cosLat, nodes }, same as roads.
+// opt.minHeight : skip anything not KNOWN to be at least this tall (skyline mode)
+// opt.sunk      : how far walls start below the ground, for coarse far terrain
+export function buildBuildings(layer, g, mb, maxTris = BUILDING_TRIS, opt = {}) {
+  const sunk = opt.sunk === undefined ? SUNK : opt.sunk;
+  // hist: how the data labels building heights, as a count per band:
+  //   none | up to 5 m | 10 | 25 | 50 | 100 | taller. Tells us how much is guesswork.
+  const stats = { tall: [], kept: 0, dropped: 0, tris: 0, ends: [0, 0, 0], seen: 0, hist: [0, 0, 0, 0, 0, 0, 0] };
+  if (!layer) return stats;
+  const E = layer.extent;
+  const hAt = (e, s) => nodeHeightAt(g.nodes, (e + g.bx) / g.size12, (g.by + s) / g.size12);
+  const cand = [];
+
+  for (const f of layer.features) {
+    if (f.type !== POLYGON) continue;
+    const p = f.props || {};
+    if (p.hide_3d === true) continue;                // an outline whose parts are drawn separately
+    let h = Number(p.render_height);
+    {
+      stats.seen++;
+      const v = h > 0 ? h : 0;
+      stats.hist[v === 0 ? 0 : v <= 5 ? 1 : v <= 10 ? 2 : v <= 25 ? 3 : v <= 50 ? 4 : v <= 100 ? 5 : 6]++;
+    }
+    const minh = Number(p.render_min_height) > 0 ? Number(p.render_min_height) : 0;
+    for (const poly of polygons(f.parts)) {
+      const rings = [];
+      for (let k = 0; k < poly.length; k++) {
+        const c = clip(poly[k], E);
+        if (c.length < 6) { if (k === 0) { rings.length = 0; break; } continue; }
+        const m = new Float64Array(c.length);
+        for (let i = 0; i < c.length; i += 2) {
+          m[i] = (c[i] / E - 0.5) * g.size14;
+          m[i + 1] = (c[i + 1] / E - 0.5) * g.size14;
+        }
+        rings.push(m);
+      }
+      if (!rings.length) continue;
+      let area = Math.abs(signedArea(rings[0]));
+      for (let k = 1; k < rings.length; k++) area -= Math.abs(signedArea(rings[k]));
+      area *= g.cosLat * g.cosLat;                   // m2 true
+      const hash = (((Math.round(poly[0][0]) * 73856093) ^ (Math.round(poly[0][1]) * 19349663)) >>> 0);
+      const known = h > 3;
+      const height = known ? h : 6 + (hash % 4);
+      if (opt.minHeight && !(known && height >= opt.minHeight)) continue;
+      if (area < MIN_AREA && height < 20) continue;
+      let nv = 0;
+      for (const r of rings) nv += r.length / 2;
+      // Tier 3 is the skyline, tier 2 the large and tall, tier 1 the rest.
+      const tier = height >= 60 ? 3 : (height >= 25 || area >= 2500) ? 2 : 1;
+      if (known) stats.tall.push([Math.round(h), Math.round(rings[0][0]), Math.round(rings[0][1]), Math.round(area)]);
+      cand.push({ rings, height, minh, area, hash, tier, sunk, tris: 3 * nv, rank: (height + 3) * Math.sqrt(Math.max(area, 1)) });
+    }
+  }
+
+  // Skyline first, then large, then the rest; the most important first within
+  // each. The budget drops from the end, and distant tiles draw only the start.
+  cand.sort((a, b) => (b.tier - a.tier) || (b.rank - a.rank));
+  let used = 0;
+  for (const b of cand) {
+    if (used + b.tris > maxTris) { stats.dropped++; continue; }
+    used += b.tris;
+    emit(b, mb, hAt);
+    stats.kept++;
+    if (b.tier === 3) stats.ends[0] = mb.idx.length;
+    if (b.tier >= 2) stats.ends[1] = mb.idx.length;
+    stats.ends[2] = mb.idx.length;
+  }
+  // A tier with nothing in it still ends where the one above it does.
+  if (!stats.ends[1]) stats.ends[1] = stats.ends[0];
+  if (!stats.ends[2]) stats.ends[2] = stats.ends[1];
+  stats.tall.sort((a, b) => b[0] - a[0]);
+  stats.tall.length = Math.min(stats.tall.length, 5);
+  stats.tris = used;
+  return stats;
+}
+
+function emit(b, mb, hAt) {
+  const base = PALETTE[b.hash % PALETTE.length];
+  const wallTop = shade(base, 1), wallBot = shade(base, 0.78), roof = shade(base, 0.7);
+
+  let gMax = -Infinity;
+  const ground = b.rings.map((r) => {
+    const gs = new Float64Array(r.length / 2);
+    for (let i = 0; i < gs.length; i++) { gs[i] = hAt(r[2 * i], r[2 * i + 1]); if (gs[i] > gMax) gMax = gs[i]; }
+    return gs;
+  });
+  const top = gMax + b.height;
+
+  for (let k = 0; k < b.rings.length; k++) {
+    const r = b.rings[k], gs = ground[k], m = gs.length;
+    const first = mb.verts;
+    for (let i = 0; i < m; i++) {
+      const bottom = b.minh > 0 ? gs[i] + b.minh : gs[i] - b.sunk;
+      mb.vert(r[2 * i], bottom, r[2 * i + 1], wallBot);
+      mb.vert(r[2 * i], top, r[2 * i + 1], wallTop);
+    }
+    for (let i = 0; i < m; i++) {
+      const j = (i + 1) % m;
+      const a = first + 2 * i, c = first + 2 * j;        // bottoms; tops are +1
+      mb.tri(a, c, a + 1);
+      mb.tri(c, c + 1, a + 1);
+    }
+  }
+
+  // Roof: own vertices so it can be a different colour from the wall tops.
+  const roofBase = mb.verts;
+  const ids = [];
+  for (const r of b.rings) {
+    for (let i = 0; i < r.length / 2; i++) { ids.push(mb.verts - roofBase); mb.vert(r[2 * i], top, r[2 * i + 1], roof); }
+  }
+  const t = triangulate(b.rings);
+  for (let i = 0; i < t.tris.length; i += 3) {
+    mb.tri(roofBase + t.src[t.tris[i]], roofBase + t.src[t.tris[i + 1]], roofBase + t.src[t.tris[i + 2]]);
+  }
+}

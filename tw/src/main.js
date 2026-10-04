@@ -8,7 +8,7 @@ import { startCache, cacheUsage } from './cache.js';
 import { initFavourites } from './favourites.js';
 import { NearField } from './nearfield.js';
 import {
-  NF_MAX_AGL, NF_MAX_SPEED, LEAD_SECONDS, FLY_MULT_MAX, WALK_MULT_MAX,
+  NF_MAX_AGL, NF_MAX_SPEED, SKY_RADIUS, LEAD_SECONDS, FLY_MULT_MAX, WALK_MULT_MAX,
   LEVELS, SKIRT, FOV, NEAR, EYE_HEIGHT, BUILD, readHash, writeHash,
 } from './config.js';
 import {
@@ -66,6 +66,8 @@ const loader = new Loader(() => {}, fatal);
 const terrain = new Terrain(gl, loader);
 const controls = new Controls(canvas, cam);
 const nearField = new NearField(gl, () => loader.vectorTemplate);
+const farField = new NearField(gl, () => loader.vectorTemplate, { zoom: 13, skyline: true, workers: 2 });
+nearField.partner = farField; farField.partner = nearField;
 
 // Resolve the vector tile template from the service's TileJSON. Terrain still
 // loads if this fails; water is an enhancement, never a dependency.
@@ -99,6 +101,18 @@ function jumpTo(s) {
 // Typing a new address (or pasting a link into the same tab) now moves you
 // there. The app's own once-a-second address updates do not fire this event.
 addEventListener('hashchange', () => jumpTo(readHash()));
+// K copies a report on building heights (how much of the data is real and how
+// much is a guess), for both layers, plus where you are.
+addEventListener('keydown', (e) => {
+  if (e.code !== 'KeyK' || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+  const rep = {
+    at: { lat: +cam.lat.toFixed(5), lon: +cam.lon.toFixed(5), alt: Math.round(cam.alt) },
+    near: nearField.report(cam.mercX, cam.mercY), sky: farField.report(cam.mercX, cam.mercY), skyStatus: farField.status, nearStatus: nearField.status,
+  };
+  window.twReport = rep;
+  console.log(JSON.stringify(rep, null, 1));
+  if (navigator.clipboard) navigator.clipboard.writeText(JSON.stringify(rep, null, 1)).catch(() => {});
+});
 initFavourites({
   root: document.getElementById('favs'),
   jump: jumpTo,
@@ -198,7 +212,7 @@ let fogOn = false;
 let debugMode = 0;   // 0 normal, 1 tile grid + level tint, 2 flat (no textures)
 let frozen = false;
 let nearOn = false;
-let nfR = 1;                 // near-field radius in tiles (1 = 3x3, 2 = 5x5)
+let nfR = 2;                 // near-field radius in tiles (2 = 5x5, 3 = 7x7, 4 = 9x9)
 let lvx = 0, lvz = 0;
 let useLead = false, leadX = 0, leadY = 0;        // smoothed horizontal velocity for look-ahead loading
 // Order matches uLayers.xyzw in the shader.
@@ -244,7 +258,7 @@ function frame(now) {
     cam.alt = ground + (pendingAgl === null ? EYE_HEIGHT : pendingAgl);
     pendingAgl = null; altSettled = true;
   }
-  controls.update(dt, ground);
+  controls.update(dt, ground, (x, y) => terrain.heightAt(x, y));
 
   cam.lat = mercYToLat(cam.mercY);
   cam.lon = mercXToLon(cam.mercX);
@@ -319,10 +333,18 @@ function frame(now) {
   //   RADIUS- grows with height, because you can see further from up there.
   if (nearOn) { if (hAgl > NF_MAX_AGL * 1.15) nearOn = false; }
   else if (hAgl < NF_MAX_AGL) nearOn = true;
-  if (nfR === 1 && hAgl > 900) nfR = 2;
-  else if (nfR === 2 && hAgl < 600) nfR = 1;
+  // Block radius in tiles: 2 (5x5) low down, 3 (7x7) from about 500 m, 4 (9x9)
+  // from about 1.5 km. Far rings carry only major roads and tall buildings, so
+  // the extra tiles cost little to draw. Moving up needs a bit more height
+  // than moving down, so hovering at a boundary does not flicker.
+  if (nfR < 3 && hAgl > 550) nfR = 3;
+  else if (nfR > 2 && hAgl < 450) nfR = 2;
+  if (nfR < 4 && hAgl > 1700) nfR = 4;
+  else if (nfR > 3 && hAgl < 1400) nfR = 3;
   if (!frozen && (vectorReady || now - startTime > 4000)) {
     nearField.update(cam.mercX, cam.mercY, nearOn, controls.hspeed < NF_MAX_SPEED, nfR, leadX, leadY, useLead);
+    // The far skyline waits until the near field has nothing left to fetch.
+    farField.updateFar(cam.mercX, cam.mercY, nearOn, controls.hspeed < NF_MAX_SPEED && !nearField.busy, SKY_RADIUS, nearField.block);
   }
 
   const outer = tileSizeMerc(LEVELS[drawLevels - 1].z) * k * 2;
@@ -376,12 +398,14 @@ function frame(now) {
   gl.uniformMatrix4fv(U.uProj, false,
     G.perspective(proj, fov, aspect, Math.min(splitNear, far * 0.5), far));
   const farDrawn = terrain.draw(U, cam.mercX, cam.mercY, k, 0, ALL);
-  nearField.draw(prog, proj, view, k, cam.alt, cam.mercX, cam.mercY, 1 / (2 * R_MEAN), LAYERS[1].on);
+  nearField.draw(prog, proj, view, k, cam.alt, cam.mercX, cam.mercY, 1 / (2 * R_MEAN), LAYERS[1].on, LAYERS[2].on);
+  farField.draw(prog, proj, view, k, cam.alt, cam.mercX, cam.mercY, 1 / (2 * R_MEAN), false, LAYERS[2].on);
   gl.clear(gl.DEPTH_BUFFER_BIT);
   gl.uniformMatrix4fv(U.uProj, false,
     G.perspective(proj, fov, aspect, near, Math.max(splitFar, near * 1000)));
   const nearDrawn = terrain.draw(U, cam.mercX, cam.mercY, k, 0, ALL);
-  nearField.draw(prog, proj, view, k, cam.alt, cam.mercX, cam.mercY, 1 / (2 * R_MEAN), LAYERS[1].on);
+  nearField.draw(prog, proj, view, k, cam.alt, cam.mercX, cam.mercY, 1 / (2 * R_MEAN), LAYERS[1].on, LAYERS[2].on);
+  farField.draw(prog, proj, view, k, cam.alt, cam.mercX, cam.mercY, 1 / (2 * R_MEAN), false, LAYERS[2].on);   // the near pass reaches out to splitFar, which is where a 20 km skyline lives
 
   // A hole is a tile the draw set says should cover ground but which has not
   // loaded. If this spikes when something flashes, the flashing IS holes.
@@ -393,22 +417,37 @@ function frame(now) {
   if (fpsTime > 0.4) { fps = frames / fpsTime; frames = 0; fpsTime = 0; }
 
   const agl = ground === null ? null : cam.alt - ground;
-  hud.textContent =
-    `${cam.lat.toFixed(5)}, ${cam.lon.toFixed(5)}  |  ` +
-    `${cam.alt.toFixed(0)} m` + (agl === null ? '' : ` (${agl.toFixed(0)} agl)`) +
-    `  |  ${controls.speed < 1 ? '0' : controls.speed.toFixed(0)} m/s  |  ` +
-    `${cam.fly
-      ? 'FLY ' + (controls.cruise * 3.6 < 10000
-          ? (controls.cruise * 3.6).toFixed(0) + ' km/h'
-          : (controls.cruise / 1000).toFixed(1) + ' km/s') +
-        (Math.abs(controls.flyMult - 1) > 0.02 ? ' x' + controls.flyMult.toFixed(1) : '') +
-        (controls.flyMult >= FLY_MULT_MAX - 0.01 ? ' MAX' : '')
-      : 'WALK ' + (controls.walkCruise * 3.6).toFixed(0) + ' km/h' +
-        (Math.abs(controls.walkMult - 1) > 0.02 ? ' x' + controls.walkMult.toFixed(1) : '') +
-        (controls.walkMult >= WALK_MULT_MAX - 0.01 ? ' MAX' : '')}${fogOn ? ' +fog' : ''}${debugMode ? ' +dbg' + debugMode : ''}${frozen ? ' FROZEN' : ''}  |  ` +
-    `${terrain.visible.length}/${terrain.loaded} tiles  |  L${minLevel}-${drawLevels - 1}  |  holes ${terrain.holes}/${holePeak}  |  evict ${terrain.evicted}  |  water ${terrain.waterCount}/${terrain.visible.length}  |  near ${nearField.status}  |  view ${(viewDist / 1000).toFixed(0)} km  |  ${fps.toFixed(0)} fps  |  ${cacheMb ? 'cache ' + cacheMb.mb.toFixed(0) + ' MB' + (cacheMb.persistent ? '' : '*') + '  |  ' : ''}v${BUILD} (${LEVELS.length}L)` +
-    (loader.queued ? `  |  loading ${loader.queued}` : '') +
-    (loader.stats.failed ? `  |  ${loader.stats.failed} failed` : '');
+  const flyText = cam.fly
+    ? 'FLY ' + (controls.cruise * 3.6 < 10000
+        ? (controls.cruise * 3.6).toFixed(0) + ' km/h'
+        : (controls.cruise / 1000).toFixed(1) + ' km/s') +
+      (Math.abs(controls.flyMult - 1) > 0.02 ? ' x' + controls.flyMult.toFixed(1) : '') +
+      (controls.flyMult >= FLY_MULT_MAX - 0.01 ? ' MAX' : '')
+    : 'WALK ' + (controls.walkCruise * 3.6).toFixed(0) + ' km/h' +
+      (Math.abs(controls.walkMult - 1) > 0.02 ? ' x' + controls.walkMult.toFixed(1) : '') +
+      (controls.walkMult >= WALK_MULT_MAX - 0.01 ? ' MAX' : '');
+  // [text, done]: a part turns green when what it counts has finished loading,
+  // so you know when a screenshot will show everything.
+  const parts = [
+    [`${cam.lat.toFixed(5)}, ${cam.lon.toFixed(5)}`],
+    [`${cam.alt.toFixed(0)} m` + (agl === null ? '' : ` (${agl.toFixed(0)} agl)`)],
+    [`${controls.speed < 1 ? '0' : controls.speed.toFixed(0)} m/s`],
+    [flyText + (fogOn ? ' +fog' : '') + (debugMode ? ' +dbg' + debugMode : '') + (frozen ? ' FROZEN' : '')],
+    [`${terrain.visible.length}/${terrain.loaded} tiles`, loader.queued === 0 && terrain.holes === 0 && terrain.loaded > 0],
+    [`L${minLevel}-${drawLevels - 1}`],
+    [`holes ${terrain.holes}/${holePeak}`, terrain.holes === 0],
+    [`evict ${terrain.evicted}`],
+    [`water ${terrain.waterCount}/${terrain.visible.length}`, terrain.waterCount === terrain.visible.length],
+    [`near ${nearField.status}`, nearField.complete],
+    [`sky ${farField.status}`, farField.complete],
+    [`view ${(viewDist / 1000).toFixed(0)} km`],
+    [`${fps.toFixed(0)} fps`, fps >= 50],
+  ];
+  if (cacheMb) parts.push([`cache ${cacheMb.mb.toFixed(0)} MB` + (cacheMb.persistent ? '' : '*')]);
+  parts.push([`v${BUILD} (${LEVELS.length}L)`]);
+  if (loader.queued) parts.push([`loading ${loader.queued}`]);
+  if (loader.stats.failed) parts.push([`${loader.stats.failed} failed`]);
+  hud.innerHTML = parts.map(([t, ok]) => (ok ? `<span class="ok">${t}</span>` : t)).join('  |  ');
 
   if (terrain.loaded === 0) {
     loading.style.display = 'block';
@@ -451,7 +490,7 @@ function frame(now) {
   if (hashTime > 1) { hashTime = 0; writeHash(cam); }
 
   let switched = '';
-  if (nfR !== prevNfR) switched = 'near block ' + (nfR === 2 ? '5x5' : '3x3');
+  if (nfR !== prevNfR) switched = 'near block ' + (2 * nfR + 1) + 'x' + (2 * nfR + 1);
   else if (minLevel !== prevMin || drawLevels !== prevDraw) switched = 'detail levels L' + minLevel + '-' + (drawLevels - 1);
   prevNfR = nfR; prevMin = minLevel; prevDraw = drawLevels;
   perf.frame(now, rawMs, performance.now() - t0, {
