@@ -96,10 +96,6 @@ export function initFavourites({ root, getView, jump }) {
     render();
   }
 
-  window.addEventListener('keydown', (e) => {
-    if (e.code === 'KeyP' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) pinHere();
-  });
-
   render();
   return { render, pinHere };
 }

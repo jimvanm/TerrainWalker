@@ -174,6 +174,19 @@ const layerBtns = (ELS['layers'] && ELS['layers']._kids) || [];
 let toggled = 0;
 for (const b of layerBtns) for (const [t, f] of (b._h || [])) { try { f({ preventDefault(){} }); toggled++; } catch (e) { console.log('LAYER HANDLER THREW ' + e.message); process.exitCode = 1; } }
 
+// Press every key in the key table, twice (on, then back off), then run more
+// frames. A key whose action is wired wrong throws here.
+const { KEYS } = await import('../src/ui/keys.js');
+let keysFired = 0;
+for (let pass = 0; pass < 2; pass++) {
+  for (const k of KEYS.filter((x) => x.act)) {
+    try { (listeners.keydown || []).forEach((f) => f({ code: k.code, preventDefault() {}, repeat: false })); keysFired++; }
+    catch (e) { console.log('KEY ' + k.label + ' THREW: ' + e.message); process.exitCode = 1; }
+    const cb = rafCb; rafCb = null; t += 16.7; if (cb) cb(t);
+    await new Promise((r) => setTimeout(r, 0));
+  }
+}
+
 const R = [];
 const ok = (c, m) => { R.push((c ? 'PASS  ' : 'FAIL  ') + m); if (!c) process.exitCode = 1; };
 
@@ -182,6 +195,7 @@ ok(toggled === 5, `all ${toggled} layer toggles fired cleanly`);
 ok(log.mipmaps > 0, `generated mipmaps for ${log.mipmaps} textures`);
 ok(log.textures > 0, `uploaded ${log.texUploads} textures across ${log.textures} objects`);
 ok(log.texSizes.has('256x256'), `mask textures are 256x256 (${[...log.texSizes].join(', ')})`);
+ok(keysFired === 2 * KEYS.filter((x) => x.act).length, `pressed every action key twice (${keysFired}) without throwing`);
 ok(padFired >= 8, `fired ${padFired} pad handlers without throwing`);
 ok(workerCount === 9, `spawned ${workerCount} workers (3 terrain, 4 near, 2 skyline)`);
 ok(log.uniforms.size === 24, `resolved ${log.uniforms.size} distinct uniform names (expect 24)`);

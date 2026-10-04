@@ -54,16 +54,16 @@ export class Perf {
     this.total = 0;                     // frames ever recorded
     this.marks = [];                    // { n, t, kind }
     window.twLog = this.log;
-    addEventListener('keydown', (e) => {
-      if (e.code === 'KeyL' && navigator.clipboard) {
-        navigator.clipboard.writeText(JSON.stringify(this.log, null, 1)).catch(() => {});
-      }
-    });
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     this.dpr = dpr;
     this.W = 260; this.H = 82;
     canvas.width = this.W * dpr; canvas.height = this.H * dpr;
     canvas.style.width = this.W + 'px'; canvas.style.height = this.H + 'px';
+  }
+
+  // L key: copy the strain log.
+  copyLog() {
+    if (navigator.clipboard) navigator.clipboard.writeText(JSON.stringify(this.log, null, 1)).catch(() => {});
   }
 
   // dt: ms since previous frame. work: ms spent in our code this frame.

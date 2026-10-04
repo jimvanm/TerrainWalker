@@ -107,13 +107,8 @@
 <div id="cross"></div>
 <div id="loading" class="panel">loading terrain&hellip;</div>
 
-<div id="help" class="panel">
-  <b>click</b> to capture mouse &middot; <b>esc</b> to release<br>
-  <b>WASD</b> move &middot; <b>Q</b>/<b>E</b> down/up &middot; <b>shift</b> run<br>
-  <b>G</b> or <b>space space</b> toggle fly &middot; <b>space</b>/<b>shift</b> up/down<br>
-  <b>ctrl</b> boost (safe once keys are locked) &middot; <b>wheel</b> fly speed &middot; <b>R</b> reset<br>
-  <b>V</b> water &middot; <b>X</b> roads &middot; <b>B</b> built &middot; <b>C</b> cover &middot; <b>F</b> fog &middot; <b>1</b> grid &middot; <b>2</b> freeze &middot; <b>3</b> flat &middot; <b>6</b> real colours &middot; <b>7</b> colour by type &middot; <b>8</b> colour set &middot; <b>9</b> warm &middot; <b>P</b> pin place &middot; <b>K</b> copy height report &middot; <b>L</b> copy strain log &middot; <b>H</b> hide this
-</div>
+<!-- Built from the key table in src/ui/keys.js. -->
+<div id="help" class="panel"></div>
 
 <div id="ctrl">
   <label for="levels">view</label>
@@ -154,7 +149,6 @@
 
 <script>
   window.addEventListener('keydown', function (e) {
-    if (e.code === 'KeyH') { document.getElementById('help').classList.toggle('hide'); document.getElementById('perf').classList.toggle('hide'); }
     // Last-resort cursor rescue, works even if the module never loaded.
     if (e.code === 'Escape') {
       document.body.classList.remove('locked');

@@ -87,14 +87,12 @@ export class Controls {
           this.lastSpace = now;
         }
       }
-      // G is an unambiguous alternative to the double tap.
-      if (e.code === 'KeyG') this.cam.fly = this.cam.fly ? 0 : 1;
+      // G (in ui/keys.js) is an unambiguous alternative to the double tap.
       // Q and E exist so the hand never goes looking for Ctrl+Q.
       if (e.code === 'KeyQ' || e.code === 'KeyE') {
         if (!this.cam.fly) this.cam.fly = 1;
         e.preventDefault();
       }
-      if (e.code === 'KeyR') this.onReset && this.onReset();
       this.keys.add(e.code);
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));

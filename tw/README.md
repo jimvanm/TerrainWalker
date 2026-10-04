@@ -43,19 +43,26 @@ whole deployment.
 | `shift` | run (walking) |
 | `G` or `space` `space` | toggle flight |
 | `space` / `shift` | up / down (flying) |
-| `ctrl` | boost, 8x |
+| `Q` / `E` | down / up (switches to flight) |
+| `ctrl` | boost, 4x |
 | wheel | flight speed |
 | `R` | return to the spawn point |
 | `V` `X` `B` `C` | toggle water, roads, built-up, land cover |
 | `T` | toggle landmarks (CN Tower, Eiffel Tower, Canton Tower) |
+| `F` | fog on/off (off by default) |
 | `6` | building colours: real map colours on/off (where a mapper entered one) |
 | `7` | building colours: by type on/off (homes, shops/offices, industry, schools/hospitals, tall, public, military) |
 | `8` | building colours: next colour set (stone, brick, render, concrete, mixed) |
 | `9` | building colours: warmer light on/off |
+| `P` | pin this place to the saved places list |
+| `K` | copy a building-height report to the clipboard |
+| `L` | copy the performance log to the clipboard |
+| `H` | hide the help panel and performance graph |
+| `1` `2` `3` | debugging: tile grid, freeze loading, flat shading |
 
-The same four are buttons under BUILDING COLOURS, lit when on.
-| `F` | fog on/off (off by default) |
-| `H` | hide the help panel |
+The building colour keys are also buttons under BUILDING COLOURS, lit when on.
+Every key is defined in one table, `src/ui/keys.js`; the help panel is built
+from it.
 
 The view slider sets render distance, from about 27 km to about 600 km.
 
