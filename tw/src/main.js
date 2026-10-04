@@ -245,21 +245,53 @@ for (const L of LAYERS) {
   L.el = b;
   layerPanel.appendChild(b);
 }
+// ---- building colour panel ----------------------------------------------
+// Same style as the layer buttons: lit means on. The SET button shows the name
+// of the colour set in use. Only uniforms change, so this is instant.
+const COLOUR_BTNS = [
+  { key: 'Digit8', label: () => 'SET: ' + SETS[LOOK.set].name.toUpperCase(), on: () => false,
+    act: () => { LOOK.set = (LOOK.set + 1) % SETS.length; }, wide: true, title: 'next colour set (8)' },
+  { key: 'Digit6', label: () => 'REAL', on: () => LOOK.real, act: () => { LOOK.real = !LOOK.real; },
+    title: 'colours a mapper entered, where there are any (6)' },
+  { key: 'Digit7', label: () => 'TYPE', on: () => LOOK.type, act: () => { LOOK.type = !LOOK.type; },
+    title: 'colour by building type: homes, shops, industry, schools, tall... (7)' },
+  { key: 'Digit9', label: () => 'WARM', on: () => LOOK.warm, act: () => { LOOK.warm = !LOOK.warm; },
+    title: 'warmer light on buildings (9)', wide: true },
+];
+{
+  const head = document.createElement('div');
+  head.className = 'panelhead';
+  head.textContent = 'BUILDING COLOURS';
+  const panel = document.createElement('div');
+  panel.id = 'looks';
+  panel.className = 'grid';
+  for (const C of COLOUR_BTNS) {
+    const b = document.createElement('button');
+    b.title = C.title;
+    if (C.wide) b.className = 'wide';
+    b.addEventListener('click', () => C.act());
+    C.el = b;
+    panel.appendChild(b);
+  }
+  layerPanel.after(head, panel);
+  const lhead = document.createElement('div');
+  lhead.className = 'panelhead';
+  lhead.textContent = 'MAP LAYERS';
+  layerPanel.before(lhead);
+}
 addEventListener('keydown', (e) => { if (e.code === 'KeyF') fogOn = !fogOn;
   if (e.code === 'Digit1') debugMode = debugMode === 1 ? 0 : 1;
   if (e.code === 'Digit2') frozen = !frozen;      // stop all tile updates
   if (e.code === 'Digit3') debugMode = debugMode === 2 ? 0 : 2;
-  // Building colours (look.js). Only uniforms change, so this is instant.
-  if (e.code === 'Digit6') LOOK.real = !LOOK.real;
-  if (e.code === 'Digit7') LOOK.type = !LOOK.type;
-  if (e.code === 'Digit8') LOOK.set = (LOOK.set + 1) % SETS.length;
-  if (e.code === 'Digit9') LOOK.bright = !LOOK.bright;
+  for (const C of COLOUR_BTNS) if (e.code === C.key) C.act();
   for (const L of LAYERS) if (e.code === L.key) L.on = !L.on; });
 let frames = 0, fpsTime = 0, fps = 0, hashTime = 0;
 const hud = document.getElementById('hud');
 const loading = document.getElementById('loading');
 
-const perf = new Perf(document.getElementById('perf'));
+const perfEl = document.getElementById('perf');
+const perf = new Perf(perfEl);
+let lastPerfBottom = 0;
 let prevNfR = nfR, prevMin = minLevel, prevDraw = drawLevels;
 function frame(now) {
   const t0 = performance.now();
@@ -461,14 +493,18 @@ function frame(now) {
     [`sky ${farField.status}`, farField.complete],
     [`land ${landmarks.resolved}/${landmarks.items.length}`, landmarks.resolved === landmarks.items.length],
     [`view ${(viewDist / 1000).toFixed(0)} km`],
-    [`colours ${lookLabel()}`],
     [`${fps.toFixed(0)} fps`, fps >= 50],
   ];
   if (cacheMb) parts.push([`cache ${cacheMb.mb.toFixed(0)} MB` + (cacheMb.persistent ? '' : '*')]);
-  parts.push([`v${BUILD} (${LEVELS.length}L)`]);
+  // Version first: the bar is often wider than the window, and the end is cut off.
+  parts.unshift([`v${BUILD} (${LEVELS.length}L)`]);
   if (loader.queued) parts.push([`loading ${loader.queued}`]);
   if (loader.stats.failed) parts.push([`${loader.stats.failed} failed`]);
-  hud.innerHTML = parts.map(([t, ok]) => (ok ? `<span class="ok">${t}</span>` : t)).join('  |  ');
+  // Each item is kept whole; the bar wraps between items (index.html #hud).
+  hud.innerHTML = parts.map(([t, ok]) => `<span class="it${ok ? ' ok' : ''}">${t}</span>`).join('<span class="sep">|</span> ');
+  // The performance graph sits just above the bar, however many lines it takes.
+  const perfBottom = 34 + hud.offsetHeight + 6;
+  if (perfBottom !== lastPerfBottom) { perfEl.style.bottom = perfBottom + 'px'; lastPerfBottom = perfBottom; }
 
   if (terrain.loaded === 0) {
     loading.style.display = 'block';
@@ -500,6 +536,11 @@ function frame(now) {
   btnEls.fly.classList.toggle('on', !!cam.fly);
   btnEls.fog.classList.toggle('on', fogOn);
   for (const L of LAYERS) L.el.classList.toggle('on', L.on);
+  for (const C of COLOUR_BTNS) {
+    const t = C.label();
+    if (C.el.textContent !== t) C.el.textContent = t;
+    C.el.classList.toggle('on', C.on());
+  }
 
   btnEls.up.classList.toggle('on', controls.btn.up || controls.keys.has('KeyE') || controls.keys.has('Space'));
   btnEls.down.classList.toggle('on', controls.btn.down || controls.keys.has('KeyQ') || controls.keys.has('ShiftLeft'));

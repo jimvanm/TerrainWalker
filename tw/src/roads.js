@@ -8,8 +8,8 @@
 import { LINESTRING, POLYGON } from './mvt.js';
 import { nodeHeightAt, GRID } from './heightgrid.js';
 import { rgba } from './meshbuilder.js';
-import { triangulate } from './earclip.js';
-import { clip, polygons } from './buildings.js';
+import { drapeConvex, drapePolygon } from './drape.js';
+import { runwayMarkings, PAVE } from './runways.js';
 
 // w = [two-way, one-way] in true metres, c = colour, r = stacking rank.
 export const ROAD_STYLE = {
@@ -25,36 +25,58 @@ export const ROAD_STYLE = {
   path:      { w: [1.6, 1.6], c: [158, 140, 108], r: 0 },
 };
 
-// Railways. w = width across both rails, line = width of each rail (true
-// metres; drawn wider than real rails so they can be seen like a road).
-// r = rank, which decides how far away it is drawn, the same as roads.
-// Main lines show as far as primary roads; trams, sidings and yards as far as
+// Railways, at true size. Each track is its own line in the map.
+//   gauge : distance between the inner edges of the two rails, metres.
+//           The map tiles carry no gauge, so standard (1.435 m) is used for
+//           everything except lines the map calls narrow gauge (1.000 m, the
+//           commonest narrow gauge). Toronto's subway and streetcars are really
+//           1.495 m; that 6 cm is not visible.
+//   RAIL_HEAD: width of the top of one rail, about 70 mm (UIC 60 is 72 mm,
+//           North American 115 lb rail 68 mm).
+//   bed   : width of the stone bed (ballast) under the track. It is what a
+//           railway looks like from the air, and keeps it visible from far away
+//           where the rails themselves are thinner than a pixel. 5 m is a bit
+//           more than the 4.3 m between neighbouring tracks, so a corridor of
+//           several tracks reads as one bed, not stripes. Streetcar track sits
+//           in the road and has none.
+// r = rank, which decides how far away it is drawn, the same as roads. Main
+// lines show as far as primary roads; trams, sidings and yards as far as
 // minor roads.
-const RAIL_C = [24, 24, 26];
+const STANDARD = 1.435, NARROW = 1.0, RAIL_HEAD = 0.07;
+const RAIL_C = [150, 148, 144];        // worn steel tops, light against the bed
+const BED_C = [58, 56, 54];            // charcoal stone
 export const RAIL_STYLE = {
-  main:    { w: 6,   line: 1.3, r: 4 },
-  minor:   { w: 5,   line: 1.1, r: 1 },   // sidings, yards, spurs, narrow gauge, heritage
-  transit: { w: 4.5, line: 1.0, r: 1 },   // tram, light rail, subway above ground, monorail
+  main:    { gauge: STANDARD, bed: 5, r: 4 },
+  minor:   { gauge: STANDARD, bed: 5, r: 1 },   // sidings, yards, spurs, heritage
+  narrow:  { gauge: NARROW,   bed: 4, r: 1 },
+  transit: { gauge: STANDARD, bed: 5, r: 1 },   // light rail, subway above ground, monorail
+  tram:    { gauge: STANDARD, bed: 0,   r: 1 },
 };
+export { RAIL_HEAD };
 const RAIL_LIFT_RANK = 7;                 // above every road, so level crossings show the rails
 
 export function railStyle(f) {
   const p = f.props || {};
-  if (f.cls === 'transit') return RAIL_STYLE.transit;
+  if (f.cls === 'transit') return p.subclass === 'tram' ? RAIL_STYLE.tram : RAIL_STYLE.transit;
   if (f.cls !== 'rail') return null;
+  if (p.subclass === 'narrow_gauge') return RAIL_STYLE.narrow;
   if (p.service || (p.subclass && p.subclass !== 'rail')) return RAIL_STYLE.minor;
   return RAIL_STYLE.main;
 }
 
 // Airports. Areas are laid flat on the ground; runways and taxiways mapped
 // only as a line get a standard width (w, true metres). Runways show from as
-// far as motorways, the rest as far as primary roads. Lifts sit below the
-// roads, so a service road across an apron stays visible.
+// far as motorways, the rest as far as primary roads. The lift sits above every
+// road and railway (roads reach 0.24 m, rails 0.28 m), so nothing mapped across
+// the pavement shows through it.
+// One pavement colour for all of it: the same grey the distant ground paint
+// uses (gl.js, 0.37 0.37 0.39), so near and far match. White markings go on
+// top (runways.js).
 export const AERO_STYLE = {
-  runway:  { c: [64, 64, 68],    w: 45, lift: 0.10, r: 5 },
-  taxiway: { c: [98, 98, 100],   w: 20, lift: 0.08, r: 3 },
-  apron:   { c: [126, 126, 124],        lift: 0.06, r: 3 },
-  helipad: { c: [98, 98, 100],          lift: 0.08, r: 3 },
+  runway:  { c: PAVE, w: 45, lift: 0.32, r: 5 },
+  taxiway: { c: PAVE, w: 20, lift: 0.32, r: 3 },
+  apron:   { c: PAVE,        lift: 0.32, r: 3 },
+  helipad: { c: PAVE,        lift: 0.32, r: 3 },
 };
 
 // Per-class lift above the terrain (metres). Tiny, but each class gets its own
@@ -85,7 +107,11 @@ function linePoints(part, ext, size, step) {
 // One or more strips along a line. strips = [[o1, o2, colour], ...], where o1
 // and o2 are sideways offsets from the centreline (mercator metres, + = left).
 // A road is one strip [+half, -half]; a railway is two narrow ones.
-function ribbon(pts, strips, lift, hAt, mb) {
+// drapeG (optional, the tile's g): lay each piece exactly on the terrain
+// (drape.js) instead of setting heights at the strip's edges only. Needed for
+// wide strips: across a 45 m runway the ground rises above a strip that is
+// flat between its edges, and shows through it.
+function ribbon(pts, strips, lift, hAt, mb, drapeG = null) {
   const m = pts.length / 2;
   if (m < 2) return;
   // Segment unit normals.
@@ -111,6 +137,14 @@ function ribbon(pts, strips, lift, hAt, mb) {
     ax[k] = x; az[k] = z; dd[k] = Math.max(0.5, x * nx[ref] + z * nz[ref]);
   }
   for (const [o1, o2, colour] of strips) {
+    if (drapeG) {
+      const P = (k, o) => [pts[2 * k] + ax[k] * o / dd[k], pts[2 * k + 1] + az[k] * o / dd[k]];
+      for (let k = 0; k < m - 1; k++) {
+        const a = P(k, o1), b = P(k + 1, o1), c = P(k + 1, o2), d = P(k, o2);
+        drapeConvex([a[0], a[1], b[0], b[1], c[0], c[1], d[0], d[1]], drapeG, hAt, lift, colour, mb);
+      }
+      continue;
+    }
     const base = mb.verts;
     for (let k = 0; k < m; k++) {
       const e = pts[2 * k], s = pts[2 * k + 1];
@@ -128,84 +162,12 @@ function ribbon(pts, strips, lift, hAt, mb) {
   }
 }
 
-// Clip a convex polygon (flat [x, y, ...]) to the side where f(x, y) <= 0.
-// f must be linear, so the crossing point is found by interpolation.
-function clipHalf(pts, f) {
-  const out = [];
-  const n = pts.length / 2;
-  for (let i = 0; i < n; i++) {
-    const j = (i + 1) % n;
-    const ax = pts[2 * i], ay = pts[2 * i + 1], bx = pts[2 * j], by = pts[2 * j + 1];
-    const fa = f(ax, ay), fb = f(bx, by);
-    if (fa <= 0) out.push(ax, ay);
-    if ((fa <= 0) !== (fb <= 0)) { const t = fa / (fa - fb); out.push(ax + (bx - ax) * t, ay + (by - ay) * t); }
-  }
-  return out.length >= 6 ? out : [];
-}
-
-// Lay one flat triangle on the terrain. It is cut along the terrain's own grid
-// lines and cell diagonals, so every piece lies on one terrain triangle and
-// neither floats nor sinks on a slope. Points are in local metres.
-function drapeTri(t, g, hAt, lift, colour, mb) {
-  const cell = g.size12 / GRID;
-  // Grid units: whole numbers are terrain grid lines (see nodeHeightAt).
-  const U = (e) => (e + g.bx) / cell, V = (s) => (g.by + s) / cell;
-  const us = [U(t[0]), U(t[2]), U(t[4])], vs = [V(t[1]), V(t[3]), V(t[5])];
-  const i0 = Math.floor(Math.min(...us)), i1 = Math.floor(Math.max(...us));
-  const j0 = Math.floor(Math.min(...vs)), j1 = Math.floor(Math.max(...vs));
-  const tri = [us[0], vs[0], us[1], vs[1], us[2], vs[2]];
-  for (let j = j0; j <= j1; j++) {
-    for (let i = i0; i <= i1; i++) {
-      let p = clipHalf(tri, (u) => i - u);
-      if (p.length) p = clipHalf(p, (u) => u - (i + 1));
-      if (p.length) p = clipHalf(p, (u, v) => j - v);
-      if (p.length) p = clipHalf(p, (u, v) => v - (j + 1));
-      if (!p.length) continue;
-      // The terrain splits each cell along u + v = 1 (cell-local).
-      for (const half of [clipHalf(p, (u, v) => (u - i) + (v - j) - 1), clipHalf(p, (u, v) => 1 - (u - i) - (v - j))]) {
-        if (!half.length) continue;
-        const base = mb.verts;
-        for (let k = 0; k < half.length; k += 2) {
-          const e = half[k] * cell - g.bx, s = half[k + 1] * cell - g.by;
-          mb.vert(e, hAt(e, s) + lift, s, colour);
-        }
-        for (let k = 1; k < half.length / 2 - 1; k++) mb.tri(base, base + k, base + k + 1);
-      }
-    }
-  }
-}
-
-// An airport area (polygon feature), clipped to the tile and laid on the ground.
-function drapePolygon(f, ext, g, hAt, lift, colour, mb) {
-  for (const poly of polygons(f.parts)) {
-    const rings = [];
-    for (let k = 0; k < poly.length; k++) {
-      const c = clip(poly[k], ext);
-      if (c.length < 6) { if (k === 0) { rings.length = 0; break; } continue; }
-      const m = new Float64Array(c.length);
-      for (let i = 0; i < c.length; i += 2) {
-        m[i] = (c[i] / ext - 0.5) * g.size14;
-        m[i + 1] = (c[i + 1] / ext - 0.5) * g.size14;
-      }
-      rings.push(m);
-    }
-    if (!rings.length) continue;
-    const flat = [];
-    for (const r of rings) for (let i = 0; i < r.length; i++) flat.push(r[i]);
-    const t = triangulate(rings);
-    for (let i = 0; i < t.tris.length; i += 3) {
-      const a = t.src[t.tris[i]], b = t.src[t.tris[i + 1]], c = t.src[t.tris[i + 2]];
-      drapeTri([flat[2 * a], flat[2 * a + 1], flat[2 * b], flat[2 * b + 1], flat[2 * c], flat[2 * c + 1]],
-        g, hAt, lift, colour, mb);
-    }
-  }
-}
-
 // g = { size14, size12, bx, by, cosLat, nodes }
 //   bx, by : offset from the near tile centre to the elevation tile NW corner,
 //            in mercator metres, so local (east, south) maps to tile (u, v).
 // aero : the tile's aeroway layer (optional).
-// counts (optional) gets { rail, aeroAreas, aeroLines } for the K report.
+// counts (optional) gets { rail, aeroAreas, aeroLines, runways, runwayNumbers } for the K report.
+// g.cx, g.cy (optional): the tile centre in mercator metres, for runway dashes.
 export function buildRoads(layer, g, mb, aero = null, counts = null) {
   if (!layer && !aero) return [0, 0, 0];
   const step = g.size12 / GRID / 3;       // a third of a terrain cell
@@ -224,6 +186,7 @@ export function buildRoads(layer, g, mb, aero = null, counts = null) {
   if (aero) {
     const ext = aero.extent;
     for (const f of aero.features) {
+      if (f.cls === 'runway') continue;      // runways.js draws runways, pavement and paint
       const st = AERO_STYLE[f.cls];
       if (!st || !keep(st.r)) continue;
       const colour = rgba(st.c[0], st.c[1], st.c[2]);
@@ -232,11 +195,12 @@ export function buildRoads(layer, g, mb, aero = null, counts = null) {
         const half = (st.w / g.cosLat) / 2;
         for (const part of f.parts) {
           if (part.length < 4) continue;
-          ribbon(linePoints(part, ext, g.size14, step), [[half, -half, colour]], st.lift, hAt, mb);
+          ribbon(linePoints(part, ext, g.size14, 1e9), [[half, -half, colour]], st.lift, hAt, mb, g);
         }
         cnt.aeroLines++;
       }
     }
+    if (keep(AERO_STYLE.runway.r)) runwayMarkings(aero, g, hAt, mb, cnt);
   }
   if (layer) {
   const ext = layer.extent;
@@ -247,12 +211,17 @@ export function buildRoads(layer, g, mb, aero = null, counts = null) {
     const rs = ROAD_STYLE[f.cls] ? null : railStyle(f);
     if (rs) {
       if (!keep(rs.r)) continue;
-      const half = (rs.w / g.cosLat) / 2, line = rs.line / g.cosLat;
-      const colour = rgba(RAIL_C[0], RAIL_C[1], RAIL_C[2]);
-      const strips = [[half, half - line, colour], [-half + line, -half, colour]];
+      // Rail centres sit half a gauge plus half a rail head from the middle.
+      const k = 1 / g.cosLat, inner = rs.gauge / 2 * k, outer = (rs.gauge / 2 + RAIL_HEAD) * k;
+      const steel = rgba(RAIL_C[0], RAIL_C[1], RAIL_C[2]), stone = rgba(BED_C[0], BED_C[1], BED_C[2]);
+      const rails = [[outer, inner, steel], [-inner, -outer, steel]];
+      const bed = rs.bed / 2 * k;
+      const lift = LIFT + RAIL_LIFT_RANK * LIFT_STEP;
       for (const part of f.parts) {
         if (part.length < 4) continue;
-        ribbon(linePoints(part, ext, g.size14, step), strips, LIFT + RAIL_LIFT_RANK * LIFT_STEP, hAt, mb);
+        const pts = linePoints(part, ext, g.size14, step);
+        if (bed) ribbon(pts, [[bed, -bed, stone]], lift, hAt, mb);
+        ribbon(pts, rails, lift + LIFT_STEP, hAt, mb);
       }
       cnt.rail++;
       continue;

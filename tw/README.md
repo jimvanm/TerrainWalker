@@ -50,8 +50,10 @@ whole deployment.
 | `T` | toggle landmarks (CN Tower, Eiffel Tower, Canton Tower) |
 | `6` | building colours: real map colours on/off (where a mapper entered one) |
 | `7` | building colours: by type on/off (homes, shops/offices, industry, schools/hospitals, tall, public, military) |
-| `8` | building colours: next colour set (stone, brick, pastel, concrete, mixed) |
-| `9` | building colours: brighter on/off |
+| `8` | building colours: next colour set (stone, brick, render, concrete, mixed) |
+| `9` | building colours: warmer light on/off |
+
+The same four are buttons under BUILDING COLOURS, lit when on.
 | `F` | fog on/off (off by default) |
 | `H` | hide the help panel |
 

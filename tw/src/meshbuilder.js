@@ -37,11 +37,13 @@ export class MeshBuilder {
 export const rgba = (r, g, b) => ((255 << 24) | (b << 16) | (g << 8) | r) >>> 0;
 
 // Info bytes, packed the same way:
-//   r  building type (look.js TYPE_NAMES), 0 = unknown
+//   r  building type (look.js TYPE_NAMES, low 4 bits), 0 = unknown, plus the
+//      size group (look.js SIZE_NAMES) times 16
 //   g  per-building number 0..255 (picks a colour from the set)
 //   b  wall shade, 255 = full colour
-//   a  flags: 1 = building (the shader picks its colour), 2 = has a map colour
+//   a  flags: 1 = building (the shader picks its colour), 2 = has a map colour,
+//      4 = roof
 // All zero means "use the vertex colour as it is" (roads, rails, airports).
-export const INFO_BUILDING = 1, INFO_REAL = 2;
+export const INFO_BUILDING = 1, INFO_REAL = 2, INFO_ROOF = 4;
 export const info = (type, num, shade, flags) =>
   ((flags << 24) | (shade << 16) | (num << 8) | type) >>> 0;

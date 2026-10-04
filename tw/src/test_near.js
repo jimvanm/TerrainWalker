@@ -119,19 +119,23 @@ function tile(layerName, extent, props, line) {
     const expect = 50 + u * N * 0.5;
     assert.ok(h - expect > 0.1 && h - expect < 0.45, 'lift ' + (h - expect));
   }
-  // A tunnel adds nothing. A railway is drawn as two dark rails (0.12.0).
+  // A tunnel adds nothing. A railway is drawn at true size (0.12.3): a 5 m
+  // stone bed, then two 70 mm rails with 1.435 m between their inner edges.
   const mb2 = new MeshBuilder();
   buildRoads({ extent: 4096, features: [layer.features[0], layer.features[1], layer.features[3]] }, g, mb2);
   const mb3 = new MeshBuilder();
   buildRoads({ extent: 4096, features: [layer.features[2]] }, g, mb3);
   assert.equal(mb2.verts + mb3.verts, r.verts, 'tunnel was drawn, or rail missing');
-  const rr = mb3.finish(), rf = new Float32Array(rr.vertices), pts = rr.verts / 4;
-  const across = (a, b) => Math.hypot(rf[4 * a] - rf[4 * b], rf[4 * a + 2] - rf[4 * b + 2]) * cosLat;
-  // Strip 1 is the first 2*pts verts, strip 2 the rest. Each rail 1.3 m, outer edges 6 m apart.
-  assert.ok(Math.abs(across(0, 1) - 1.3) < 0.01, 'rail width ' + across(0, 1));
-  assert.ok(Math.abs(across(2 * pts + 1, 2 * pts) - 1.3) < 0.01, 'second rail width');
-  assert.ok(Math.abs(across(0, 2 * pts + 1) - 6) < 0.01, 'track width ' + across(0, 2 * pts + 1));
-  ok('ribbons: true width, drape follows slope, tunnels skipped, rail as two 1.3 m rails 6 m apart (' + r.verts + ' verts)');
+  const rr = mb3.finish(), rf = new Float32Array(rr.vertices), pts = rr.verts / 6;
+  // Strips in order: bed (verts 0..2pts), rail 1, rail 2; each strip is pairs (left, right) per point.
+  const at = (i) => [rf[4 * i], rf[4 * i + 2]];
+  const across = (a, b) => Math.hypot(at(a)[0] - at(b)[0], at(a)[1] - at(b)[1]) * cosLat;
+  const r1 = 2 * pts, r2 = 4 * pts;
+  const near = (x, y) => Math.abs(x - y) < 1e-4;
+  assert.ok(near(across(0, 1), 5), 'bed ' + across(0, 1));
+  assert.ok(near(across(r1, r1 + 1), 0.07) && near(across(r2, r2 + 1), 0.07), 'rail head ' + across(r1, r1 + 1));
+  assert.ok(near(across(r1 + 1, r2), 1.435), 'gauge ' + across(r1 + 1, r2));
+  ok('ribbons: true width, drape follows slope, tunnels skipped, rail at true gauge 1.435 m on a 5 m bed (' + r.verts + ' verts)');
 }
 
 // 4. bend keeps width (mitre) and does not spike on a hairpin

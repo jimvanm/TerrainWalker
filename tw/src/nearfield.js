@@ -6,7 +6,7 @@
 import * as G from './gl.js';
 import { probe } from './perf.js';
 import { mercToTile, tileCentreMerc, tileToMerc, mercYToLat, mercXToLon } from './geo.js';
-import { TYPE_NAMES, lookBits, setUniform, TYPE_UNIFORM } from './look.js';
+import { TYPE_NAMES, SIZE_NAMES, lookBits, setUniform, TYPE_UNIFORM, ROOF_UNIFORM, AUTO_WALL_UNIFORM, AUTO_ROOF_UNIFORM } from './look.js';
 import { TILE_URL, NF_Z, NF_WORKERS, SKY_MIN_HEIGHT, SKY_RADIUS, SKY_URBAN, SKY_URBAN_BUILT } from './config.js';
 
 const VS = `#version 300 es
@@ -22,20 +22,32 @@ uniform float uCamAlt;
 uniform float uCurv;
 uniform vec3  uPal[8];   // current colour set (look.js)
 uniform vec3  uType[8];  // colour per building type
-uniform int   uLook;     // 1 real colours, 2 by type, 4 brighter
+uniform vec3  uRoof[8];  // roof colours
+uniform vec3  uAutoWall[32];   // auto set: 8 walls per size group
+uniform vec3  uAutoRoof[32];   // auto set: 8 roofs per size group
+uniform int   uLook;     // 1 real colours, 2 by type, 4 warmer, 8 auto set
 out vec3 vPos;
 out vec3 vCol;
 vec3 buildingColour() {
   int fl = int(aInfo.a * 255.0 + 0.5);
   int num = int(aInfo.g * 255.0 + 0.5);
-  int type = int(aInfo.r * 255.0 + 0.5);
-  vec3 c = uPal[num % 8];
-  if ((uLook & 2) != 0 && type > 0) c = uType[type] * (0.92 + 0.16 * fract(float(num) * 0.618));
-  if ((uLook & 1) != 0 && (fl & 2) != 0) c = aCol.rgb;
-  if ((uLook & 4) != 0) {
-    float l = dot(c, vec3(0.299, 0.587, 0.114));
-    c = clamp(mix(vec3(l), c, 1.8) * 1.1, 0.0, 1.0);
+  int tg = int(aInfo.r * 255.0 + 0.5);
+  int type = tg % 16, size = tg / 16;
+  bool useAuto = (uLook & 8) != 0;
+  vec3 c;
+  if ((fl & 4) != 0) c = useAuto ? uAutoRoof[size * 8 + (num / 8) % 8] : uRoof[(num / 8) % 8];
+  else {
+    c = useAuto ? uAutoWall[size * 8 + num % 8] : uPal[num % 8];
+    if ((uLook & 2) != 0 && type > 0) c = uType[type] * (0.94 + 0.12 * fract(float(num) * 0.618));
+    if ((uLook & 1) != 0 && (fl & 2) != 0) {
+      // A mapper's colour is often a pure web colour (yellow, green, black).
+      // Soften it toward grey and keep it out of the very dark and very light.
+      vec3 m = aCol.rgb;
+      float l = dot(m, vec3(0.299, 0.587, 0.114));
+      c = clamp(mix(vec3(l), m, 0.55), 0.0, 1.0) * 0.6 + 0.18;
+    }
   }
+  if ((uLook & 4) != 0) c *= vec3(1.06, 1.0, 0.90);   // warmer light
   return c * aInfo.b;
 }
 void main() {
@@ -79,7 +91,7 @@ export class NearField {
     this.maxRing = this.skyline ? SKY_RADIUS + 3 : 14;   // never draw tiles farther than this, in tiles
     this.prog = G.program(gl, VS, FS);
     this.u = {};
-    for (const n of ['uProj', 'uView', 'uTileOffset', 'uScale', 'uCamAlt', 'uCurv', 'uSunDir', 'uPal', 'uType', 'uLook']) {
+    for (const n of ['uProj', 'uView', 'uTileOffset', 'uScale', 'uCamAlt', 'uCurv', 'uSunDir', 'uPal', 'uType', 'uRoof', 'uAutoWall', 'uAutoRoof', 'uLook']) {
       this.u[n] = gl.getUniformLocation(this.prog, n);
     }
     this.aPos = gl.getAttribLocation(this.prog, 'aPos');
@@ -152,19 +164,22 @@ export class NearField {
   // plus a close look at the tiles around a point (cx, cy in mercator metres).
   report(cmx, cmy) {
     const hist = [0, 0, 0, 0, 0, 0, 0];
-    const types = [0, 0, 0, 0, 0, 0, 0, 0];
-    let seen = 0, kept = 0, tiles = 0, real = 0, rail = 0, aeroAreas = 0, aeroLines = 0;
+    const types = [0, 0, 0, 0, 0, 0, 0, 0], sizes = [0, 0, 0, 0];
+    let seen = 0, kept = 0, tiles = 0, real = 0, rail = 0, aeroAreas = 0, aeroLines = 0, runways = 0, runwayNumbers = 0;
     for (const t of this.tiles.values()) {
       if (!t.stats || !t.stats.hist) continue;
       tiles++; seen += t.stats.seen; kept += t.stats.kept;
       for (let i = 0; i < 7; i++) hist[i] += t.stats.hist[i];
       real += t.stats.real || 0;
       if (t.stats.types) for (let i = 0; i < 8; i++) types[i] += t.stats.types[i];
+      if (t.stats.sizes) for (let i = 0; i < 4; i++) sizes[i] += t.stats.sizes[i];
       rail += t.stats.rail || 0; aeroAreas += t.stats.aeroAreas || 0; aeroLines += t.stats.aeroLines || 0;
+      runways += t.stats.runways || 0; runwayNumbers += t.stats.runwayNumbers || 0;
     }
     const out = { tiles, buildingsSeen: seen, buildingsKept: kept,
              withMapColour: real, byType: Object.fromEntries(TYPE_NAMES.map((n, i) => [n, types[i]])),
-             railLines: rail, airportAreas: aeroAreas, airportLines: aeroLines,
+             bySize: Object.fromEntries(SIZE_NAMES.map((n, i) => [n, sizes[i]])),
+             railLines: rail, airportAreas: aeroAreas, airportLines: aeroLines, runwayPieces: runways, runwayNumbers,
              heightBands: { none: hist[0], upTo5: hist[1], upTo10: hist[2], upTo25: hist[3], upTo50: hist[4], upTo100: hist[5], over100: hist[6] } };
     if (cmx !== undefined) {
       const reach = 6000 / 0.73;                       // about 6 km on the ground, in mercator metres
@@ -182,6 +197,15 @@ export class NearField {
         }
       }
       near.sort((a, b) => a.km - b.km); marks.sort((a, b) => a.km - b.km);
+      // Runway data, raw from the map, for tiles within about 4 km.
+      const rw = [];
+      for (const t of this.tiles.values()) {
+        if (!t.stats || !t.stats.runwayDebug) continue;
+        const km = Math.hypot(t.centre.x - cmx, t.centre.y - cmy) * 0.73 / 1000;
+        if (km <= 4) rw.push({ tile: t.z + '/' + t.key, km: +km.toFixed(1), ...t.stats.runwayDebug });
+      }
+      rw.sort((a, b) => a.km - b.km);
+      if (rw.length) out.runways = rw;
       out.around = { tiles: near.slice(0, 12), markers: marks.slice(0, 8) };
     }
     return out;
@@ -498,6 +522,9 @@ export class NearField {
     gl.uniform3f(u.uSunDir, 0.40, 0.82, 0.41);
     gl.uniform3fv(u.uPal, setUniform());
     gl.uniform3fv(u.uType, TYPE_UNIFORM);
+    gl.uniform3fv(u.uRoof, ROOF_UNIFORM);
+    gl.uniform3fv(u.uAutoWall, AUTO_WALL_UNIFORM);
+    gl.uniform3fv(u.uAutoRoof, AUTO_ROOF_UNIFORM);
     gl.uniform1i(u.uLook, lookBits());
     if (this.aInfo >= 0) gl.vertexAttrib4f(this.aInfo, 0, 0, 0, 0);
     // Draw everything that is already in memory, not just what is wanted right

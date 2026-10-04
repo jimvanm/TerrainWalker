@@ -13,8 +13,8 @@
 
 import { POLYGON } from './mvt.js';
 import { nodeHeightAt, GRID } from './heightgrid.js';
-import { rgba, info, INFO_BUILDING, INFO_REAL } from './meshbuilder.js';
-import { LANDUSE_TYPE, TALL } from './look.js';
+import { rgba, info, INFO_BUILDING, INFO_REAL, INFO_ROOF } from './meshbuilder.js';
+import { LANDUSE_TYPE, TALL, SIZE_LIMITS } from './look.js';
 import { triangulate, signedArea } from './earclip.js';
 
 const PALETTE = [
@@ -169,8 +169,9 @@ export function buildBuildings(layer, g, mb, maxTris = BUILDING_TRIS, opt = {}) 
   // hist: how the data labels building heights, as a count per band:
   //   none | up to 5 m | 10 | 25 | 50 | 100 | taller. Tells us how much is guesswork.
   // real: buildings that carry a map colour. types: kept buildings per type.
+  // sizes: kept buildings per size group (look.js SIZE_NAMES).
   const stats = { tall: [], kept: 0, dropped: 0, tris: 0, ends: [0, 0, 0], seen: 0, hist: [0, 0, 0, 0, 0, 0, 0],
-                  real: 0, types: [0, 0, 0, 0, 0, 0, 0, 0] };
+                  real: 0, types: [0, 0, 0, 0, 0, 0, 0, 0], sizes: [0, 0, 0, 0] };
   if (!layer) return stats;
   const areas = landuseAreas(opt.landuse);
   const E = layer.extent;
@@ -241,6 +242,7 @@ export function buildBuildings(layer, g, mb, maxTris = BUILDING_TRIS, opt = {}) 
     emit(b, mb, hAt);
     stats.kept++;
     stats.types[b.type]++;
+    stats.sizes[sizeGroup(b)]++;
     if (b.colour) stats.real++;
     if (b.tier === 3) stats.ends[0] = mb.idx.length;
     if (b.tier >= 2) stats.ends[1] = mb.idx.length;
@@ -255,6 +257,13 @@ export function buildBuildings(layer, g, mb, maxTris = BUILDING_TRIS, opt = {}) 
   return stats;
 }
 
+// Size group for the auto colours: 0 houses, 1 big low, 2 mid-rise, 3 towers.
+export function sizeGroup(b) {
+  if (b.height >= SIZE_LIMITS.tall) return 3;
+  if (b.height >= SIZE_LIMITS.low) return 2;
+  return b.area >= SIZE_LIMITS.bigArea ? 1 : 0;
+}
+
 function emit(b, mb, hAt) {
   // The vertex colour is the map colour when there is one (the shader shades
   // it), else the old baked colour, which is only a fallback.
@@ -262,7 +271,8 @@ function emit(b, mb, hAt) {
   const c0 = b.colour ? rgba(b.colour[0], b.colour[1], b.colour[2]) : null;
   const wallTop = c0 || shade(base, 1), wallBot = c0 || shade(base, 0.78), roof = c0 || shade(base, 0.7);
   const fl = INFO_BUILDING | (b.colour ? INFO_REAL : 0), num = b.hash & 255;
-  const iTop = info(b.type, num, 255, fl), iBot = info(b.type, num, 199, fl), iRoof = info(b.type, num, 179, fl);
+  const tg = b.type | (sizeGroup(b) << 4);
+  const iTop = info(tg, num, 255, fl), iBot = info(tg, num, 199, fl), iRoof = info(tg, num, 255, fl | INFO_ROOF);
 
   let gMax = -Infinity;
   const ground = b.rings.map((r) => {

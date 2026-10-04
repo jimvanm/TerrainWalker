@@ -1,6 +1,6 @@
 // All tunables live here.
 
-export const BUILD = '0.12.0';
+export const BUILD = '0.12.10';
 
 // Resolved at runtime to a {z}/{x}/{y} template. Never hardcode the tile URL:
 // the style points at a TileJSON, and that indirection is how the service is

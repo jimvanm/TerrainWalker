@@ -109,6 +109,7 @@ export async function buildNearTile(spec) {
     by: nw12.y - c.y,
     cosLat: Math.cos(mercYToLat(c.y) * Math.PI / 180),
     nodes,
+    cx: c.x, cy: c.y,                 // tile centre, so runway dashes line up across tiles
   };
   const mb = new MeshBuilder();
   const counts = {};

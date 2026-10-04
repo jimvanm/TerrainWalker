@@ -17,7 +17,11 @@
     position: fixed; background: rgba(12,16,22,.72); padding: 6px 10px;
     border-radius: 4px; pointer-events: none; white-space: nowrap;
   }
-  #hud { left: 10px; bottom: 34px; }
+  /* The status bar wraps onto more lines rather than running off the screen.
+     Each item stays whole; it stops short of the button column on the right. */
+  #hud { left: 10px; bottom: 34px; white-space: normal; max-width: calc(100vw - 190px); }
+  #hud .it { display: inline-block; white-space: nowrap; }
+  #hud .sep { color: #6d7d90; margin: 0 6px; }
   #hud .ok { color: #6be08a; }
   #attrib { left: 10px; bottom: 10px; opacity: .75; font-size: 10px; padding: 3px 10px; }
   #perf { position: fixed; left: 10px; bottom: 74px; border-radius: 4px; pointer-events: none; }
@@ -58,7 +62,9 @@
   #ui { position:fixed; right:14px; bottom:44px; width:136px;
         display:flex; flex-direction:column; gap:6px; align-items:stretch; }
   #ui .grid { display:grid; gap:5px; }
-  #layers { grid-template-columns:repeat(2,1fr); }
+  #layers, #looks { grid-template-columns:repeat(2,1fr); }
+  #ui .panelhead { font:600 10px ui-monospace,monospace; color:#dbe3ec; letter-spacing:.08em; text-align:center;
+                   background:rgba(12,16,22,.78); border-radius:4px; padding:3px 0; margin-top:4px; }
   #pad    { grid-template-columns:repeat(3,1fr); }
   #ui button { font:600 11px ui-monospace,monospace; color:#8b97a6; cursor:pointer;
                background:rgba(12,16,22,.78); border:1px solid #3a4552;
@@ -66,7 +72,7 @@
   #ui button:hover { border-color:#6d7d90; }
   #pad button { color:#dbe3ec; }
   #pad button.on { background:#2f6b45; border-color:#4ac07a; color:#fff; }
-  #layers button.on { background:#2a4f6b; border-color:#5aa0d0; color:#fff; }
+  #layers button.on, #looks button.on { background:#2a4f6b; border-color:#5aa0d0; color:#fff; }
   #ui button.wide { grid-column:1 / -1; }
   body.locked #ui button { cursor:default; opacity:.9; }
 
@@ -106,7 +112,7 @@
   <b>WASD</b> move &middot; <b>Q</b>/<b>E</b> down/up &middot; <b>shift</b> run<br>
   <b>G</b> or <b>space space</b> toggle fly &middot; <b>space</b>/<b>shift</b> up/down<br>
   <b>ctrl</b> boost (safe once keys are locked) &middot; <b>wheel</b> fly speed &middot; <b>R</b> reset<br>
-  <b>V</b> water &middot; <b>X</b> roads &middot; <b>B</b> built &middot; <b>C</b> cover &middot; <b>F</b> fog &middot; <b>1</b> grid &middot; <b>2</b> freeze &middot; <b>3</b> flat &middot; <b>6</b> real colours &middot; <b>7</b> colour by type &middot; <b>8</b> colour set &middot; <b>9</b> brighter &middot; <b>P</b> pin place &middot; <b>K</b> copy height report &middot; <b>L</b> copy strain log &middot; <b>H</b> hide this
+  <b>V</b> water &middot; <b>X</b> roads &middot; <b>B</b> built &middot; <b>C</b> cover &middot; <b>F</b> fog &middot; <b>1</b> grid &middot; <b>2</b> freeze &middot; <b>3</b> flat &middot; <b>6</b> real colours &middot; <b>7</b> colour by type &middot; <b>8</b> colour set &middot; <b>9</b> warm &middot; <b>P</b> pin place &middot; <b>K</b> copy height report &middot; <b>L</b> copy strain log &middot; <b>H</b> hide this
 </div>
 
 <div id="ctrl">
