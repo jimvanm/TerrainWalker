@@ -7,6 +7,7 @@ import { Perf, probe } from './perf.js';
 import { startCache, cacheUsage } from './cache.js';
 import { initFavourites } from './favourites.js';
 import { NearField } from './nearfield.js';
+import { Landmarks } from './landmarks.js';
 import {
   NF_MAX_AGL, NF_MAX_SPEED, SKY_RADIUS, LEAD_SECONDS, FLY_MULT_MAX, WALK_MULT_MAX,
   LEVELS, SKIRT, FOV, NEAR, EYE_HEIGHT, BUILD, readHash, writeHash,
@@ -68,6 +69,7 @@ const controls = new Controls(canvas, cam);
 const nearField = new NearField(gl, () => loader.vectorTemplate);
 const farField = new NearField(gl, () => loader.vectorTemplate, { zoom: 13, skyline: true, workers: 2 });
 nearField.partner = farField; farField.partner = nearField;
+const landmarks = new Landmarks(gl);
 
 // Resolve the vector tile template from the service's TileJSON. Terrain still
 // loads if this fails; water is an enhancement, never a dependency.
@@ -108,6 +110,7 @@ addEventListener('keydown', (e) => {
   const rep = {
     at: { lat: +cam.lat.toFixed(5), lon: +cam.lon.toFixed(5), alt: Math.round(cam.alt) },
     near: nearField.report(cam.mercX, cam.mercY), sky: farField.report(cam.mercX, cam.mercY), skyStatus: farField.status, nearStatus: nearField.status,
+    landmarks: landmarks.report(cam.mercX, cam.mercY, mercScale(cam.lat)),
   };
   window.twReport = rep;
   console.log(JSON.stringify(rep, null, 1));
@@ -221,6 +224,9 @@ const LAYERS = [
   { id: 'roads', key: 'KeyX', label: 'ROADS', on: true },
   { id: 'built', key: 'KeyB', label: 'BUILT', on: true },
   { id: 'cover', key: 'KeyC', label: 'COVER', on: true },
+  // Not a shader channel: the landmark models are separate geometry, so this one
+  // is left out of uLayers (see .slice(0, 4) below).
+  { id: 'land', key: 'KeyT', label: 'LANDMARKS', on: true },
 ];
 
 // ---- layer panel ---------------------------------------------------------
@@ -347,6 +353,8 @@ function frame(now) {
     farField.updateFar(cam.mercX, cam.mercY, nearOn, controls.hspeed < NF_MAX_SPEED && !nearField.busy, SKY_RADIUS, nearField.block);
   }
 
+  landmarks.update((x, y) => terrain.heightAt(x, y));
+
   const outer = tileSizeMerc(LEVELS[drawLevels - 1].z) * k * 2;
   // Also a true 3D distance. Flying high, the far corner of the outermost ring
   // is dominated by altitude, not by the ring's horizontal reach.
@@ -367,7 +375,7 @@ function frame(now) {
   gl.uniform1f(U.uFogDensity, fogOn ? 2.4 / viewDist : 0);
   gl.uniform3f(U.uSunDir, 0.40, 0.82, 0.41);
   gl.uniform1f(U.uDebug, debugMode);
-  gl.uniform4f(U.uLayers, ...LAYERS.map((L) => (L.on ? 1 : 0)));
+  gl.uniform4f(U.uLayers, ...LAYERS.slice(0, 4).map((L) => (L.on ? 1 : 0)));
   // Painted roads fade out inside the area the real geometry covers.
   const nr = nearField.rectUniform(cam.mercX, cam.mercY, k, LAYERS[1].on);
   gl.uniform4f(U.uNearRect, nr[0], nr[1], nr[2], nr[3]);
@@ -400,12 +408,14 @@ function frame(now) {
   const farDrawn = terrain.draw(U, cam.mercX, cam.mercY, k, 0, ALL);
   nearField.draw(prog, proj, view, k, cam.alt, cam.mercX, cam.mercY, 1 / (2 * R_MEAN), LAYERS[1].on, LAYERS[2].on);
   farField.draw(prog, proj, view, k, cam.alt, cam.mercX, cam.mercY, 1 / (2 * R_MEAN), false, LAYERS[2].on);
+  if (LAYERS[4].on) landmarks.draw(prog, proj, view, cam.alt, cam.mercX, cam.mercY, 1 / (2 * R_MEAN), k);
   gl.clear(gl.DEPTH_BUFFER_BIT);
   gl.uniformMatrix4fv(U.uProj, false,
     G.perspective(proj, fov, aspect, near, Math.max(splitFar, near * 1000)));
   const nearDrawn = terrain.draw(U, cam.mercX, cam.mercY, k, 0, ALL);
   nearField.draw(prog, proj, view, k, cam.alt, cam.mercX, cam.mercY, 1 / (2 * R_MEAN), LAYERS[1].on, LAYERS[2].on);
   farField.draw(prog, proj, view, k, cam.alt, cam.mercX, cam.mercY, 1 / (2 * R_MEAN), false, LAYERS[2].on);   // the near pass reaches out to splitFar, which is where a 20 km skyline lives
+  if (LAYERS[4].on) landmarks.draw(prog, proj, view, cam.alt, cam.mercX, cam.mercY, 1 / (2 * R_MEAN), k);
 
   // A hole is a tile the draw set says should cover ground but which has not
   // loaded. If this spikes when something flashes, the flashing IS holes.
@@ -440,6 +450,7 @@ function frame(now) {
     [`water ${terrain.waterCount}/${terrain.visible.length}`, terrain.waterCount === terrain.visible.length],
     [`near ${nearField.status}`, nearField.complete],
     [`sky ${farField.status}`, farField.complete],
+    [`land ${landmarks.resolved}/${landmarks.items.length}`, landmarks.resolved === landmarks.items.length],
     [`view ${(viewDist / 1000).toFixed(0)} km`],
     [`${fps.toFixed(0)} fps`, fps >= 50],
   ];

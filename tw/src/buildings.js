@@ -71,8 +71,25 @@ function polygons(parts) {
   return out;
 }
 
+// Does this ring touch a circle? opt.mask circles are { x, y, r } in the same
+// tile-local units as the rings. True when the circle's middle is inside the
+// ring or any edge passes within r of it.
+export function touchesCircle(ring, c) {
+  const n = ring.length / 2;
+  let inside = false;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const x1 = ring[2 * i], y1 = ring[2 * i + 1], x2 = ring[2 * j], y2 = ring[2 * j + 1];
+    if ((y1 > c.y) !== (y2 > c.y) && c.x < ((x2 - x1) * (c.y - y1)) / (y2 - y1) + x1) inside = !inside;
+    const dx = x2 - x1, dy = y2 - y1, L = dx * dx + dy * dy;
+    const t = L ? Math.max(0, Math.min(1, ((c.x - x1) * dx + (c.y - y1) * dy) / L)) : 0;
+    if (Math.hypot(c.x - (x1 + t * dx), c.y - (y1 + t * dy)) < c.r) return true;
+  }
+  return inside;
+}
+
 // g = { size14, size12, bx, by, cosLat, nodes }, same as roads.
 // opt.minHeight : skip anything not KNOWN to be at least this tall (skyline mode)
+// opt.mask      : circles { x, y, r } (tile-local) where no building is drawn: landmark sites
 // opt.sunk      : how far walls start below the ground, for coarse far terrain
 export function buildBuildings(layer, g, mb, maxTris = BUILDING_TRIS, opt = {}) {
   const sunk = opt.sunk === undefined ? SUNK : opt.sunk;
@@ -108,6 +125,7 @@ export function buildBuildings(layer, g, mb, maxTris = BUILDING_TRIS, opt = {}) 
         rings.push(m);
       }
       if (!rings.length) continue;
+      if (opt.mask && opt.mask.some((c) => touchesCircle(rings[0], c))) { stats.masked = (stats.masked || 0) + 1; continue; }
       let area = Math.abs(signedArea(rings[0]));
       for (let k = 1; k < rings.length; k++) area -= Math.abs(signedArea(rings[k]));
       area *= g.cosLat * g.cosLat;                   // m2 true

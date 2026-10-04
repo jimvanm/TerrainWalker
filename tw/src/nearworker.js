@@ -10,6 +10,8 @@ import { tileSizeMerc, tileToMerc, tileCentreMerc, mercYToLat } from './geo.js';
 import { decodeTerrarium, meshNodes, pxMetersFor, PX } from './heightgrid.js';
 import { buildRoads } from './roads.js';
 import { buildBuildings } from './buildings.js';
+import { SITES } from './landmark_sites.js';
+import { lonToMercX, latToMercY } from './geo.js';
 import { signedArea } from './earclip.js';
 import { POLYGON } from './mvt.js';
 import { MeshBuilder } from './meshbuilder.js';
@@ -110,8 +112,17 @@ export async function buildNearTile(spec) {
   const mb = new MeshBuilder();
   const rEnds = skyline ? [0, 0, 0] : buildRoads(layers.transportation, g, mb);
   const bb = new MeshBuilder();
+  // Landmark sites in this tile's local units, so the plain building outline under
+  // a landmark is left out. Only sites that can reach into this tile are passed.
+  const half = g.size14 / 2;
+  const mask = [];
+  for (const L of SITES) {
+    const r = L.maskR / g.cosLat;
+    const mx = lonToMercX(L.lon) - c.x, my = c.y - latToMercY(L.lat);
+    if (Math.abs(mx) < half + r && Math.abs(my) < half + r) mask.push({ x: mx, y: my, r });
+  }
   const stats = buildBuildings(layers.building, g, bb, undefined,
-    skyline ? { minHeight: skyMin, sunk: SKY_SUNK } : {});
+    { ...(skyline ? { minHeight: skyMin, sunk: SKY_SUNK } : {}), mask });
   const r = mb.finish(), b = bb.finish();
   return { vertices: r.vertices, indices: r.indices, verts: r.verts,
            bVertices: b.vertices, bIndices: b.indices, bVerts: b.verts, stats, rEnds };

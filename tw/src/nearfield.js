@@ -30,7 +30,7 @@ void main() {
   gl_Position = uProj * uView * vec4(x, y - drop, z, 1.0);
 }`;
 
-const FS = `#version 300 es
+export const FS = `#version 300 es
 precision highp float;
 in vec3 vPos;
 in vec3 vCol;

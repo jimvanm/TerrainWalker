@@ -47,6 +47,7 @@ whole deployment.
 | wheel | flight speed |
 | `R` | return to the spawn point |
 | `V` `X` `B` `C` | toggle water, roads, built-up, land cover |
+| `T` | toggle landmarks (CN Tower, Eiffel Tower, Canton Tower) |
 | `F` | fog on/off (off by default) |
 | `H` | hide the help panel |
 
