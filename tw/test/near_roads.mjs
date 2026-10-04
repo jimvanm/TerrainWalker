@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { decodeMVT, LINESTRING } from './mvt.js';
-import { nodeHeightAt, GRID } from './heightgrid.js';
-import { buildRoads } from './roads.js';
-import { MeshBuilder } from './meshbuilder.js';
-import { tileSizeMerc } from './geo.js';
-import { buildMesh } from './worker.js';
-import { PX } from './heightgrid.js';
+import { decodeMVT, LINESTRING } from '../src/mvt.js';
+import { nodeHeightAt, GRID } from '../src/heightgrid.js';
+import { buildRoads } from '../src/roads.js';
+import { MeshBuilder } from '../src/meshbuilder.js';
+import { tileSizeMerc } from '../src/geo.js';
+import { buildMesh } from '../src/worker.js';
+import { PX } from '../src/heightgrid.js';
 
 let n = 0;
 const ok = (name) => { n++; console.log('ok  ' + name); };

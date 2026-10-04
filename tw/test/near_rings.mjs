@@ -12,8 +12,8 @@ const gl = new Proxy({}, { get: (_, p) => {
   if (p === 'drawElements') return (mode, n) => draws.push(n);
   return () => ({});
 }});
-const { NearField } = await import('./nearfield.js');
-const { mercToTile } = await import('./geo.js');
+const { NearField } = await import('../src/nearfield.js');
+const { mercToTile } = await import('../src/geo.js');
 const mx = -8847000, my = 5440000;
 const t0 = mercToTile(mx, my, 14), cx = Math.floor(t0.x), cy = Math.floor(t0.y);
 const M = new Float32Array(16);

@@ -2,13 +2,13 @@
 // for the colour keys (6 real, 7 type, 8 set, 9 brighter).
 // Run: node src/test_look.mjs
 import assert from 'node:assert/strict';
-import { buildRoads } from './roads.js';
-import { buildBuildings, parseColour } from './buildings.js';
-import { MeshBuilder } from './meshbuilder.js';
-import { GRID, nodeHeightAt } from './heightgrid.js';
-import { tileSizeMerc } from './geo.js';
-import { POLYGON, LINESTRING } from './mvt.js';
-import { parseRef, numberFor, fitRect } from './runways.js';
+import { buildRoads } from '../src/roads.js';
+import { buildBuildings, parseColour } from '../src/buildings.js';
+import { MeshBuilder } from '../src/meshbuilder.js';
+import { GRID, nodeHeightAt } from '../src/heightgrid.js';
+import { tileSizeMerc } from '../src/geo.js';
+import { POLYGON, LINESTRING } from '../src/mvt.js';
+import { parseRef, numberFor, fitRect } from '../src/runways.js';
 
 const ok = (m) => console.log('ok  ' + m);
 const size12 = tileSizeMerc(12), size14 = tileSizeMerc(14), V = GRID + 1;
@@ -170,7 +170,7 @@ const hAt = (e, s) => nodeHeightAt(nodes, (e + g.bx) / size12, (g.by + s) / size
 // must get exactly one number, and split points none.
 {
   const { readFileSync } = await import('node:fs');
-  const tiles = JSON.parse(readFileSync(new URL('./test_runway_data.json', import.meta.url)));
+  const tiles = JSON.parse(readFileSync(new URL('./runway_data.json', import.meta.url)));
   const want = {
     '14/4569/5977': ['24R'], '14/4569/5978': ['24L'], '14/4568/5977': [], '14/4568/5978': ['06L', '33R'],
     '14/4568/5979': ['06R'], '14/4567/5977': [], '14/4567/5978': ['33L'],

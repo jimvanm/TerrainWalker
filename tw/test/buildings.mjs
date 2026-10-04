@@ -1,7 +1,7 @@
-import { buildBuildings } from './buildings.js';
-import { MeshBuilder } from './meshbuilder.js';
-import { POLYGON } from './mvt.js';
-import { GRID } from './heightgrid.js';
+import { buildBuildings } from '../src/buildings.js';
+import { MeshBuilder } from '../src/meshbuilder.js';
+import { POLYGON } from '../src/mvt.js';
+import { GRID } from '../src/heightgrid.js';
 const ok = (c, m) => { if (!c) { console.error('FAIL', m); process.exit(1); } console.log('ok  ' + m); };
 
 const V = GRID + 1;

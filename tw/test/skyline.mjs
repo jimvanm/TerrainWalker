@@ -11,8 +11,8 @@ const gl = new Proxy({}, { get: (_, p) => {
   if (p === 'getExtension') return () => null;
   return () => ({});
 }});
-const { NearField } = await import('./nearfield.js');
-const { mercToTile } = await import('./geo.js');
+const { NearField } = await import('../src/nearfield.js');
+const { mercToTile } = await import('../src/geo.js');
 const mx = -8847000, my = 5440000;
 const t14 = mercToTile(mx, my, 14), cx = Math.floor(t14.x), cy = Math.floor(t14.y);
 const tpl = () => 'https://v/{z}/{x}/{y}.pbf';

@@ -9,9 +9,9 @@ const gl = new Proxy({}, { get: (_, p) => {
   if (p === 'getExtension') return () => null;
   return () => ({});
 }});
-const { NearField } = await import('./nearfield.js');
-const { Terrain } = await import('./terrain.js');
-const { mercToTile, tileToMerc } = await import('./geo.js');
+const { NearField } = await import('../src/nearfield.js');
+const { Terrain } = await import('../src/terrain.js');
+const { mercToTile, tileToMerc } = await import('../src/geo.js');
 
 const nf = new NearField(gl, () => 'https://v/{z}/{x}/{y}.pbf');
 const mx = -8847000, my = 5440000;
@@ -85,7 +85,7 @@ console.log('\nsmoke ok');
   assert.match(nf2.status, /too fast/);
   console.log('ok  near field also wants tiles ahead; says so when too fast to fetch');
 
-  const { Controls } = await import('./controls.js');
+  const { Controls } = await import('../src/controls.js');
   const fake = { cam: { fly: 1 }, flyMult: 1, walkMult: 1 };
   Controls.prototype.bump.call(fake, 1.5);
   assert.equal(fake.flyMult, 1.5); assert.equal(fake.walkMult, 1);

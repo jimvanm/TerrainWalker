@@ -22,7 +22,7 @@ function layer(name, geom, cls) {
 }
 const tile = new Uint8Array([...layer('building', rect(0, 0, 4096, 2048)), ...layer('landuse', rect(0, 0, 2048, 4096), 'residential')]);
 globalThis.fetch = async () => new Response(tile, { status: 200 });
-const { buildNearTile } = await import('./nearworker.js');
+const { buildNearTile } = await import('../src/nearworker.js');
 const r = await buildNearTile({ marker: true, vurl: 'https://v/13/1/1.pbf', skyline: true });
 assert.ok(Math.abs(r.stats.cover - 0.5) < 1e-9, 'half-covered by buildings: ' + r.stats.cover);
 assert.ok(Math.abs(r.stats.built - 0.5) < 1e-9, 'half residential land use: ' + r.stats.built);

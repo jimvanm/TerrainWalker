@@ -78,6 +78,9 @@ function el() {
     requestPointerLock() {}, setAttribute() {},
     querySelectorAll: () => PAD,
     appendChild(c) { (this._kids = this._kids || []).push(c); },
+    append(...c) { (this._kids = this._kids || []).push(...c); },
+    after() {}, before() {}, remove() {}, focus() {}, select() {},
+    offsetHeight: 20, children: [], dataset: {},
     getContext: () => makeGL(), width: 0, height: 0,
   };
 }
@@ -174,14 +177,14 @@ for (const b of layerBtns) for (const [t, f] of (b._h || [])) { try { f({ preven
 const R = [];
 const ok = (c, m) => { R.push((c ? 'PASS  ' : 'FAIL  ') + m); if (!c) process.exitCode = 1; };
 
-ok(layerBtns.length === 4, `layer panel built ${layerBtns.length} buttons (expect 4)`);
-ok(toggled === 4, `all ${toggled} layer toggles fired cleanly`);
+ok(layerBtns.length === 5, `layer panel built ${layerBtns.length} buttons (expect 5)`);
+ok(toggled === 5, `all ${toggled} layer toggles fired cleanly`);
 ok(log.mipmaps > 0, `generated mipmaps for ${log.mipmaps} textures`);
 ok(log.textures > 0, `uploaded ${log.texUploads} textures across ${log.textures} objects`);
 ok(log.texSizes.has('256x256'), `mask textures are 256x256 (${[...log.texSizes].join(', ')})`);
 ok(padFired >= 8, `fired ${padFired} pad handlers without throwing`);
-ok(workerCount === 3, `spawned ${workerCount} workers`);
-ok(log.uniforms.size === 16, `resolved ${log.uniforms.size} uniform locations (expect 16)`);
+ok(workerCount === 9, `spawned ${workerCount} workers (3 terrain, 4 near, 2 skyline)`);
+ok(log.uniforms.size === 24, `resolved ${log.uniforms.size} distinct uniform names (expect 24)`);
 ok(log.badUniform.length === 0, `no null uniform locations (${log.badUniform.length})`);
 ok(log.nan.length === 0, `no NaN/Inf uniform values (${log.nan.length}${log.nan.length ? ': ' + log.nan.slice(0, 3) : ''})`);
 ok(log.draws > 0, `issued ${log.draws} draw calls over ${FRAMES} frames`);
@@ -190,3 +193,5 @@ ok(log.clears >= FRAMES, `${log.clears} clears (2 per frame for the depth split)
 console.log('\n' + R.join('\n'));
 console.log(`\ntriangles submitted total: ${(log.tris / 1e6).toFixed(1)}M over ${FRAMES} frames`);
 console.log(`≈ ${(log.tris / FRAMES / 1000).toFixed(0)}k tris/frame, ${(log.draws / FRAMES).toFixed(0)} draws/frame`);
+// The app sets repeating timers (cache polling), so leave explicitly.
+process.exit(process.exitCode || 0);

@@ -1,10 +1,10 @@
 // Far tiles draw only the start of the index buffer, so the buffer must really
 // be ordered most-important-first and the recorded ends must be right.
-import { buildBuildings } from './buildings.js';
-import { buildRoads, ROAD_STYLE } from './roads.js';
-import { MeshBuilder } from './meshbuilder.js';
-import { POLYGON, LINESTRING } from './mvt.js';
-import { GRID } from './heightgrid.js';
+import { buildBuildings } from '../src/buildings.js';
+import { buildRoads, ROAD_STYLE } from '../src/roads.js';
+import { MeshBuilder } from '../src/meshbuilder.js';
+import { POLYGON, LINESTRING } from '../src/mvt.js';
+import { GRID } from '../src/heightgrid.js';
 const ok = (c, m) => { if (!c) { console.error('FAIL', m); process.exit(1); } console.log('ok  ' + m); };
 const V = GRID + 1, size14 = 2446, size12 = size14 * 4;
 const g = { size14, size12, bx: size12 / 2, by: size12 / 2, cosLat: 0.72, nodes: new Float32Array(V * V).fill(100) };

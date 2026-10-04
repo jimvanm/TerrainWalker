@@ -1,4 +1,4 @@
-import { despike, decodeTerrarium, pxMetersFor, PX } from './heightgrid.js';
+import { despike, decodeTerrarium, pxMetersFor, PX } from '../src/heightgrid.js';
 const ok = (c, m) => { if (!c) { console.error('FAIL', m); process.exit(1); } console.log('ok  ' + m); };
 const make = (f) => { const h = new Float32Array(PX * PX); for (let y = 0; y < PX; y++) for (let x = 0; x < PX; x++) h[y * PX + x] = f(x, y); return h; };
 const px12 = pxMetersFor(12, 1788);

@@ -1,4 +1,4 @@
-import { triangulate, signedArea } from './earclip.js';
+import { triangulate, signedArea } from '../src/earclip.js';
 const ok = (c, m) => { if (!c) { console.error('FAIL', m); process.exit(1); } console.log('ok  ' + m); };
 const area = (rings, res) => {
   // rebuild coordinates through src

@@ -1,9 +1,9 @@
 // Landmark models: sane data, right sizes, and a correct vertex buffer.
 import assert from 'node:assert/strict';
-const { MODELS } = await import('./landmark_models.js');
+const { MODELS } = await import('../src/landmark_models.js');
 // landmarks.js pulls in gl.js and nearfield.js, which look for a page.
 globalThis.document = { getElementById: () => ({ style: {} }) };
-const { LANDMARKS, buildVertices } = await import('./landmarks.js');
+const { LANDMARKS, buildVertices } = await import('../src/landmarks.js');
 
 const height = { cn: 553.3, eiffel: 330, canton: 602 };
 for (const L of LANDMARKS) {
@@ -31,10 +31,10 @@ for (const L of LANDMARKS) {
 }
 
 // ---- masking the ordinary building outlines under a landmark ----
-const { touchesCircle, buildBuildings } = await import('./buildings.js');
-const { MeshBuilder } = await import('./meshbuilder.js');
-const { POLYGON } = await import('./mvt.js');
-const { GRID } = await import('./heightgrid.js');
+const { touchesCircle, buildBuildings } = await import('../src/buildings.js');
+const { MeshBuilder } = await import('../src/meshbuilder.js');
+const { POLYGON } = await import('../src/mvt.js');
+const { GRID } = await import('../src/heightgrid.js');
 const sq = (x, y, w) => [x, y, x + w, y, x + w, y + w, x, y + w];
 assert.ok(touchesCircle(sq(0, 0, 100), { x: 50, y: 50, r: 5 }), 'circle inside a building touches it');
 assert.ok(touchesCircle(sq(0, 0, 100), { x: 105, y: 50, r: 10 }), 'circle poking over an edge touches it');
@@ -57,14 +57,14 @@ assert.equal(masked.kept, 1, 'the building under the landmark is left out, the o
 assert.equal(masked.masked, 1);
 
 // ---- the camera can run past longitude 180; towers must still be found ----
-const { wrapMercDx, EQUATOR } = await import('./geo.js');
+const { wrapMercDx, EQUATOR } = await import('../src/geo.js');
 assert.ok(Math.abs(wrapMercDx(EQUATOR + 5) - 5) < 1e-6, 'one lap round the world is no distance');
 assert.ok(Math.abs(wrapMercDx(-EQUATOR - 5) + 5) < 1e-6, 'and the other way round');
 assert.equal(wrapMercDx(1234), 1234, 'a nearby place is untouched');
 assert.ok(Math.abs(wrapMercDx(0.6 * EQUATOR) + 0.4 * EQUATOR) < 1e-6, 'past halfway, the short way round is used');
 
 // ---- heading from map outlines (orient.js) ----
-const O = await import('./orient.js');
+const O = await import('../src/orient.js');
 const near = (a, b, tol = 0.05) => Math.abs(O.wrapTo(a - b, 360)) < tol;
 assert.equal(O.wrapTo(100, 90), 10); assert.equal(O.wrapTo(-100, 90), -10); assert.equal(O.wrapTo(45, 90), 45);
 const box = (w, h) => [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]];
@@ -81,7 +81,7 @@ const gl = new Proxy({}, { get: (_, p) => {
   if (['getShaderParameter', 'getProgramParameter'].includes(p)) return () => true;
   return () => ({});
 } });
-const { Landmarks } = await import('./landmarks.js');
+const { Landmarks } = await import('../src/landmarks.js');
 const lm = new Landmarks(gl);
 for (const it of lm.items) {
   assert.ok(it.footprint.length >= 3, it.id + ' has a footprint');

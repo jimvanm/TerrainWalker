@@ -8,7 +8,7 @@ globalThis.document = { pointerLockElement: null, exitPointerLock() { this.exite
     focus() {}, select() {} }) };
 const root = document.createElement('div');
 Object.defineProperty(root, 'textContent', { set(v) { this.children = []; }, get() { return ''; } });
-const { initFavourites } = await import('./favourites.js');
+const { initFavourites } = await import('../src/favourites.js');
 let jumped = null;
 const ui = initFavourites({ root, jump: (p) => { jumped = p; },
   getView: () => ({ lat: 1.23456, lon: 2.34567, alt: 500, agl: 120, yaw: 10, pitch: -5, fly: 1 }) });

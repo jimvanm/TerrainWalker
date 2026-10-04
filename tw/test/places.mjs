@@ -1,6 +1,6 @@
 const mem = new Map();
 globalThis.localStorage = { getItem: (k) => mem.has(k) ? mem.get(k) : null, setItem: (k, v) => mem.set(k, String(v)) };
-const P = await import('./places.js');
+const P = await import('../src/places.js');
 const ok = (c, m) => { if (!c) { console.error('FAIL', m); process.exit(1); } console.log('ok  ' + m); };
 
 let l = P.loadPlaces();

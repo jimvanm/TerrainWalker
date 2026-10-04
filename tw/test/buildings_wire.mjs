@@ -1,8 +1,8 @@
 // A real MVT polygon, encoded the way a map server does, through decode -> build.
-import { decodeMVT, POLYGON } from './mvt.js';
-import { buildBuildings } from './buildings.js';
-import { MeshBuilder } from './meshbuilder.js';
-import { GRID } from './heightgrid.js';
+import { decodeMVT, POLYGON } from '../src/mvt.js';
+import { buildBuildings } from '../src/buildings.js';
+import { MeshBuilder } from '../src/meshbuilder.js';
+import { GRID } from '../src/heightgrid.js';
 const vi = (x) => { const b = []; while (x >= 128) { b.push((x % 128) | 128); x = Math.floor(x / 128); } b.push(x); return b; };
 const key = (f, w) => vi(f * 8 + w);
 const ld = (f, bytes) => [...key(f, 2), ...vi(bytes.length), ...bytes];

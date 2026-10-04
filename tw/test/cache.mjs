@@ -9,7 +9,7 @@ globalThis.caches = { open: async () => ({
 let net = 0, down = false;
 globalThis.fetch = async (u) => { net++; if (down) throw new Error('offline');
   return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'image/png' } }); };
-const { cachedFetch } = await import('./cache.js');
+const { cachedFetch } = await import('../src/cache.js');
 const ok = (c, m) => { if (!c) { console.error('FAIL', m); process.exit(1); } console.log('ok  ' + m); };
 
 let r = await cachedFetch('u1'); await r.arrayBuffer(); await new Promise((s) => setTimeout(s, 20));
