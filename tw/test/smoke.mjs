@@ -41,6 +41,8 @@ function makeGL() {
     uniform1f: (l, v) => chk(l, [v]),
     uniform2f: (l, a, b) => chk(l, [a, b]),
     uniform3f: (l, a, b, c) => chk(l, [a, b, c]),
+    uniform3fv: (l, v) => chk(l, [...v]),
+    uniform4fv: (l, v) => chk(l, [...v]),
     uniformMatrix4fv: (l, t, m) => chk(l, m),
   };
   function chk(loc, vals) {
@@ -117,6 +119,19 @@ let workerCount = 0;
 globalThis.Worker = class {
   constructor() { workerCount++; this.onmessage = null; }
   postMessage(m) {
+    // Near field and skyline jobs carry an elevation URL; answer those with a
+    // small road and building mesh, the way nearworker.js would.
+    if (m.eurl) {
+      const v = new ArrayBuffer(4 * 16);
+      const tri = () => new Uint32Array([0, 1, 2, 0, 2, 3]);
+      setTimeout(() => this.onmessage && this.onmessage({ data: {
+        id: m.id, ok: true, vertices: v.slice(0), indices: tri(), verts: 4,
+        bVertices: v.slice(0), bIndices: tri(), bVerts: 4, bInfo: new Uint8Array(16),
+        rEnds: [6, 6, 6],
+        stats: { seen: 1, kept: 1, dropped: 0, ends: [6, 6, 6], cover: 0.5, built: 0.5 },
+      } }), 0);
+      return;
+    }
     const px = 256;
     const h = new Float32Array(px * px);
     for (let j = 0; j < px; j++) {
@@ -198,9 +213,12 @@ ok(log.texSizes.has('256x256'), `mask textures are 256x256 (${[...log.texSizes].
 ok(keysFired === 2 * KEYS.filter((x) => x.act).length, `pressed every action key twice (${keysFired}) without throwing`);
 ok(padFired >= 8, `fired ${padFired} pad handlers without throwing`);
 ok(workerCount === 9, `spawned ${workerCount} workers (3 terrain, 4 near, 2 skyline)`);
-ok(log.uniforms.size === 24, `resolved ${log.uniforms.size} distinct uniform names (expect 24)`);
+ok(log.uniforms.size === 23, `resolved ${log.uniforms.size} distinct uniform names (expect 23: terrain 17, mesh adds 6)`);
 ok(log.badUniform.length === 0, `no null uniform locations (${log.badUniform.length})`);
 ok(log.nan.length === 0, `no NaN/Inf uniform values (${log.nan.length}${log.nan.length ? ': ' + log.nan.slice(0, 3) : ''})`);
+const rep = globalThis.twReport;   // left behind by the K key
+ok(rep && /bldg/.test(rep.nearStatus), `near field loaded and drew buildings (${rep && rep.nearStatus})`);
+ok(rep && /urban [1-9]/.test(rep.skyStatus), `skyline found built-up tiles (${rep && rep.skyStatus})`);
 ok(log.draws > 0, `issued ${log.draws} draw calls over ${FRAMES} frames`);
 ok(log.buffers > 0, `created ${log.buffers} GL buffers`);
 ok(log.clears >= FRAMES, `${log.clears} clears (2 per frame for the depth split)`);

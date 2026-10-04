@@ -1,7 +1,7 @@
 // Landmark models: sane data, right sizes, and a correct vertex buffer.
 import assert from 'node:assert/strict';
 const { MODELS } = await import('../src/landmark_models.js');
-// landmarks.js pulls in gl.js and nearfield.js, which look for a page.
+// landmarks.js pulls in modules that look for a page.
 globalThis.document = { getElementById: () => ({ style: {} }) };
 const { LANDMARKS, buildVertices } = await import('../src/landmarks.js');
 
@@ -82,7 +82,8 @@ const gl = new Proxy({}, { get: (_, p) => {
   return () => ({});
 } });
 const { Landmarks } = await import('../src/landmarks.js');
-const lm = new Landmarks(gl);
+const { MeshProgram } = await import('../src/meshprogram.js');
+const lm = new Landmarks(gl, new MeshProgram(gl));
 for (const it of lm.items) {
   assert.ok(it.footprint.length >= 3, it.id + ' has a footprint');
   if (!it.fold) { assert.ok(O.dominantBearing(O.edgesOf(it.footprint), 4).strength < 0.1, it.id + ' is round'); continue; }

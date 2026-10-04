@@ -2,36 +2,10 @@
 // They are drawn like the near field (camera-relative, same curve drop, same
 // shading) but are never fetched and never culled by distance: the Earth's
 // curve hides them when they are over the horizon, which is the right rule.
-import * as G from './gl.js';
-import { FS } from './nearfield.js';
 import { lonToMercX, latToMercY, mercScale, wrapMercDx } from './geo.js';
 import { MODELS } from './landmark_models.js';
 import { SITES } from './landmark_sites.js';
 import { hull, polygonArea, edgesOf, dominantBearing, suggestYaw, ovalAxis, wrapTo } from './orient.js';
-
-// Same as the near field's vertex shader, except the model is scaled by its OWN
-// latitude (uModelK), not the camera's, so a tower seen from far away keeps its shape.
-const VS = `#version 300 es
-precision highp float;
-in vec3 aPos;
-in vec4 aCol;
-uniform mat4  uProj;
-uniform mat4  uView;
-uniform vec2  uTileOffset;
-uniform float uModelK;
-uniform float uCamAlt;
-uniform float uCurv;
-out vec3 vPos;
-out vec3 vCol;
-void main() {
-  float x = aPos.x + uTileOffset.x;
-  float z = aPos.z + uTileOffset.y;
-  float y = aPos.y - uCamAlt;
-  vPos = vec3(x, y, z);
-  vCol = aCol.rgb;
-  float drop = (x * x + z * z) * uCurv;
-  gl_Position = uProj * uView * vec4(x, y - drop, z, 1.0);
-}`;
 
 export const LANDMARKS = SITES;
 const SINK = 6;   // metres below the ground sample, so a sloping site never shows a gap
@@ -58,29 +32,15 @@ export function buildVertices(model, yawDeg = 0) {
 }
 
 export class Landmarks {
-  constructor(gl) {
+  // mesh: the shared MeshProgram (meshprogram.js). Landmark vertices are
+  // already in true metres, so they are drawn with uScale = 1.
+  constructor(gl, mesh) {
     this.gl = gl;
-    this.prog = G.program(gl, VS, FS);
-    this.u = {};
-    for (const n of ['uProj', 'uView', 'uTileOffset', 'uModelK', 'uCamAlt', 'uCurv', 'uSunDir']) {
-      this.u[n] = gl.getUniformLocation(this.prog, n);
-    }
-    const aPos = gl.getAttribLocation(this.prog, 'aPos');
-    const aCol = gl.getAttribLocation(this.prog, 'aCol');
+    this.mesh = mesh;
     this.items = LANDMARKS.map((L) => {
       const model = MODELS[L.id];
       const { vertices, indices } = buildVertices(model, L.yawDeg);
-      const vao = gl.createVertexArray(), vbo = gl.createBuffer(), ibo = gl.createBuffer();
-      gl.bindVertexArray(vao);
-      gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
-      gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
-      gl.enableVertexAttribArray(aPos);
-      gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 16, 0);
-      gl.enableVertexAttribArray(aCol);
-      gl.vertexAttribPointer(aCol, 4, gl.UNSIGNED_BYTE, true, 16, 12);
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
-      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
-      gl.bindVertexArray(null);
+      const { vao } = mesh.buffers(vertices, indices, null);
       // Ground footprint in [east, north] metres, before any yaw, for orient.js.
       const foot = [];
       for (let i = 0; i < model.pos.length; i += 3) if (model.pos[i + 1] < 4) foot.push([model.pos[i], -model.pos[i + 2]]);
@@ -105,26 +65,22 @@ export class Landmarks {
 
   get resolved() { return this.items.filter((it) => it.base !== null).length; }
 
-  // Draws every tower whose ground is known. `restore` is the program to hand back.
-  draw(restore, proj, view, camAlt, camMercX, camMercY, curv, k) {
-    const gl = this.gl, u = this.u;
-    gl.useProgram(this.prog);
-    gl.uniformMatrix4fv(u.uProj, false, proj);
-    gl.uniformMatrix4fv(u.uView, false, view);
-    gl.uniform1f(u.uCurv, curv);
-    gl.uniform3f(u.uSunDir, 0.40, 0.82, 0.41);
+  // Draws every tower whose ground is known. The mesh program must already be
+  // in use for this pass; uScale and uCamAlt are changed here, so landmarks are
+  // drawn last.
+  draw(pass) {
+    const gl = this.gl, u = this.mesh.u;
+    gl.uniform1f(u.uScale, 1);
     for (const it of this.items) {
       if (it.base === null) continue;
-      gl.uniform1f(u.uModelK, it.k);
       // Height is relative to the tower's own base: shift the camera, not the model.
-      gl.uniform1f(u.uCamAlt, camAlt - it.base);
+      gl.uniform1f(u.uCamAlt, pass.alt - it.base);
       // Offset uses the camera's scale, exactly like tile offsets do.
       // The camera's longitude can have wrapped past 180, so take the nearest copy of the tower.
-      gl.uniform2f(u.uTileOffset, wrapMercDx(it.mx - camMercX) * k, (camMercY - it.my) * k);
+      gl.uniform2f(u.uTileOffset, wrapMercDx(it.mx - pass.mercX) * pass.k, (pass.mercY - it.my) * pass.k);
       gl.bindVertexArray(it.vao);
       gl.drawElements(gl.TRIANGLES, it.count, gl.UNSIGNED_INT, 0);
     }
-    gl.useProgram(restore);
   }
 
   // What the map's building outlines say about each tower's heading. `outlines` are

@@ -1,25 +1,19 @@
 import assert from 'node:assert/strict';
-globalThis.document = { getElementById: () => ({ style: {} }) };
-const posted = [];
-globalThis.Worker = class { postMessage(m) { posted.push(m); } };
-const gl = new Proxy({}, { get: (_, p) => {
-  if (p === 'getAttribLocation') return (_, n) => (n === 'aPos' ? 0 : 1);
-  if (['getShaderParameter', 'getProgramParameter'].includes(p)) return () => true;
-  if (p === 'getParameter') return () => 8;
-  if (p === 'getExtension') return () => null;
-  return () => ({});
-}});
-const { NearField } = await import('../src/nearfield.js');
+import { posted, fakeGL, TEMPLATE, view, pass, finishAll } from './_fakes.mjs';
+const gl = fakeGL();
+const { MeshProgram } = await import('../src/meshprogram.js');
+const { NearLayer } = await import('../src/near.js');
 const { Terrain } = await import('../src/terrain.js');
 const { mercToTile, tileToMerc } = await import('../src/geo.js');
 
-const nf = new NearField(gl, () => 'https://v/{z}/{x}/{y}.pbf');
+const mesh = new MeshProgram(gl);
+const nf = new NearLayer(gl, mesh, TEMPLATE);
 const mx = -8847000, my = 5440000;
 const tick = (fetchOk, R) => {
-  for (const [id] of [...nf.inflight]) nf._done(nf.workers[0], { id, ok: true, vertices: new ArrayBuffer(48), indices: new Uint32Array([0,1,2]), verts: 3 });
-  nf.update(mx, my, true, fetchOk, R);
+  finishAll(nf, { vertices: new ArrayBuffer(48), indices: new Uint32Array([0, 1, 2]), verts: 3 });
+  nf.update(view(mx, my, { fetchOk, R }));
 };
-nf.update(mx, my, true, true, 2);
+nf.update(view(mx, my, { R: 2 }));
 assert.ok(nf.want.length >= 25 && nf.want.length <= 36, 'block covers 5x5, stretched to whole z13 tiles: ' + nf.want.length);
 assert.equal(nf.rect, null, 'no cover before anything loaded');
 for (let i = 0; i < 40; i++) tick(true, 2);
@@ -31,20 +25,20 @@ console.log('ok  5x5 loads; the painted-road cover is the 3x3 full-detail block'
 
 // fetch gating: fast flight asks for nothing new but keeps drawing what it has
 const posted0 = posted.length;
-nf.update(mx + 20000, my, true, false, 2);          // moved ~10 tiles, fetch not allowed
+nf.update(view(mx + 20000, my, { fetchOk: false, R: 2 }));   // moved ~10 tiles, fetch not allowed
 assert.equal(posted.length, posted0, 'no fetch when too fast');
-assert.equal(nf.queue.size, 0);
-nf.update(mx + 60000, my, true, false, 2);          // ~25 tiles away: past the draw limit
-assert.equal(nf.draw({}, new Float32Array(16), new Float32Array(16), 0.7, 0, mx + 60000, my, 0, true), 0, 'tiles beyond the draw limit are not drawn');
-nf.update(mx + 20000, my, true, false, 2);
-assert.ok(nf.draw({}, new Float32Array(16), new Float32Array(16), 0.7, 0, mx + 20000, my, 0, true) > 0, 'tiles already in memory stay drawn after the camera moves on');
-nf.update(mx, my, true, false, 2);
-assert.ok(nf.draw({}, new Float32Array(16), new Float32Array(16), 0.7, 0, mx, my, 0, true) > 0, 'cached tiles still draw at speed');
+assert.equal(nf.pool.queue.size, 0);
+nf.update(view(mx + 60000, my, { fetchOk: false, R: 2 }));   // ~25 tiles away: past the draw limit
+assert.equal(nf.draw(pass(mx + 60000, my), true, true), 0, 'tiles beyond the draw limit are not drawn');
+nf.update(view(mx + 20000, my, { fetchOk: false, R: 2 }));
+assert.ok(nf.draw(pass(mx + 20000, my), true, true) > 0, 'tiles already in memory stay drawn after the camera moves on');
+nf.update(view(mx, my, { fetchOk: false, R: 2 }));
+assert.ok(nf.draw(pass(mx, my), true, true) > 0, 'cached tiles still draw at speed');
 console.log('ok  fast flight fetches nothing but still draws cached tiles');
 
 // cover block never claims a tile that is not loaded
 nf.tiles.delete((cx + 1) + '/' + cy);                // knock out a tile east of centre
-nf.update(mx, my, true, false, 2);
+nf.update(view(mx, my, { fetchOk: false, R: 2 }));
 const r = nf.rect;
 assert.ok(r.e <= tileToMerc(cx + 1, cy, 14).x + 1e-6, 'rect stops at the hole');
 console.log('ok  covered block stops at a missing tile (painted road stays there)');
@@ -53,7 +47,7 @@ console.log('ok  covered block stops at a missing tile (painted road stays there
 assert.deepEqual(nf.rectUniform(mx, my, 0.7, false), [1, 1, -1, -1]);
 const ru = nf.rectUniform(mx, my, 0.7, true);
 assert.ok(ru[0] < 0 && ru[2] > ru[0] && ru[1] < ru[3], JSON.stringify(ru));
-nf.update(mx, my, false, true, 1);
+nf.update(view(mx, my, { on: false, R: 1 }));
 assert.deepEqual(nf.rectUniform(mx, my, 0.7, true), [1, 1, -1, -1]);
 console.log('ok  rect uniform is empty when off and camera-relative when on');
 
@@ -78,10 +72,10 @@ console.log('\nsmoke ok');
 
 // ---- 0.8.2: lead tiles and wheel scaling ----
 {
-  const nf2 = new NearField(gl, () => 'https://v/{z}/{x}/{y}.pbf');
-  nf2.update(mx, my, true, true, 1, mx + 20000, my, true);
+  const nf2 = new NearLayer(gl, mesh, TEMPLATE);
+  nf2.update(view(mx, my, { R: 1, lead: [mx + 20000, my] }));
   assert.ok(nf2.want.length > 9, 'lead tiles added: ' + nf2.want.length);
-  nf2.update(mx, my, true, false, 1, mx + 20000, my, true);
+  nf2.update(view(mx, my, { R: 1, fetchOk: false, lead: [mx + 20000, my] }));
   assert.match(nf2.status, /too fast/);
   console.log('ok  near field also wants tiles ahead; says so when too fast to fetch');
 

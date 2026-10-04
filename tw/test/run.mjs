@@ -1,5 +1,6 @@
 // Runs every test in this folder:   node test/run.mjs
 // Add a name to run only matching tests:   node test/run.mjs near
+// Files starting with _ are shared helpers, not tests.
 //
 // Each test runs in its own Node process, because each one fakes a different
 // slice of the browser (document, Worker, WebGL) on the global object, and
@@ -13,7 +14,7 @@ import { dirname, join } from 'node:path';
 const here = dirname(fileURLToPath(import.meta.url));
 const only = process.argv[2] || '';
 const files = readdirSync(here)
-  .filter((f) => f.endsWith('.mjs') && f !== 'run.mjs' && f.includes(only))
+  .filter((f) => f.endsWith('.mjs') && f !== 'run.mjs' && !f.startsWith('_') && f.includes(only))
   .sort();
 
 const TIMEOUT_MS = 120000;

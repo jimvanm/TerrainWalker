@@ -1,9 +1,11 @@
 // Owns the GPU buffers for loaded tiles, decides what to request, and draws.
 
+import * as G from './gl.js';
+import { TERRAIN_VS, TERRAIN_FS } from './shaders.js';
 import { probe } from './perf.js';
 import { computeBlocks } from './rings.js';
 import { keyOf } from './tiles.js';
-import { CACHE_TILES, LEVELS } from './config.js';
+import { CACHE_TILES, LEVELS, SKIRT } from './config.js';
 import { tileSizeMerc, mercToTile, HALF } from './geo.js';
 
 const PX = 256;
@@ -11,6 +13,13 @@ const PX = 256;
 export class Terrain {
   constructor(gl, loader) {
     this.gl = gl;
+    this.prog = G.program(gl, TERRAIN_VS, TERRAIN_FS);
+    this.u = G.uniforms(gl, this.prog, ['uProj', 'uView', 'uTileOffset', 'uScale', 'uCamAlt',
+      'uCurv', 'uSkirt', 'uFogColor', 'uFogDensity', 'uSunDir',
+      'uTileSize', 'uMask', 'uCover', 'uLayers', 'uDebug', 'uLevel', 'uNearRect']);
+    gl.useProgram(this.prog);
+    gl.uniform1i(this.u.uMask, 0);    // texture units
+    gl.uniform1i(this.u.uCover, 1);
     // Bound wherever a tile has no water data, so the shader needs no branch.
     this.aniso = gl.getExtension('EXT_texture_filter_anisotropic');
     this.anisoMax = this.aniso
@@ -193,14 +202,27 @@ export class Terrain {
     return fetchList.length;
   }
 
-  draw(u, camMercX, camMercY, k, levelMin, levelMax) {
-    const gl = this.gl;
+  // pass:    the camera for this depth pass (main.js)
+  // shading: what is the same for every tile this frame
+  //          { fogColor, fogDensity, debug, layers: [water, roads, built, cover], nearRect }
+  draw(pass, shading) {
+    const gl = this.gl, u = this.u;
+    gl.useProgram(this.prog);
+    G.setCamera(gl, u, pass);
+    gl.uniform1f(u.uScale, pass.k);
+    gl.uniform1f(u.uSkirt, SKIRT);
+    gl.uniform3fv(u.uFogColor, shading.fogColor);
+    // Density 0 disables fog exactly: 1 - exp(0) = 0, no branch needed.
+    gl.uniform1f(u.uFogDensity, shading.fogDensity);
+    gl.uniform1f(u.uDebug, shading.debug);
+    gl.uniform4fv(u.uLayers, shading.layers);
+    // Painted roads fade out inside the area the real geometry covers.
+    gl.uniform4fv(u.uNearRect, shading.nearRect);
     let drawn = 0;
     for (const t of this.visible) {
-      if (t.level < levelMin || t.level > levelMax) continue;
       gl.uniform2f(u.uTileOffset,
-        (t.centre.x - camMercX) * k,
-        (camMercY - t.centre.y) * k);
+        (t.centre.x - pass.mercX) * pass.k,
+        (pass.mercY - t.centre.y) * pass.k);
       gl.uniform1f(u.uTileSize, t.size);
       gl.uniform1f(u.uLevel, t.level);
       gl.activeTexture(gl.TEXTURE0);

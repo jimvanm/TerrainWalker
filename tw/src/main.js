@@ -3,7 +3,8 @@
 //   detail.js    how much to load and draw (the per-frame "view")
 //   settings.js  what is switched on
 //   ui/          keys, buttons, status bar, compass
-//   terrain.js, nearfield.js, landmarks.js   the layers
+//   terrain.js, near.js, skyline.js, landmarks.js   the layers
+//   handover.js  which of near field and skyline draws which ground
 
 import * as G from './gl.js';
 import { Loader } from './tiles.js';
@@ -12,7 +13,10 @@ import { Controls } from './controls.js';
 import { Perf, probe } from './perf.js';
 import { startCache, cacheUsage } from './cache.js';
 import { initFavourites } from './favourites.js';
-import { NearField } from './nearfield.js';
+import { NearLayer } from './near.js';
+import { SkylineLayer } from './skyline.js';
+import { Handover } from './handover.js';
+import { MeshProgram } from './meshprogram.js';
 import { Landmarks } from './landmarks.js';
 import { Detail } from './detail.js';
 import { LOOK, SETS } from './look.js';
@@ -22,9 +26,7 @@ import { initPanels } from './ui/panels.js';
 import { initCompass } from './ui/compass.js';
 import { Hud, fatal } from './ui/hud.js';
 import { heightReport } from './ui/report.js';
-import {
-  VECTOR_TILEJSON, SKY_RADIUS, SKIRT, FOV, NEAR, EYE_HEIGHT, LEVELS, readHash, writeHash,
-} from './config.js';
+import { VECTOR_TILEJSON, FOV, NEAR, EYE_HEIGHT, readHash, writeHash } from './config.js';
 import { lonToMercX, latToMercY, mercXToLon, mercYToLat } from './geo.js';
 
 // ---- graphics ---------------------------------------------------------------
@@ -34,18 +36,8 @@ const gl = canvas.getContext('webgl2', {
 });
 if (!gl) G.fail('This browser has no WebGL2. Try a current Firefox, Chrome or Edge.');
 
-const prog = G.program(gl, G.VS, G.FS);
-gl.useProgram(prog);
-const U = {};
-for (const n of ['uProj', 'uView', 'uTileOffset', 'uScale', 'uCamAlt',
-                 'uCurv', 'uSkirt', 'uFogColor', 'uFogDensity', 'uSunDir',
-                 'uTileSize', 'uMask', 'uCover', 'uLayers', 'uDebug', 'uLevel', 'uNearRect']) {
-  U[n] = gl.getUniformLocation(prog, n);
-}
 // Back-face culling stays off. Skirt winding is then irrelevant, and the
-// derivative-based normals in the fragment shader do not care either.
-gl.uniform1i(U.uMask, 0);
-gl.uniform1i(U.uCover, 1);
+// derivative-based normals in the fragment shaders do not care either.
 gl.disable(gl.CULL_FACE);
 gl.enable(gl.DEPTH_TEST);
 gl.depthFunc(gl.LEQUAL);
@@ -83,10 +75,12 @@ window.addEventListener('unhandledrejection', (e) => {
 const loader = new Loader(() => {}, fatal);
 const terrain = new Terrain(gl, loader);
 const controls = new Controls(canvas, cam);
-const nearField = new NearField(gl, () => loader.vectorTemplate);
-const farField = new NearField(gl, () => loader.vectorTemplate, { zoom: 13, skyline: true, workers: 2 });
-nearField.partner = farField; farField.partner = nearField;
-const landmarks = new Landmarks(gl);
+const mesh = new MeshProgram(gl);
+const vectorTemplate = () => loader.vectorTemplate;
+const nearField = new NearLayer(gl, mesh, vectorTemplate);
+const farField = new SkylineLayer(gl, mesh, vectorTemplate);
+const handover = new Handover(nearField, farField);
+const landmarks = new Landmarks(gl, mesh);
 const detail = new Detail();
 
 // Resolve the vector tile template from the service's TileJSON. Terrain still
@@ -193,43 +187,36 @@ function frame(now) {
   cam.lon = mercXToLon(cam.mercX);
 
   const v = detail.update(dt, cam, ground, controls, settings);
-  const { k, agl: hAgl } = v;
 
   // Freeze pins the tile set: no requests, no substitution, no changes to what
   // is drawn. Wait for the TileJSON before the first fetch, otherwise the
   // opening tiles arrive without water and would need refetching.
   if (!settings.frozen && (vectorReady || now - startTime > 4000)) {
     terrain.update(v.mercX, v.mercY, v.minLevel, v.drawLevels, v.lead.x, v.lead.y, v.lead.use);
-    nearField.update(v.mercX, v.mercY, v.nearOn, v.nearFetchOk, v.nearR, v.lead.x, v.lead.y, v.lead.use);
-    // The far skyline waits until the near field has nothing left to fetch.
-    farField.updateFar(v.mercX, v.mercY, v.nearOn, v.nearFetchOk && !nearField.busy, SKY_RADIUS, nearField.block);
+    handover.update(v);
   }
   landmarks.update((x, y) => terrain.heightAt(x, y));
 
   const roadsOn = layerOn('roads'), bldOn = layerOn('built'), landOn = layerOn('land');
-  // A true 3D distance. Flying high, the far corner of the outermost ring is
-  // dominated by altitude, not by the ring's horizontal reach.
-  const far = Math.hypot(v.outer * Math.SQRT2, hAgl) * 1.15;
+  const shading = {
+    fogColor: FOG,
+    fogDensity: settings.fog ? 2.4 / v.viewDist : 0,
+    debug: settings.debug,
+    layers: LAYERS.slice(0, 4).map((L) => (L.on ? 1 : 0)),
+    nearRect: nearField.rectUniform(v.mercX, v.mercY, v.k, roadsOn),
+  };
+  // Everything is drawn twice per frame, once per depth range (see below).
+  const drawScene = (pass) => {
+    terrain.draw(pass, shading);
+    mesh.use(pass);
+    handover.draw(pass, roadsOn, bldOn);
+    if (landOn) landmarks.draw(pass);   // last: it changes uScale and uCamAlt
+  };
 
   gl.viewport(0, 0, canvas.width, canvas.height);
   gl.clearColor(FOG[0], FOG[1], FOG[2], 1);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
   G.viewRot(view, cam.yaw, cam.pitch);
-  gl.uniformMatrix4fv(U.uView, false, view);
-  gl.uniform1f(U.uScale, k);
-  gl.uniform1f(U.uCamAlt, cam.alt);
-  gl.uniform1f(U.uCurv, v.curv);
-  gl.uniform1f(U.uSkirt, SKIRT);
-  gl.uniform3f(U.uFogColor, FOG[0], FOG[1], FOG[2]);
-  // Density 0 disables fog exactly: 1 - exp(0) = 0, no branch needed.
-  gl.uniform1f(U.uFogDensity, settings.fog ? 2.4 / v.viewDist : 0);
-  gl.uniform3f(U.uSunDir, 0.40, 0.82, 0.41);
-  gl.uniform1f(U.uDebug, settings.debug);
-  gl.uniform4f(U.uLayers, ...LAYERS.slice(0, 4).map((L) => (L.on ? 1 : 0)));
-  // Painted roads fade out inside the area the real geometry covers.
-  const nr = nearField.rectUniform(cam.mercX, cam.mercY, k, roadsOn);
-  gl.uniform4f(U.uNearRect, nr[0], nr[1], nr[2], nr[3]);
 
   // Depth split, chosen for PRECISION rather than for level boundaries.
   //
@@ -241,32 +228,28 @@ function frame(now) {
   // skirts, so adjacent tiles' coplanar skirt walls flicker against each other.
   //
   // Instead: split where resolution decays to TARGET, and let BOTH passes draw
-  // every level. A triangle spanning the split is drawn in both, and since the
+  // everything. A triangle spanning the split is drawn in both, and since the
   // depth buffer is cleared between them the near pass simply wins inside its
   // range. No seam, and no coupling to the LOD scheme at all.
-  const near = Math.max(NEAR, Math.min(hAgl * 0.01, 2000));
+  const near = Math.max(NEAR, Math.min(v.agl * 0.01, 2000));
   const TARGET = 20;                              // metres of depth resolution
   const splitFar = Math.sqrt(near * 16777216 * TARGET);
   const splitNear = splitFar * 0.75;              // overlap, so nothing falls between
-
+  // A true 3D distance. Flying high, the far corner of the outermost ring is
+  // dominated by altitude, not by the ring's horizontal reach.
+  const far = Math.hypot(v.outer * Math.SQRT2, v.agl) * 1.15;
   const aspect = canvas.width / canvas.height;
   const fov = FOV * Math.PI / 180;
-  const ALL = LEVELS.length - 1;
+  // The camera for one pass. Positions are camera-relative, so this is all a
+  // shader needs to place a vertex.
+  const pass = { proj, view, k: v.k, alt: cam.alt, mercX: cam.mercX, mercY: cam.mercY, curv: v.curv };
 
-  gl.uniformMatrix4fv(U.uProj, false,
-    G.perspective(proj, fov, aspect, Math.min(splitNear, far * 0.5), far));
-  terrain.draw(U, cam.mercX, cam.mercY, k, 0, ALL);
-  nearField.draw(prog, proj, view, k, cam.alt, cam.mercX, cam.mercY, v.curv, roadsOn, bldOn);
-  farField.draw(prog, proj, view, k, cam.alt, cam.mercX, cam.mercY, v.curv, false, bldOn);
-  if (landOn) landmarks.draw(prog, proj, view, cam.alt, cam.mercX, cam.mercY, v.curv, k);
+  G.perspective(proj, fov, aspect, Math.min(splitNear, far * 0.5), far);
+  drawScene(pass);
   gl.clear(gl.DEPTH_BUFFER_BIT);
-  gl.uniformMatrix4fv(U.uProj, false,
-    G.perspective(proj, fov, aspect, near, Math.max(splitFar, near * 1000)));
-  terrain.draw(U, cam.mercX, cam.mercY, k, 0, ALL);
-  nearField.draw(prog, proj, view, k, cam.alt, cam.mercX, cam.mercY, v.curv, roadsOn, bldOn);
   // The near pass reaches out to splitFar, which is where a 20 km skyline lives.
-  farField.draw(prog, proj, view, k, cam.alt, cam.mercX, cam.mercY, v.curv, false, bldOn);
-  if (landOn) landmarks.draw(prog, proj, view, cam.alt, cam.mercX, cam.mercY, v.curv, k);
+  G.perspective(proj, fov, aspect, near, Math.max(splitFar, near * 1000));
+  drawScene(pass);
 
   // ---- page ----
   hud.update(dt, now, {

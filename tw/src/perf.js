@@ -18,7 +18,7 @@
 // Every event is kept (height, speed, holes, queue) in window.twLog. Press L
 // to copy the log to the clipboard.
 
-// Shared counters. terrain.js and nearfield.js add to these while they upload;
+// Shared counters. terrain.js and tilelayer.js add to these while they upload;
 // main.js hands them to the meter once a frame and zeroes them.
 export const probe = { uploadMs: 0, nearTiles: 0, terrainTiles: 0, switched: '' };
 
