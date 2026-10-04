@@ -23,7 +23,7 @@ Measuring and checking (need the reference models, which are not in the repo):
 
 In the app (`src/`): `landmark_sites.js` (where each tower stands and which way it
 faces), `landmarks.js` (drawing and the K-report), `orient.js` (direction from map
-outlines), `landmark_models.js` (generated), `test_landmarks.mjs`.
+outlines), `landmark_models.js` (generated). Test: `test/landmarks.mjs`.
 
 ## Reference models (supplied by Jim, not in the repo)
 - CN Tower: GLB, CC-BY-4.0 by zayshaa on Sketchfab (credited in the main README).

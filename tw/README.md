@@ -127,6 +127,14 @@ a `vec4`. Flat shading comes from screen-space derivatives and the colour ramp
 is computed from elevation in the fragment shader, then quantised to 5 bits per
 channel.
 
+### How the code fits together
+
+Each frame, `src/detail.js` turns the camera into one "view": where you are,
+and how much to load and draw from there. Every layer (terrain, near field,
+skyline, landmarks) updates from that same view, then draws. All shader code
+is in `src/shaders.js`, all keys in `src/ui/keys.js`. The full file map is in
+[SPEC.md, section 12](SPEC.md#12-repository-layout).
+
 ## Overlay layers
 
 Elevation cannot tell you what water is. Lake Superior sits at 183 m, Erie at

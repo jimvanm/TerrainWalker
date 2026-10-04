@@ -192,7 +192,7 @@ function frame(now) {
   // is drawn. Wait for the TileJSON before the first fetch, otherwise the
   // opening tiles arrive without water and would need refetching.
   if (!settings.frozen && (vectorReady || now - startTime > 4000)) {
-    terrain.update(v.mercX, v.mercY, v.minLevel, v.drawLevels, v.lead.x, v.lead.y, v.lead.use);
+    terrain.update(v);
     handover.update(v);
   }
   landmarks.update((x, y) => terrain.heightAt(x, y));

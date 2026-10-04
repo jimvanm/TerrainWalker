@@ -309,21 +309,60 @@ All parameters optional. Defaults to a scenic spawn point. The hash updates on a
 
 ## 12. Repository layout
 
+The original plan (Three.js, nine files) was replaced as the project grew.
+This is the layout as built.
+
 ```
-index.html              importmap, canvas, HUD, attribution
-src/main.js             bootstrap, render loop
-src/config.js           constants, URL hash parsing
-src/geo.js              Mercator, tile addressing, origin rebasing
-src/tiles.js            request queue, LRU cache, worker pool
-src/worker.js           fetch, decode, mesh generation
-src/terrain.js          ring manager, scene graph, skirts
-src/palette.js          hypsometric colour
-src/controls.js         walk/fly controller
-vendor/three.module.js  vendored, pinned version
-SPEC.md
-README.md
-LICENSE
+index.html          page, styles, panels (filled in by src/ui/)
+diag.html           standalone fault finder; uses no modules on purpose
+serve.py            dev server with correct MIME types
+
+src/main.js         start-up and the frame loop; wires the parts, owns no logic
+src/config.js       constants, URL hash
+src/settings.js     what is switched on: fog, debug, freeze, map layers
+src/detail.js       per frame: how much to load and draw -> one "view" object
+
+  the layers, each with update(view) and draw(pass)
+src/terrain.js      clipmap terrain: what to fetch, GPU tiles, drawing, heightAt
+src/rings.js        which terrain tiles cover the ground (pure, tested)
+src/near.js         real roads and buildings around a low camera (zoom 14)
+src/skyline.js      tall buildings out to ~20 km (zoom 13 markers, zoom 14 detail)
+src/tilelayer.js    what near and skyline share: GPU tiles, drawing, reports
+src/handover.js     the only file that knows both near and skyline: who draws what
+src/landmarks.js    hand-built towers (CN, Eiffel, Canton)
+
+  graphics
+src/gl.js           WebGL helpers, matrices, shared camera uniforms
+src/shaders.js      all GLSL: terrain and mesh programs, camera placement once
+src/meshprogram.js  the one program for roads, buildings, skyline, landmarks
+
+  background helpers (web workers)
+src/pool.js         helper pool and job queue, used by every layer
+src/tiles.js        terrain requests on top of the pool
+src/worker.js       terrain helper: elevation + painted overlays -> mesh, textures
+src/nearworker.js   near/skyline helper: map tile -> road and building meshes
+src/mvt.js, heightgrid.js, roads.js, buildings.js, runways.js, drape.js,
+earclip.js, meshbuilder.js   decoding and mesh building, used by the helpers
+src/cache.js        persistent download cache (Cache API)
+
+  page
+src/ui/keys.js      every key in one table; the help panel is built from it
+src/ui/panels.js    buttons: layers, building colours, movement pad, slider
+src/ui/hud.js       status bar, loading message, error panel
+src/ui/compass.js   heading gyro
+src/ui/report.js    K: building-height report
+src/controls.js     walking and flying
+src/favourites.js, places.js   saved places
+src/look.js         building colour sets
+src/perf.js         performance graph and strain log
+
+test/run.mjs        runs every test: node test/run.mjs
+tools/              offline tools (landmark modelling)
 ```
+
+Each frame: `detail.js` turns the camera into a view; each layer updates from
+it; then the scene is drawn twice, once per depth range, through one
+`drawScene(pass)` in `main.js`.
 
 No file should exceed roughly 300 lines. If one does, the module boundary is wrong.
 

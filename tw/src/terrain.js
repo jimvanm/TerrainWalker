@@ -128,7 +128,12 @@ export class Terrain {
   // `lead*` is where the camera will be in a few seconds. Fetching is centred on
   // both, drawing only on the real position, so tiles are already there when
   // you arrive instead of loading after you have passed.
-  update(mercX, mercY, minLevel, activeLevels, leadX, leadY, useLead) {
+  update(view) {
+    return this.plan(view.mercX, view.mercY, view.minLevel, view.drawLevels,
+      view.lead.x, view.lead.y, view.lead.use);
+  }
+
+  plan(mercX, mercY, minLevel, activeLevels, leadX, leadY, useLead) {
     // Three separate questions. Conflating any two of them has now caused a
     // bug each time:
     //
