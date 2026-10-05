@@ -18,6 +18,13 @@ export function latToMercY(lat) {
   return R_MAJOR * Math.log(Math.tan(Math.PI / 4 + phi / 2));
 }
 
+// Longitude into -180..180. The camera's mercator x is never wrapped (the
+// tiles around you are placed from it), so after flying across the 180th
+// meridian its plain longitude runs past 180; this is the one people read.
+export function wrapLon(lon) {
+  return ((lon + 180) % 360 + 360) % 360 - 180;
+}
+
 export function mercXToLon(x) {
   return (x / R_MAJOR) * R2D;
 }

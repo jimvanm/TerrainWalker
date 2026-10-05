@@ -110,6 +110,7 @@ export const NEAR = 0.5;
 // land you on water, since a lake at 74 m is exactly what an elevation ramp
 // cannot render and the vector overlay can.
 import { startPlace } from './places.js';
+import { wrapLon } from './geo.js';
 
 const SPAWN = { lat: 43.871722, lon: -77.680430, alt: 2500, yaw: 0, pitch: -8, fly: 1 };
 
@@ -129,7 +130,9 @@ export function readHash() {
     return Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : null;
   };
   const lat = num('lat', -85, 85); if (lat !== null) c.lat = lat;
-  const lon = num('lon', -180, 180); if (lon !== null) c.lon = lon;
+  // Wrapped, not clamped: a link from before longitudes were wrapped can say
+  // 244.4 for -115.6, and clamping that put you in the Pacific at 180.
+  const lon = num('lon', -1e6, 1e6); if (lon !== null) c.lon = wrapLon(lon);
   const alt = num('alt', -500, 80000); if (alt !== null) { c.alt = alt; c.agl = null; }
   const yaw = num('yaw', -3600, 3600); if (yaw !== null) c.yaw = yaw;
   const pit = num('pitch', -89, 89); if (pit !== null) c.pitch = pit;

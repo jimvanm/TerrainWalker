@@ -29,7 +29,7 @@ import { initCompass } from './ui/compass.js';
 import { Hud, fatal } from './ui/hud.js';
 import { heightReport } from './ui/report.js';
 import { VECTOR_TILEJSON, FOV, NEAR, EYE_HEIGHT, readHash, writeHash } from './config.js';
-import { lonToMercX, latToMercY, mercXToLon, mercYToLat } from './geo.js';
+import { lonToMercX, latToMercY, mercXToLon, mercYToLat, wrapLon } from './geo.js';
 
 // ---- graphics ---------------------------------------------------------------
 const canvas = document.getElementById('c');
@@ -199,7 +199,7 @@ function frame(now) {
   }
   controls.update(dt, ground, (x, y) => terrain.heightAt(x, y));
   cam.lat = mercYToLat(cam.mercY);
-  cam.lon = mercXToLon(cam.mercX);
+  cam.lon = wrapLon(mercXToLon(cam.mercX));   // for showing and saving; see geo.js
 
   const v = detail.update(dt, cam, ground, controls, settings);
 
