@@ -1,6 +1,6 @@
 // Every key the app answers to, in one table.
 //
-// The help panel is built from this table, so it cannot fall out of step with
+// The key menu (help panel) is built from this table, so it cannot fall out of step with
 // what the keys actually do. test/keys.mjs also checks that the README lists
 // every key here.
 //
@@ -10,64 +10,65 @@
 //   hold  held keys read every frame by controls.js (movement). Listed here
 //         only so they appear in the help.
 //
-// line: which line of the help panel the entry goes on.
+// group: which heading of the help menu the entry goes under (GROUPS, in order).
+
+export const GROUPS = ['Mouse', 'Moving', 'Flying', 'Show / hide', 'Colours', 'Tools', 'Checking'];
 
 export const KEYS = [
-  { line: 0, label: 'click', help: 'to capture mouse' },
-  { line: 0, label: 'esc', help: 'to release' },
+  { group: 'Mouse', label: 'click', help: 'capture mouse' },
+  { group: 'Mouse', label: 'esc', help: 'release mouse' },
 
-  { line: 1, label: 'WASD', help: 'move', hold: ['KeyW', 'KeyA', 'KeyS', 'KeyD'] },
-  { line: 1, label: 'Q/E', help: 'down/up', hold: ['KeyQ', 'KeyE'] },
-  { line: 1, label: 'shift', help: 'run', hold: ['ShiftLeft'] },
+  { group: 'Moving', label: 'WASD', help: 'move', hold: ['KeyW', 'KeyA', 'KeyS', 'KeyD'] },
+  { group: 'Moving', label: 'Q/E', help: 'down / up', hold: ['KeyQ', 'KeyE'] },
+  { group: 'Moving', label: 'shift', help: 'run', hold: ['ShiftLeft'] },
+  { group: 'Moving', label: 'ctrl', help: 'boost (lock keys first)', hold: ['ControlLeft'] },
+  { group: 'Moving', label: 'R', help: 'back to start', code: 'KeyR', act: 'reset' },
 
-  { line: 2, label: 'G', help: 'or', code: 'KeyG', act: 'toggleFly' },
-  { line: 2, label: 'space space', help: 'toggle fly' },
-  { line: 2, label: 'space/shift', help: 'up/down', hold: ['Space', 'ShiftLeft'] },
+  { group: 'Flying', label: 'G', help: 'or', code: 'KeyG', act: 'toggleFly' },
+  { group: 'Flying', label: 'space space', help: 'walk / fly' },
+  { group: 'Flying', label: 'space/shift', help: 'up / down', hold: ['Space', 'ShiftLeft'] },
+  { group: 'Flying', label: 'wheel', help: 'flying speed' },
 
-  { line: 3, label: 'ctrl', help: 'boost (safe once keys are locked)', hold: ['ControlLeft'] },
-  { line: 3, label: 'wheel', help: 'fly speed' },
-  { line: 3, label: 'R', help: 'reset', code: 'KeyR', act: 'reset' },
+  { group: 'Show / hide', label: 'V', help: 'water', code: 'KeyV', act: 'layer:water' },
+  { group: 'Show / hide', label: 'X', help: 'roads', code: 'KeyX', act: 'layer:roads' },
+  { group: 'Show / hide', label: 'B', help: 'buildings', code: 'KeyB', act: 'layer:built' },
+  { group: 'Show / hide', label: 'C', help: 'ground cover', code: 'KeyC', act: 'layer:cover' },
+  { group: 'Show / hide', label: 'T', help: 'landmarks', code: 'KeyT', act: 'layer:land' },
+  { group: 'Show / hide', label: 'F', help: 'fog', code: 'KeyF', act: 'toggleFog' },
 
-  { line: 4, label: 'V', help: 'water', code: 'KeyV', act: 'layer:water' },
-  { line: 4, label: 'X', help: 'roads', code: 'KeyX', act: 'layer:roads' },
-  { line: 4, label: 'B', help: 'built', code: 'KeyB', act: 'layer:built' },
-  { line: 4, label: 'C', help: 'cover', code: 'KeyC', act: 'layer:cover' },
-  { line: 4, label: 'T', help: 'landmarks', code: 'KeyT', act: 'layer:land' },
-  { line: 4, label: 'F', help: 'fog', code: 'KeyF', act: 'toggleFog' },
+  { group: 'Colours', label: '6', help: 'real', code: 'Digit6', act: 'lookReal' },
+  { group: 'Colours', label: '7', help: 'by type', code: 'Digit7', act: 'lookType' },
+  { group: 'Colours', label: '8', help: 'colour set', code: 'Digit8', act: 'lookSet' },
+  { group: 'Colours', label: '9', help: 'warm', code: 'Digit9', act: 'lookWarm' },
 
-  { line: 5, label: '6', help: 'real colours', code: 'Digit6', act: 'lookReal' },
-  { line: 5, label: '7', help: 'colour by type', code: 'Digit7', act: 'lookType' },
-  { line: 5, label: '8', help: 'colour set', code: 'Digit8', act: 'lookSet' },
-  { line: 5, label: '9', help: 'warm', code: 'Digit9', act: 'lookWarm' },
+  { group: 'Tools', label: 'P', help: 'pin this place', code: 'KeyP', act: 'pin' },
+  { group: 'Tools', label: 'K', help: 'copy height report', code: 'KeyK', act: 'heightReport' },
+  { group: 'Tools', label: 'L', help: 'copy strain log', code: 'KeyL', act: 'strainLog' },
+  { group: 'Tools', label: 'H', help: 'hide this menu and the graph', code: 'KeyH', act: 'toggleHelp' },
 
-  { line: 6, label: 'P', help: 'pin place', code: 'KeyP', act: 'pin' },
-  { line: 6, label: 'K', help: 'copy height report', code: 'KeyK', act: 'heightReport' },
-  { line: 6, label: 'L', help: 'copy strain log', code: 'KeyL', act: 'strainLog' },
-  { line: 6, label: 'H', help: 'hide this', code: 'KeyH', act: 'toggleHelp' },
-
-  { line: 7, label: '1', help: 'grid', code: 'Digit1', act: 'debugGrid' },
-  { line: 7, label: '2', help: 'freeze', code: 'Digit2', act: 'freeze' },
-  { line: 7, label: '3', help: 'flat', code: 'Digit3', act: 'debugFlat' },
-  { line: 7, label: '4', help: 'show buildings under landmarks', code: 'Digit4', act: 'toggleMask' },
+  { group: 'Checking', label: '1', help: 'grid', code: 'Digit1', act: 'debugGrid' },
+  { group: 'Checking', label: '2', help: 'freeze', code: 'Digit2', act: 'freeze' },
+  { group: 'Checking', label: '3', help: 'flat ground', code: 'Digit3', act: 'debugFlat' },
+  { group: 'Checking', label: '4', help: 'buildings under landmarks', code: 'Digit4', act: 'toggleMask' },
 ];
 
 const esc = (s) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
 
+// One heading per group, then one row per key: the key on the left, what it
+// does on the right. An entry whose help is just "or" shares the next entry's
+// row ("G or space space   walk / fly").
 export function helpHtml() {
-  const lines = [];
-  for (const k of KEYS) {
-    (lines[k.line] = lines[k.line] || []).push(k);
-  }
-  return lines.map((ks) => {
-    // "G or space space toggle fly" reads as one phrase, so an entry whose help
-    // is just "or" joins the next one without a separator.
-    let out = '';
-    ks.forEach((k, i) => {
-      if (i > 0) out += ks[i - 1].help === 'or' ? ' ' : ' &middot; ';
-      out += `<b>${esc(k.label)}</b> ${esc(k.help)}`;
-    });
-    return out;
-  }).join('<br>');
+  return GROUPS.map((g) => {
+    const ks = KEYS.filter((k) => k.group === g);
+    let rows = '', keys = '';
+    for (const k of ks) {
+      keys += (keys ? ' or ' : '') + `<b>${esc(k.label)}</b>`;
+      if (k.help === 'or') continue;
+      rows += `<div class="row"><span class="k">${keys}</span><span>${esc(k.help)}</span></div>`;
+      keys = '';
+    }
+    return `<div class="grp"><div class="gh">${esc(g)}</div>${rows}</div>`;
+  }).join('');
 }
 
 // Runs table actions on key press. Auto-repeat and keys pressed with ctrl, alt

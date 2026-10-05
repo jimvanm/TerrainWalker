@@ -62,11 +62,11 @@ whole deployment.
 | `P` | pin this place to the saved places list |
 | `K` | copy a building-height report to the clipboard |
 | `L` | copy the performance log to the clipboard |
-| `H` | hide the help panel and performance graph |
+| `H` | hide the key menu and performance graph |
 | `1` `2` `3` `4` | debugging: tile grid, freeze loading, flat shading, show the map buildings a landmark hides |
 
 The building colour keys are also buttons under BUILDING COLOURS, lit when on.
-Every key is defined in one table, `src/ui/keys.js`; the help panel is built
+Every key is defined in one table, `src/ui/keys.js`; the key menu is built
 from it.
 
 The view slider sets render distance, from about 27 km to about 600 km.

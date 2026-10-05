@@ -348,7 +348,7 @@ earclip.js, meshbuilder.js   decoding and mesh building, used by the helpers
 src/cache.js        persistent download cache (Cache API)
 
   page
-src/ui/keys.js      every key in one table; the help panel is built from it
+src/ui/keys.js      every key in one table; the key menu is built from it
 src/ui/panels.js    buttons: layers, building colours, movement pad, slider
 src/ui/hud.js       status bar, loading message, error panel
 src/ui/compass.js   heading gyro

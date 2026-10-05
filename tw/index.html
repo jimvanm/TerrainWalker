@@ -43,9 +43,18 @@
   #favs .fname { flex: 1; margin: 2px 6px; padding: 3px 6px; background: #1d2530; border: 1px solid #5aa0d0; border-radius: 3px; cursor: text; min-width: 0; }
   #favs .fempty { padding: 6px 10px; color: #93a1b2; }
   body.locked #favs { opacity: .55; }
-  #help { left: 10px; top: 10px; line-height: 1.7; }
+  /* The key menu: a column down the left, one key per row, under headings.
+     On a short screen it splits into two columns rather than running into
+     the status bar. */
+  #help { left: 10px; top: 10px; padding: 4px 10px 8px; line-height: 1.45; }
+  #help .grp { break-inside: avoid; display: grid; grid-template-columns: max-content auto; column-gap: 12px; }
+  #help .gh { grid-column: 1 / -1; color: #93a1b2; font-size: 10px; letter-spacing: .08em;
+              text-transform: uppercase; margin: 6px 0 1px; border-bottom: 1px solid #2a3340; }
+  #help .row { display: contents; }
+  #help .k { color: #93a1b2; }
   #help b { color: #ffd479; font-weight: 600; }
   #help.hide { display: none; }
+  @media (max-height: 760px) { #help { column-count: 2; column-gap: 18px; } }
   #ctrl {
     position: fixed; right: 10px; top: 10px; background: rgba(12,16,22,.72);
     padding: 6px 10px; border-radius: 4px; display: flex; gap: 8px; align-items: center;
