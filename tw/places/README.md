@@ -34,3 +34,10 @@ downloads in `places/<id>/.cache` (not saved in git), so a second run is quick.
 
 Survey data comes from Natural Resources Canada (HRDEM) and the US Geological
 Survey (3DEP 1 m). Elsewhere the builder finds nothing yet.
+
+## How the app uses them
+
+At start the app reads `index.json` and each `place.json`. Wherever a place has
+a tile, the app loads it from here instead of the usual one, and close up it
+adds zoom 15 and 16 there. A place listed in `index.json` but not yet built is
+left out, with a warning in the browser console.

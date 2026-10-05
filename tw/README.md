@@ -104,7 +104,14 @@ while you are low enough to see roads and buildings. Where the data is good
 they show cliffs and gorges zoom 12 smooths away (Niagara, the Grand Canyon);
 elsewhere they are enlarged copies. `terraincheck.html` shows which is which.
 
-**Clipmap.** Eleven levels, zoom 14 down to zoom 4. Each level is a 4x4 block of
+**Places of interest.** Where even that is not good enough, a place can have
+its own tiles, built from laser-survey data (1 to 2 m) by
+`tools/places/build_place.py`; see `places/README.md`. The app uses a place's
+tiles instead of the usual ones, and only there adds two finer levels, zoom 15
+and 16. Niagara is the first.
+
+**Clipmap.** Thirteen levels, zoom 16 down to zoom 4 (zoom 15 and 16 only in
+a place of interest). Each level is a 4x4 block of
 tiles whose origin is snapped to an **even** tile coordinate. That one
 constraint makes the nesting exact: a 4x4 block at zoom z+1 covers precisely 2x2
 whole tiles at zoom z, aligned to the coarse grid, so the coarse level drops

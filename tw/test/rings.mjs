@@ -96,10 +96,10 @@ console.log(R.slice(-2).join('\n'));
   };
   // [speed m/s, finest zoom worth fetching]; zooms, not level numbers, so
   // adding levels does not change what this checks.
-  const cases = [[70, 14], [300, 14], [4000, 11], [20000, 9], [100000, 6]].map(([v, z]) => [v, LEVELS.findIndex((L) => L.z === z)]);
+  const cases = [[70, 16], [300, 15], [4000, 11], [20000, 9], [100000, 6]].map(([v, z]) => [v, LEVELS.findIndex((L) => L.z === z)]);
   let bad = 0;
   for (const [v, want] of cases) if (pick(v) !== want) { bad++; console.log(`  ${v} m/s -> level ${pick(v)}, expected ${want}`); }
-  ok(bad === 0, 'finest sustainable zoom tracks speed (walking 14, 4 km/s 11, 100 km/s 6)');
+  ok(bad === 0, 'finest sustainable zoom tracks speed (70 m/s 16, 300 m/s 15, 4 km/s 11, 100 km/s 6)');
   // Every retained level must survive at least one load time.
   let unsafe = 0;
   for (const v of [70, 300, 1000, 4000, 20000, 100000, 400000]) {

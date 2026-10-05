@@ -132,11 +132,17 @@ function path(cx, parts, k, close) {
 // Channels rather than one composited image, so a layer can be switched off
 // with a uniform instead of a refetch and a re-rasterise.
 // mPerPx: true metres per mask pixel, so airport widths come out right.
-function rasterOverlays(layers, mPerPx = 10) {
+// sub: paint only part of the map tile, enlarged: { s, ox, oy } is the part's
+// size (1/s of the tile) and position (in parts). Used for tiles finer than
+// the map service's deepest zoom. mPerPx is then the map tile's, since line
+// widths are enlarged with everything else.
+function rasterOverlays(layers, mPerPx = 10, sub = null) {
   const maskCv = new OffscreenCanvas(MASK, MASK);
   const mx = maskCv.getContext('2d', { willReadFrequently: true });
   mx.fillStyle = '#000';
   mx.fillRect(0, 0, MASK, MASK);
+  const zoomIn = (cx) => { if (sub) cx.setTransform(sub.s, 0, 0, sub.s, -sub.ox * MASK, -sub.oy * MASK); };
+  zoomIn(mx);
   // Additive, so each layer lands in its own channel without erasing the others.
   mx.globalCompositeOperation = 'lighter';
   mx.lineCap = 'round';
@@ -206,6 +212,7 @@ function rasterOverlays(layers, mPerPx = 10) {
 
   const coverCv = new OffscreenCanvas(MASK, MASK);
   const cxx = coverCv.getContext('2d', { willReadFrequently: true });
+  zoomIn(cxx);
   const lc = layers.landcover;
   if (lc) {
     const k = MASK / lc.extent;
@@ -232,7 +239,7 @@ function rasterOverlays(layers, mPerPx = 10) {
   return any ? { mask, cover } : null;
 }
 
-async function loadVector(url, mPerPx) {
+async function loadVector(url, mPerPx, sub) {
   const res = await cachedFetch(url, { mode: 'cors' });
   if (res.status === 404 || res.status === 204) return null;   // no data here
   if (!res.ok) throw new Error('vector HTTP ' + res.status);
@@ -240,7 +247,7 @@ async function loadVector(url, mPerPx) {
   if (buf.length === 0) return null;
   // Full properties for transportation only, to tell main railways from sidings and tunnels.
   return rasterOverlays(decodeMVT(buf,
-    ['water', 'waterway', 'landcover', 'landuse', 'transportation', 'aeroway'], 'class', ['transportation']), mPerPx);
+    ['water', 'waterway', 'landcover', 'landuse', 'transportation', 'aeroway'], 'class', ['transportation']), mPerPx, sub);
 }
 
 async function loadTile(url, z, y) {
@@ -259,12 +266,15 @@ async function loadTile(url, z, y) {
 // there is no worker global scope.
 if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
 self.onmessage = async (ev) => {
-  const { id, url, vurl, z, x, y, grid, keepHeights } = ev.data;
+  const { id, url, vurl, vsub, z, x, y, grid, keepHeights } = ev.data;
+  // Metres per map pixel, at the map tile's own zoom (see rasterOverlays).
+  const vz = vsub ? vsub.vz : z;
+  const mPerPx = tileSizeMerc(vz) * Math.cos(mercYToLat(tileCentreMerc(x, y, z).y) * Math.PI / 180) / MASK;
   try {
     // Water is optional: a failure here must never cost us the terrain.
     const [heights, ov] = await Promise.all([
       loadTile(url, z, y),
-      vurl ? loadVector(vurl, tileSizeMerc(z) * Math.cos(mercYToLat(tileCentreMerc(x, y, z).y) * Math.PI / 180) / MASK).catch(() => null) : Promise.resolve(null),
+      vurl ? loadVector(vurl, mPerPx, vsub).catch(() => null) : Promise.resolve(null),
     ]);
     const { positions, indices } = buildMesh(heights, z, grid);
     const centre = tileCentreMerc(x, y, z);

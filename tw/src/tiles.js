@@ -2,7 +2,8 @@
 // Only MAX_INFLIGHT requests are ever outstanding: this endpoint is a free
 // public good and does not deserve to be hammered.
 
-import { TILE_URL, WORKERS, MAX_INFLIGHT, VECTOR_MAXZOOM } from './config.js';
+import { WORKERS, MAX_INFLIGHT, VECTOR_MAXZOOM } from './config.js';
+import { elevationUrl } from './placetiles.js';
 import { WorkerPool } from './pool.js';
 
 export const keyOf = (z, x, y) => z + '/' + x + '/' + y;
@@ -24,10 +25,15 @@ export class Loader {
     this.pool = new WorkerPool(new URL('./worker.js', import.meta.url), WORKERS, {
       maxInflight: MAX_INFLIGHT,
       message: (s) => {
-        const sub = (t) => t.replace('{z}', s.z).replace('{x}', s.x).replace('{y}', s.y);
+        // Map data stops at VECTOR_MAXZOOM. A finer tile (a place's) is painted
+        // from its part of the zoom-14 map tile: vsub says which part.
+        const d = Math.max(0, s.z - VECTOR_MAXZOOM);
+        const vz = s.z - d, vx = s.x >> d, vy = s.y >> d;
+        const vurl = this.vectorTemplate
+          ? this.vectorTemplate.replace('{z}', vz).replace('{x}', vx).replace('{y}', vy) : null;
         return {
-          url: sub(TILE_URL),
-          vurl: this.vectorTemplate && s.z <= VECTOR_MAXZOOM ? sub(this.vectorTemplate) : null,
+          url: elevationUrl(s.z, s.x, s.y),
+          vurl, vsub: d ? { s: 1 << d, ox: s.x - (vx << d), oy: s.y - (vy << d), vz } : null,
           z: s.z, x: s.rawX, y: s.rawY, grid: s.grid, keepHeights: s.keepHeights,
         };
       },

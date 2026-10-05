@@ -341,6 +341,7 @@ src/meshprogram.js  the one program for roads, buildings, skyline, landmarks
   background helpers (web workers)
 src/pool.js         helper pool and job queue, used by every layer
 src/tiles.js        terrain requests on top of the pool
+src/placetiles.js   places of interest: which tiles a place has its own of
 src/worker.js       terrain helper: elevation + painted overlays -> mesh, textures
 src/nearworker.js   near/skyline helper: map tile -> road and building meshes
 src/mvt.js, heightgrid.js, roads.js, buildings.js, runways.js, drape.js,
@@ -354,7 +355,7 @@ src/ui/hud.js       status bar, loading message, error panel
 src/ui/compass.js   heading gyro
 src/ui/report.js    K: building-height report
 src/controls.js     walking and flying
-src/favourites.js, places.js   saved places
+src/favourites.js, places.js   saved places (not places of interest)
 src/look.js         building colour sets
 src/perf.js         performance graph and strain log
 

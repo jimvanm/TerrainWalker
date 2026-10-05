@@ -3,10 +3,16 @@
 // clipboard, logged, and left on window.twReport.
 
 import { lookLabel } from '../look.js';
+import { placeNames, hasPlaceTile } from '../placetiles.js';
 
-export function heightReport(cam, near, sky, landmarks) {
+export function heightReport(cam, near, sky, landmarks, terrain) {
+  const g = terrain && terrain.groundAt(cam.mercX, cam.mercY);
   const rep = {
     at: { lat: +cam.lat.toFixed(5), lon: +cam.lon.toFixed(5), alt: Math.round(cam.alt) },
+    // The ground under you: its height, the zoom it came from, and whether
+    // that tile is a place of interest's own.
+    ground: g ? { h: +g.h.toFixed(1), z: g.z, place: hasPlaceTileAt(g.z, cam) } : null,
+    places: placeNames(),
     colours: lookLabel(),
     near: near.report(cam.mercX, cam.mercY), sky: sky.report(cam.mercX, cam.mercY),
     skyStatus: sky.status, nearStatus: near.status,
@@ -42,4 +48,11 @@ function maskReport(layers) {
     r.notHidden = r.notHidden.slice(0, 12).map((q) => ({ ...q, m: Math.round(Math.hypot(q.east, q.north)) }));
   }
   return out;
+}
+
+function hasPlaceTileAt(z, cam) {
+  const n = 2 ** z, x = Math.floor((cam.lon + 180) / 360 * n);
+  const r = cam.lat * Math.PI / 180;
+  const y = Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n);
+  return hasPlaceTile(z, x, y);
 }

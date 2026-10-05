@@ -21,6 +21,12 @@ export const LEVELS = [
   // height data is better than 30 m (the US, Arctic, Norway, New Zealand...)
   // these show cliffs and gorges that zoom 12 smooths away. Elsewhere they are
   // enlarged copies of zoom 12 and cost a little bandwidth for nothing.
+  //
+  // The two finest are `place` levels: fetched only where a place of interest
+  // has its own tiles (places/, src/placetiles.js). Elsewhere nothing is
+  // fetched for them and zoom 14 is drawn in their stead.
+  { z: 16, grid: 128, close: true, place: true },
+  { z: 15, grid: 128, close: true, place: true },
   { z: 14, grid: 128, close: true },
   { z: 13, grid: 128, close: true },
   { z: 12, grid: 128 },

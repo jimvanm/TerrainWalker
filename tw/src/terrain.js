@@ -8,8 +8,12 @@ import { keyOf } from './tiles.js';
 import { CACHE_TILES, LEVELS, SKIRT } from './config.js';
 import { tileSizeMerc, mercToTile, HALF } from './geo.js';
 import { nodeHeightAt, COARSE } from './heightgrid.js';
+import { hasPlaceTile } from './placetiles.js';
 
 const PX = 256;
+// The place levels come first in LEVELS (config.js); this many of them.
+const PLACE = LEVELS.filter((L) => L.place).length;
+const PLACE_Z = new Set(LEVELS.filter((L) => L.place).map((L) => L.z));
 
 export class Terrain {
   constructor(gl, loader) {
@@ -153,17 +157,24 @@ export class Terrain {
     if (!fetchLevels.length) return 0;
 
     const has = (z, x, y) => this.tiles.has(keyOf(z, x, y));
-    const fetchList = computeBlocks(mercX, mercY, fetchLevels);
+    // Place levels: only the tiles a place of interest has. Elsewhere nothing,
+    // and zoom 14 is fetched and drawn in their stead. Laid out as if only the
+    // place tiles existed, so a zoom-14 tile is left out only where finer
+    // place tiles cover all of it.
+    const fetchable = (b) => !LEVELS[b.level].place || hasPlaceTile(b.z, b.x, b.y);
+    const exists = (z, x, y) => !PLACE_Z.has(z) || hasPlaceTile(z, x, y);
+    const fetchList = computeBlocks(mercX, mercY, fetchLevels, exists);
     for (const b of fetchList) b.level += minLevel;
+    for (let i = fetchList.length - 1; i >= 0; i--) if (!fetchable(fetchList[i])) fetchList.splice(i, 1);
     if (useLead) {
       const seen = new Set(fetchList.map((b) => keyOf(b.z, b.x, b.y)));
-      for (const b of computeBlocks(leadX, leadY, fetchLevels)) {
+      for (const b of computeBlocks(leadX, leadY, fetchLevels, exists)) {
         const k = keyOf(b.z, b.x, b.y);
         if (seen.has(k)) continue;
         seen.add(k);
         b.level += minLevel;
         b.lead = true;
-        fetchList.push(b);
+        if (fetchable(b)) fetchList.push(b);
       }
     }
     const blocks = computeBlocks(mercX, mercY, drawLevels, has);
@@ -197,7 +208,10 @@ export class Terrain {
       this.loader.want({
         key, z: b.z, x: b.x, y: b.y, rawX: b.rawX, rawY: b.rawY,
         grid: b.grid, level: b.level,
-        keepHeights: b.level === minLevel,
+        // Full heights for the finest level fetched, which the ground under
+        // you comes from. With the place levels on, also for zoom 14 and the
+        // place levels between: outside a place, zoom 14 is the finest there is.
+        keepHeights: b.level === minLevel || (b.level > minLevel && b.level <= PLACE),
         priority: (activeLevels - 1 - b.level) * 100 + dist + (b.lead ? 50 : 0),
       });
     }

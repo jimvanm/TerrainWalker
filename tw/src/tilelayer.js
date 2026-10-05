@@ -8,7 +8,7 @@
 import { probe } from './perf.js';
 import { tileCentreMerc, mercYToLat, mercXToLon } from './geo.js';
 import { TYPE_NAMES, SIZE_NAMES } from './look.js';
-import { TILE_URL } from './config.js';
+import { elevationUrl } from './placetiles.js';
 import { WorkerPool } from './pool.js';
 
 const RETRY_MS = 10000;   // a failed tile is asked for again after this long
@@ -86,7 +86,7 @@ export class TileLayer {
     return {
       x, y: spec.y, z: Z, ez, ...this._jobOptions(spec),
       vurl: sub(this.getTemplate(), Z, x, spec.y),
-      eurl: sub(TILE_URL, ez, x >> (Z - ez), spec.y >> (Z - ez)),
+      eurl: elevationUrl(ez, x >> (Z - ez), spec.y >> (Z - ez)),
     };
   }
 

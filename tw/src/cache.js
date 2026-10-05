@@ -24,6 +24,11 @@ function open() {
 // Same as fetch(url, init), but served from the cache when we have it and it
 // is fresh. If the network fails and we hold an old copy, the old copy wins.
 export async function cachedFetch(url, init) {
+  // This site's own files (a place's tiles) are never kept: they are local,
+  // and rebuilding them must show at once.
+  if (typeof location !== 'undefined' && new URL(url, location.href).origin === location.origin) {
+    return fetch(url, { ...init, cache: 'no-cache' });
+  }
   const cache = await open();
   let stale = null;
   if (cache) {

@@ -19,6 +19,7 @@ import { Handover } from './handover.js';
 import { MeshProgram } from './meshprogram.js';
 import { Landmarks } from './landmarks.js';
 import { Detail } from './detail.js';
+import { loadPlaceTiles } from './placetiles.js';
 import { LOOK, SETS } from './look.js';
 import { settings, LAYERS, layerOn, toggleLayer } from './settings.js';
 import { helpHtml, bindKeys } from './ui/keys.js';
@@ -72,6 +73,9 @@ window.addEventListener('unhandledrejection', (e) => {
 });
 
 // ---- layers -------------------------------------------------------------------
+// The places of interest first, so no usual tile is fetched where a place has
+// its own. A few small local files; given up on after 3 s.
+await Promise.race([loadPlaceTiles(), new Promise((r) => setTimeout(r, 3000))]);
 const loader = new Loader(() => {}, fatal);
 const terrain = new Terrain(gl, loader);
 const controls = new Controls(canvas, cam);
@@ -131,7 +135,7 @@ const actions = {
   slower: () => controls.bump(1 / 1.5),
   pin: () => favourites.pinHere(),
   strainLog: () => perf.copyLog(),
-  heightReport: () => heightReport(cam, nearField, farField, landmarks),
+  heightReport: () => heightReport(cam, nearField, farField, landmarks, terrain),
   toggleHelp: () => {
     document.getElementById('help').classList.toggle('hide');
     perfEl.classList.toggle('hide');
