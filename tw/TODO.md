@@ -64,6 +64,12 @@ always with everything loaded.
 
 ## Bugs and rough edges
 
+- [ ] **A spike in Lake Erie.** A thin white column several kilometres tall
+      stands in the lake near 42.88, -79.24 (off Port Colborne), seen from
+      40 km up. Probably a bad value in the usual elevation tiles that the
+      spike filter (despike) misses, drawn white as steep water. Find which
+      tile and zoom it comes from, and why despike lets it through.
+
 - [ ] **Roads look bad, and are close to useless on foot.** They render as flat
       uniform stripes: no casing, no width hierarchy beyond major/minor, and
       aliasing at mask resolution. At walking height the problem stops being
