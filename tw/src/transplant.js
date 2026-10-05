@@ -25,7 +25,7 @@
 // whatever that ground does. The ground under it is not changed. Pieces last
 // until a reload.
 
-import { mercScale, mercYToLat, wrapMercDx, HALF, tileSizeMerc, R_MEAN } from './geo.js';
+import { mercScale, mercYToLat, mercXToLon, lonToMercX, latToMercY, wrapMercDx, HALF, tileSizeMerc, R_MEAN } from './geo.js';
 import { aimPoint, forward } from './dropper.js';
 
 const TURN = 15;
@@ -215,6 +215,16 @@ export class Transplant {
   // A short note in the message line, for a few seconds.
   _say(text) { this.note = text; this.noteUntil = Date.now() + 3000; }
 
+  // From the saved pieces list: put that piece in hand, wherever you are.
+  // The ground is fetched again (usually from the tile cache).
+  take(saved) {
+    this.cancel();
+    this.state = 'drawing';
+    this.mode = saved.mode === 'sea' ? 'sea' : 'rise';
+    this.corners = saved.corners.map(([lat, lon]) => ({ mx: lonToMercX(lon), my: latToMercY(lat), h: null }));
+    return this.close(saved);
+  }
+
   undo() { if (this.state === 'drawing') this.corners.pop(); }
 
   turn(sign) {
@@ -230,8 +240,10 @@ export class Transplant {
     this._model();
   }
 
-  // Enter: close the outline and fetch the ground inside it.
-  async close() {
+  // Enter: close the outline and fetch the ground inside it. A new outline is
+  // passed to onPicked (the saved pieces list), which gives back its name;
+  // one taken from that list (fromList) already has one.
+  async close(fromList = null) {
     if (this.state !== 'drawing' || this.corners.length < 3) return;
     const cs = this.corners;
     const cx = cs.reduce((s, c) => s + c.mx, 0) / cs.length, cy = cs.reduce((s, c) => s + c.my, 0) / cs.length;
@@ -256,7 +268,11 @@ export class Transplant {
     if (this.state !== 'loading') return;           // put away while loading
     if (!tiles.size) { this._say('Could not load the ground there.'); this.state = 'drawing'; return; }
     const at = sampler(tiles, z);
-    this.piece = { poly, heightAt: (e, nn) => at(cx + e / k, cy + nn / k), name: 'Piece of ground', z };
+    let name = fromList ? fromList.name : 'Piece of ground';
+    if (!fromList && this.onPicked) {
+      name = this.onPicked({ corners: cs.map((c) => [+mercYToLat(c.my).toFixed(6), +mercXToLon(c.mx).toFixed(6)]), mode: this.mode }) || name;
+    }
+    this.piece = { poly, heightAt: (e, nn) => at(cx + e / k, cy + nn / k), name, z };
     this.yawDeg = 0;
     this.state = 'carrying';
     this._model();

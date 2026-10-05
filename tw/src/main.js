@@ -22,6 +22,7 @@ import { Detail } from './detail.js';
 import { loadPlaceTiles } from './placetiles.js';
 import { Dropper, screenDir, aimPoint } from './dropper.js';
 import { Transplant, toScreen } from './transplant.js';
+import { initPieces } from './pieces.js';
 import { cachedFetch } from './cache.js';
 import { elevationUrl } from './placetiles.js';
 import { LOOK, SETS } from './look.js';
@@ -102,6 +103,14 @@ async function fetchHeights(z, x, y) {
   return h;
 }
 const transplant = new Transplant(landmarks, fetchHeights);
+// The saved pieces of ground (Tools mode): new ones are added as they are
+// picked up; clicking one takes it in hand again.
+const pieceList = initPieces({
+  root: document.getElementById('pieces'),
+  take: (p) => { dropper.off(); transplant.take(p); },
+  draw: () => { dropper.off(); if (!transplant.active) transplant.toggle(); },
+});
+transplant.onPicked = (v) => pieceList.picked(v);
 const groundH = (x, y) => terrain.heightAt(x, y);
 let aimDir = null;     // the pointer's direction in Tools mode, this frame
 const detail = new Detail();

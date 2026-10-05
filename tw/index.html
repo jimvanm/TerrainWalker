@@ -30,23 +30,25 @@
   #attrib { left: 10px; bottom: 10px; opacity: .75; font-size: 10px; padding: 3px 10px; }
   #perf { position: fixed; left: 10px; bottom: 74px; border-radius: 4px; pointer-events: none; }
   #perf.hide { display: none; }
-  #favs { position: fixed; right: 10px; top: 52px; width: 210px; z-index: 5;
+  .listpanel { position: fixed; right: 10px; top: 52px; width: 210px; z-index: 5;
           background: rgba(12,16,22,.78); border-radius: 4px; font-size: 12px; }
-  #favs button, #favs input { font: inherit; color: #dbe3ec; background: none; border: 0; cursor: pointer; }
-  #favs .fhead { display: flex; justify-content: space-between; padding: 4px 6px; }
-  #favs .ftitle { font-weight: 600; padding: 2px 4px; }
-  #favs .fpin { border: 1px solid #3a4552; border-radius: 3px; padding: 1px 8px; color: #ffd479; }
-  #favs .flist { max-height: 40vh; overflow-y: auto; border-top: 1px solid #2a3340; padding: 3px 0; }
-  #favs .frow { display: flex; align-items: center; }
-  #favs .fgo { flex: 1; text-align: left; padding: 4px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #favs .fgo:hover { background: #2a4f6b; }
-  #favs .fstar { padding: 4px 6px; color: #6d7d90; }
-  #favs .fstar.on { color: #ffd479; }
-  #favs .fdel { padding: 4px 8px; color: #8b97a6; }
-  #favs .fdel:hover, #favs .fdel.armed { color: #ff6b60; }
-  #favs .fname { flex: 1; margin: 2px 6px; padding: 3px 6px; background: #1d2530; border: 1px solid #5aa0d0; border-radius: 3px; cursor: text; min-width: 0; }
-  #favs .fempty { padding: 6px 10px; color: #93a1b2; }
-  body.locked #favs { opacity: .55; }
+  .listpanel button, .listpanel input { font: inherit; color: #dbe3ec; background: none; border: 0; cursor: pointer; }
+  .listpanel .fhead { display: flex; justify-content: space-between; padding: 4px 6px; }
+  .listpanel .ftitle { font-weight: 600; padding: 2px 4px; }
+  .listpanel .fpin { border: 1px solid #3a4552; border-radius: 3px; padding: 1px 8px; color: #ffd479; }
+  .listpanel .flist { max-height: 40vh; overflow-y: auto; border-top: 1px solid #2a3340; padding: 3px 0; }
+  .listpanel .frow { display: flex; align-items: center; }
+  .listpanel .fgo { flex: 1; text-align: left; padding: 4px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .listpanel .fgo:hover { background: #2a4f6b; }
+  .listpanel .fstar { padding: 4px 6px; color: #6d7d90; }
+  .listpanel .fstar.on { color: #ffd479; }
+  .listpanel .fdel { padding: 4px 8px; color: #8b97a6; }
+  .listpanel .fdel:hover, .listpanel .fdel.armed { color: #ff6b60; }
+  .listpanel .fname { flex: 1; margin: 2px 6px; padding: 3px 6px; background: #1d2530; border: 1px solid #5aa0d0; border-radius: 3px; cursor: text; min-width: 0; }
+  .listpanel .fempty { padding: 6px 10px; color: #93a1b2; }
+  body.locked .listpanel { opacity: .55; }
+  /* PLACES in Navigation, PIECES (pieces of ground) in Tools, in the same spot. */
+  body.tools #favs, body:not(.tools) #pieces { display: none; }
   /* The key menu: a column down the left, one key per row, under headings.
      On a short screen it splits into two columns rather than running into
      the status bar. */
@@ -150,7 +152,8 @@
   <input id="levels" type="range" min="2" max="9" step="1" value="9">
 </div>
 
-<div id="favs"></div>
+<div id="favs" class="listpanel"></div>
+<div id="pieces" class="listpanel"></div>
 
 <div id="ui">
   <div id="layers" class="grid"></div>

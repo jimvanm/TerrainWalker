@@ -143,4 +143,39 @@ const { Landmarks } = await import('../src/landmarks.js');
   assert.ok(tp.state === 'off' && !L.items.some((it) => it.preview), 'N again puts it away');
   console.log('ok  draw, take back, pick up, carry, turn, change height, lay down, remove, put away');
 }
+// ---- the saved pieces list ----
+{
+  const mem = new Map();
+  globalThis.localStorage = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, String(v)) };
+  const P = await import('../src/pieces.js');
+  const list = P.loadPieces();
+  assert.deepEqual(list, [], 'none at first');
+  const a = P.addPiece(list, { corners: [[1, 1], [1, 2], [2, 2]], mode: 'rise' });
+  const b = P.addPiece(list, { corners: [[1, 1], [1, 2], [2, 2]], mode: 'sea' });
+  assert.ok(a.name === 'Piece 1' && b.name === 'Piece 2' && list[0] === b, 'named in turn, newest first');
+  P.savePieces(list);
+  assert.equal(P.loadPieces().length, 2, 'kept in the browser');
+  mem.set('tw.pieces', 'not json');
+  assert.deepEqual(P.loadPieces(), [], 'a broken store is ignored, not fatal');
+
+  // Picking up an outline saves it; taking it from the list puts it in hand again.
+  const mesh = { buffers: () => ({ vao: {}, count: 0 }), freeBuffers() {} };
+  const L = new Landmarks(null, mesh, []);
+  await L.ready;
+  const fetchTile = async () => { const h = new Float32Array(256 * 256); for (let i = 0; i < h.length; i++) h[i] = 500 + (i % 256); return h; };
+  const tp = new T.Transplant(L, fetchTile);
+  const saved = [];
+  tp.onPicked = (v) => { saved.push(v); return 'Piece 9'; };
+  const c0 = { lat: 49.3, lon: -123.0 }, k0 = geo.mercScale(c0.lat), x0 = geo.lonToMercX(c0.lon), y0 = geo.latToMercY(c0.lat);
+  tp.toggle();
+  for (const [de, dn] of [[-1000, -1000], [1000, -1000], [0, 1000]]) { tp.aim = { mx: x0 + de / k0, my: y0 + dn / k0 }; tp.click(() => 0); }
+  await tp.close();
+  assert.ok(saved.length === 1 && saved[0].corners.length === 3 && tp.piece.name === 'Piece 9', 'an outline picked up is saved, by its corners, and named');
+  assert.ok(Math.abs(saved[0].corners[2][0] - geo.mercYToLat(y0 + 1000 / k0)) < 1e-5, 'corners as latitude and longitude');
+  tp.cancel();
+  await tp.take({ name: 'Grouse', corners: saved[0].corners, mode: 'sea' });
+  assert.ok(tp.state === 'carrying' && tp.piece.name === 'Grouse' && tp.mode === 'sea', 'taken from the list: in hand, with its name and height setting');
+  assert.equal(saved.length, 1, 'and not saved a second time');
+  console.log('ok  the saved pieces list');
+}
 console.log('transplant ok');

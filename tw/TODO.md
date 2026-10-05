@@ -209,7 +209,10 @@ holes wherever tiles have not loaded.
 - [ ] **Moving ground, next steps.** Tools mode, `N` (src/transplant.js):
       outline, pick up, carry, turn, lay down; rise above its edge or height
       above sea level (`U`). Drawn as a solid model with a wall around its
-      edge; the ground under it is not changed. Next, agreed: part 2, cities:
+      edge; the ground under it is not changed. Saved outlines: the PIECES list
+      (src/pieces.js). Next, agreed: a mountain lookup by name (Wikidata:
+      summit, height, prominence; outline traced at the col's height, capped
+      at about 15 km). Then part 2, cities:
       move the buildings and roads inside the outline too, draped on the
       destination's ground (downtown Toronto on Saba, in front of Mount St
       Helens). Open: in rise mode a valley below the outline's edge comes out
