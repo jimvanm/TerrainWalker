@@ -10,7 +10,7 @@
 // Drawn like the near field (camera-relative, same curve drop, same shading).
 // The Earth's curve hides a landmark beyond the horizon, which is also why that
 // is the right distance to load it.
-import { lonToMercX, latToMercY, mercScale, wrapMercDx, R_MEAN } from './geo.js';
+import { lonToMercX, latToMercY, mercXToLon, mercYToLat, mercScale, wrapMercDx, R_MEAN } from './geo.js';
 import { loadList, loadModel, footprintOf } from './landmark_list.js';
 import { polygonArea, edgesOf, dominantBearing, suggestYaw, ovalAxis, wrapTo } from './orient.js';
 
@@ -55,8 +55,10 @@ export class Landmarks {
     this.items = [];             // placements
     this.models = new Map();     // shape id -> { state: 'loading' | 'ready' | 'failed', vao, count, footprint, ... }
     this.listed = false;
-    (list ? Promise.resolve(list) : loadList()).then((all) => {
+    this.kinds = [];             // the listed landmarks, as shapes to drop elsewhere (dropper.js)
+    this.ready = (list ? Promise.resolve(list) : loadList()).then((all) => {
       for (const L of all) this.add({ ...L, model: L.id });
+      this.kinds = all;
       this.listed = true;
     });
   }
@@ -74,6 +76,32 @@ export class Landmarks {
     };
     this.items.push(it);
     return it;
+  }
+
+  // Move a placement (mercator metres). Its ground is looked up again.
+  moveTo(it, mx, my) {
+    if (it.mx === mx && it.my === my) return;
+    it.mx = mx; it.my = my;
+    it.k = mercScale(mercYToLat(my));
+    it.lat = mercYToLat(my); it.lon = mercXToLon(mx);
+    it.base = null; it.baseZ = -1;
+  }
+
+  // Turn a placement. The turn is baked into its buffers, so they are remade.
+  turnTo(it, yawDeg) {
+    it.yawDeg = yawDeg;
+    this._free(it);
+  }
+
+  remove(it) {
+    this._free(it);
+    const i = this.items.indexOf(it);
+    if (i >= 0) this.items.splice(i, 1);
+  }
+
+  _free(it) {
+    if (it.buf) this.mesh.freeBuffers(it.buf);
+    it.buf = null; it.vao = null; it.count = 0;
   }
 
   _ready(it) { const m = this.models.get(it.model); return !!m && m.state === 'ready'; }
@@ -127,11 +155,7 @@ export class Landmarks {
     // Free shapes nobody is near any more, with their placements' buffers.
     for (const [id, m] of this.models) {
       if ((used.get(id) ?? Infinity) <= UNLOAD) continue;
-      for (const it of this.items) {
-        if (it.model !== id || !it.buf) continue;
-        this.mesh.freeBuffers(it.buf);
-        it.buf = null; it.vao = null; it.count = 0;
-      }
+      for (const it of this.items) if (it.model === id) this._free(it);
       this.models.delete(id);
     }
   }
@@ -150,7 +174,7 @@ export class Landmarks {
     const gl = this.gl, u = this.mesh.u;
     gl.uniform1f(u.uScale, 1);
     for (const it of this.items) {
-      if (!it.vao || it.base === null) continue;
+      if (!it.vao || it.base === null || it.hidden) continue;
       // Height is relative to the landmark's own base: shift the camera, not the model.
       gl.uniform1f(u.uCamAlt, pass.alt - it.base);
       // Offset uses the camera's scale, exactly like tile offsets do.
@@ -166,7 +190,7 @@ export class Landmarks {
   // suggested yaw per landmark; the number is then copied into its landmark.json.
   // Only landmarks whose shape is loaded (you are near them) can be compared.
   orientation(outlines) {
-    return this.items.filter((it) => this._ready(it)).map((it) => {
+    return this.items.filter((it) => this._ready(it) && !it.dropped && !it.preview).map((it) => {
       it = { ...it, footprint: this.models.get(it.model).footprint };
       const modelEdges = edgesOf(it.footprint), modelArea = Math.round(polygonArea(it.footprint));
       const own = dominantBearing(modelEdges, it.fold);
@@ -199,8 +223,9 @@ export class Landmarks {
   }
 
   report() {
-    return this.items.filter((it) => it.inRange || it.km < 200).map((it) => ({
-      name: it.name, ground: it.base === null ? null : Math.round(it.base + SINK), km: +it.km.toFixed(1),
+    return this.items.filter((it) => !it.preview && (it.inRange || it.km < 200)).map((it) => ({
+      name: it.name + (it.dropped ? ' (dropped)' : ''),
+      ...(it.dropped ? { lat: +it.lat.toFixed(6), lon: +it.lon.toFixed(6), yawDeg: it.yawDeg } : {}), ground: it.base === null ? null : Math.round(it.base + SINK), km: +it.km.toFixed(1),
       shape: this.models.has(it.model) ? this.models.get(it.model).state : 'not loaded (out of range)',
     }));
   }

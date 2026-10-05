@@ -20,6 +20,7 @@ import { MeshProgram } from './meshprogram.js';
 import { Landmarks } from './landmarks.js';
 import { Detail } from './detail.js';
 import { loadPlaceTiles } from './placetiles.js';
+import { Dropper } from './dropper.js';
 import { LOOK, SETS } from './look.js';
 import { settings, LAYERS, layerOn, toggleLayer } from './settings.js';
 import { helpHtml, bindKeys } from './ui/keys.js';
@@ -85,6 +86,7 @@ const nearField = new NearLayer(gl, mesh, vectorTemplate);
 const farField = new SkylineLayer(gl, mesh, vectorTemplate);
 const handover = new Handover(nearField, farField);
 const landmarks = new Landmarks(gl, mesh);
+const dropper = new Dropper(landmarks);
 const detail = new Detail();
 
 // Resolve the vector tile template from the service's TileJSON. Terrain still
@@ -134,6 +136,10 @@ const actions = {
   faster: () => controls.bump(1.5),
   slower: () => controls.bump(1 / 1.5),
   pin: () => favourites.pinHere(),
+  dropCycle: () => dropper.cycle(),
+  dropLeft: () => dropper.turn(-1),
+  dropRight: () => dropper.turn(1),
+  dropRemove: () => dropper.removeAimed(cam, (x, y) => terrain.heightAt(x, y)),
   strainLog: () => perf.copyLog(),
   heightReport: () => heightReport(cam, nearField, farField, landmarks, terrain),
   toggleHelp: () => {
@@ -151,6 +157,10 @@ const actions = {
   },
 };
 bindKeys(actions);
+// A click while the mouse is captured drops the armed landmark. (The first
+// click only captures the mouse: the lock is not on yet when it arrives.)
+canvas.addEventListener('click', () => { if (controls.locked) dropper.drop(); });
+const dropEl = document.getElementById('drop');
 document.getElementById('help').innerHTML = helpHtml();
 const syncPanels = initPanels(actions, controls, cam);
 const setHeading = initCompass();
@@ -200,7 +210,9 @@ function frame(now) {
     terrain.update(v);
     handover.update(v);
   }
+  dropper.update(cam, (x, y) => terrain.heightAt(x, y));   // before landmarks: it moves the preview
   landmarks.update(v, (x, y) => terrain.groundAt(x, y));
+  if (dropEl.textContent !== dropper.message) { dropEl.textContent = dropper.message; dropEl.classList.toggle('hide', !dropper.message); }
 
   const roadsOn = layerOn('roads'), bldOn = layerOn('built'), landOn = layerOn('land');
   const shading = {

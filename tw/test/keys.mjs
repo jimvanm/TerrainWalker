@@ -8,7 +8,7 @@ import { KEYS, helpHtml, bindKeys } from '../src/ui/keys.js';
 const acts = KEYS.filter((k) => k.act);
 const codes = acts.map((k) => k.code);
 assert.equal(new Set(codes).size, codes.length, 'no key code runs two actions');
-for (const k of acts) assert.match(k.code, /^(Key[A-Z]|Digit\d)$/, 'action key has a real key code: ' + k.label);
+for (const k of acts) assert.match(k.code, /^(Key[A-Z]|Digit\d|Comma|Period|Delete)$/, 'action key has a real key code: ' + k.label);
 
 const html = helpHtml();
 for (const k of KEYS) assert.ok(html.includes(`<b>${k.label}</b>`), 'help panel shows ' + k.label);

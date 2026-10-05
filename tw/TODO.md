@@ -195,13 +195,11 @@ holes wherever tiles have not loaded.
 
 ## Features discussed, not started
 
-- [ ] **Place a landmark at the reticle.** A key arms it, a click drops the
-      chosen shape where the reticle meets the ground, and it is drawn from
-      there like any landmark: the CN Tower beside Vesuvius, say. The app is
-      ready for it: `Landmarks.add()` stands a shape anywhere, and one shape
-      can stand in several places. Needs: picking the ground point under the
-      reticle, a way to choose the shape, and whether placements are kept
-      (saved places style) or vanish on reload.
+- [ ] **Dropping landmarks, next steps.** `M` drops one at the crosshair
+      (src/dropper.js). Still to do: a search to pick from many landmarks
+      rather than pressing `M` through them all, and masking: a dropped
+      landmark does not hide the map buildings under it, as listed ones do
+      (the near-field helper reads only landmarks/index.json).
 
 - [ ] **Artificial horizon.** The heading indicator shipped; the pitch half did
       not. Belongs with the sphere, where "level" becomes a computed quantity

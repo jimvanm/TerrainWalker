@@ -42,6 +42,10 @@ export const KEYS = [
   { group: 'Colours', label: '9', help: 'warm', code: 'Digit9', act: 'lookWarm' },
 
   { group: 'Tools', label: 'P', help: 'pin this place', code: 'KeyP', act: 'pin' },
+  { group: 'Tools', label: 'M', help: 'drop a landmark (again: next, then off)', code: 'KeyM', act: 'dropCycle' },
+  { group: 'Tools', label: ',', help: 'or', code: 'Comma', act: 'dropLeft' },
+  { group: 'Tools', label: '.', help: 'turn it', code: 'Period', act: 'dropRight' },
+  { group: 'Tools', label: 'Delete', help: 'remove the dropped one aimed at', code: 'Delete', act: 'dropRemove' },
   { group: 'Tools', label: 'K', help: 'copy height report', code: 'KeyK', act: 'heightReport' },
   { group: 'Tools', label: 'L', help: 'copy strain log', code: 'KeyL', act: 'strainLog' },
   { group: 'Tools', label: 'H', help: 'hide this menu and the graph', code: 'KeyH', act: 'toggleHelp' },

@@ -54,6 +54,8 @@
   #help .k { color: #93a1b2; }
   #help b { color: #ffd479; font-weight: 600; }
   #help.hide { display: none; }
+  #drop { left: 50%; top: 10px; transform: translateX(-50%); color: #ffd479; }
+  #drop.hide { display: none; }
   @media (max-height: 760px) { #help { column-count: 2; column-gap: 18px; } }
   #ctrl {
     position: fixed; right: 10px; top: 10px; background: rgba(12,16,22,.72);
@@ -118,6 +120,8 @@
 
 <!-- Built from the key table in src/ui/keys.js. -->
 <div id="help" class="panel"></div>
+<!-- What M (drop a landmark) is about to do. -->
+<div id="drop" class="panel hide"></div>
 
 <div id="ctrl">
   <label for="levels">view</label>
