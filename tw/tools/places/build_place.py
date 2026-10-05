@@ -5,7 +5,7 @@ Build detailed terrain tiles for a place from laser-survey elevation data.
     python tools/places/build_place.py niagara --probe     # what would be used; downloads nothing
     python tools/places/build_place.py niagara             # build the tiles
 
-Run from the project's tw folder. Needs Python 3.9 or newer and:
+Works from any folder. Needs Python 3.9 or newer and:
 
     pip install rasterio numpy pillow
 
@@ -242,7 +242,8 @@ def main():
     ap = argparse.ArgumentParser(description="Build detailed terrain tiles for a place.")
     ap.add_argument("place", help="folder name under places/, e.g. niagara")
     ap.add_argument("--probe", action="store_true", help="only report what would be used; download nothing")
-    ap.add_argument("--root", default=".", help="the project's tw folder (default: here)")
+    ap.add_argument("--root", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."),
+                    help="the project's tw folder (default: found from where this script is)")
     ap.add_argument("--source", action="append", default=[],
                     help="use this elevation file instead of searching (repeatable; for testing)")
     ap.add_argument("--cache", default=None, help="where to keep downloaded usual tiles (default: places/<id>/.cache)")

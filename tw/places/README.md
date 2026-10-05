@@ -15,13 +15,13 @@ own terrain tiles built from laser-survey data. Each place is one folder here.
 
 ## Build a place
 
-From the `tw` folder, once:
+Once:
 
 ```
 pip install rasterio numpy pillow
 ```
 
-Then:
+Then, from the `tw` folder:
 
 ```
 python tools/places/build_place.py niagara --probe
