@@ -1,0 +1,21 @@
+{
+  "name": "Niagara River: control dam to Queenston",
+  "note": "From about 100 m upstream of the International Control Dam, past both falls and down the gorge to just below Queenston Heights. Each point is [lat, lon, metres]: the corridor reaches that far from the line through the points, which covers the river plus about 500 m on each side.",
+  "path": [
+    [43.0717, -79.0558, 1200],
+    [43.0745, -79.0650, 1300],
+    [43.0785, -79.0725, 1300],
+    [43.0850, -79.0705, 1000],
+    [43.0897, -79.0677, 850],
+    [43.1000, -79.0620, 850],
+    [43.1094, -79.0587, 850],
+    [43.1177, -79.0660, 1000],
+    [43.1280, -79.0520, 850],
+    [43.1380, -79.0465, 850],
+    [43.1532, -79.0443, 850],
+    [43.1640, -79.0485, 900],
+    [43.1720, -79.0550, 900]
+  ],
+  "feather_m": 150,
+  "zooms": [12, 13, 14, 15, 16]
+}
