@@ -31,6 +31,11 @@ types, module execution, module workers, WebGL2 and shader compilation, tile
 fetch and CORS, OffscreenCanvas — and names the cause. It deliberately uses no
 modules itself, so it still runs when module loading is the broken part.
 
+To see how good the height data is at a given place, open
+<http://localhost:8080/terraincheck.html>. It compares every detail level at
+famously difficult places (Niagara Falls, Yosemite, Thor Peak and others) with
+published facts, and names the source of the data at each.
+
 To publish, push the repo and turn on GitHub Pages from the root. That is the
 whole deployment.
 

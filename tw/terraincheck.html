@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Terrain Walker — terrain data check</title>
+<style>
+  body { font: 13px/1.55 ui-monospace, Consolas, monospace; background:#12161c; color:#dbe3ec; margin:0; padding:24px; }
+  h1 { font-size:16px; margin:0 0 4px; }
+  p.sub { color:#8b97a6; margin:0 0 16px; max-width:900px; }
+  button { font:inherit; color:#dbe3ec; background:#1d2530; border:1px solid #3a4552; border-radius:4px; padding:5px 12px; cursor:pointer; }
+  button:hover { border-color:#6d7d90; }
+  .site { border-left:3px solid #4a7ac0; background:#1a1f27; padding:10px 14px; margin:14px 0; }
+  .site.done { border-color:#4ac07a; }
+  .site.bad { border-color:#e05555; }
+  .head { display:flex; gap:14px; align-items:baseline; flex-wrap:wrap; }
+  .name { font-weight:600; font-size:14px; }
+  .facts { color:#a8b4c2; margin:4px 0 8px; }
+  .verdict { color:#ffd479; margin:6px 0; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; }
+  .lvl { text-align:center; font-size:11px; color:#a8b4c2; }
+  canvas { display:block; width:170px; height:170px; image-rendering:pixelated; border:1px solid #2a3340; }
+  table { border-collapse:collapse; margin-top:8px; font-size:12px; }
+  td, th { padding:2px 10px 2px 0; text-align:right; }
+  th { color:#8b97a6; font-weight:400; }
+  td:first-child, th:first-child { text-align:left; }
+  .new { color:#6be08a; } .old { color:#e0a83c; }
+  a { color:#5aa0d0; }
+  #status { color:#8b97a6; margin-left:12px; }
+</style>
+</head>
+<body>
+<h1>Terrain data check</h1>
+<p class="sub">For each place: the height data at every detail level, zoom 10 to 15, against published
+facts. The terrain service mixes sources of very different quality (10 m in the US, 5 m in the Arctic,
+30 m radar elsewhere); each place says which it uses. Spacings in green are no finer than the source, so
+they carry real measurements; past that, finer levels are only enlarged copies. Pictures are the same area
+at each level, lit from the north-west. Downloads about 25 MB the first time, from the same free service
+the app uses.</p>
+<button id="run">Run all</button> <button id="copy">Copy report</button><span id="status"></span>
+<div id="out"></div>
+
+<script type="module">
+import { TILE_URL } from './src/config.js';
+import { despike, PX } from './src/heightgrid.js';
+
+// box: kilometres across. facts: published numbers to judge the data against.
+const SITES = [
+  { id: 'niagara-falls', name: 'Niagara Falls (Horseshoe)', lat: 43.0779, lon: -79.0755, box: 2,
+    src: 'Canadian survey (about 20 m) on most of the Horseshoe; US survey (10 m) on the American side. The border runs down the river.', srcM: 20,
+    facts: 'Horseshoe Falls drops about 51 m, over a curved crest about 670 m long.' },
+  { id: 'niagara-gorge', name: 'Niagara Gorge (Rainbow Bridge)', lat: 43.0898, lon: -79.0681, box: 2,
+    src: 'US survey (10 m) on the east side, Canadian survey (about 20 m) on the west. The border runs down the river.', srcM: 20,
+    facts: 'Gorge about 300 m wide; near-vertical walls; rim about 55 m above the river.' },
+  { id: 'el-capitan', name: 'El Capitan, Yosemite', lat: 37.7310, lon: -119.6370, box: 2.5,
+    src: 'US national survey, 10 m.', srcM: 10,
+    facts: 'Wall about 900 m from the valley floor, close to vertical.' },
+  { id: 'half-dome', name: 'Half Dome, Yosemite', lat: 37.7460, lon: -119.5330, box: 2.5,
+    src: 'US national survey, 10 m.', srcM: 10,
+    facts: 'About 1,440 m above the valley floor; north-west face about 600 m sheer.' },
+  { id: 'thor', name: 'Thor Peak, Nunavut', lat: 66.5500, lon: -65.3400, box: 3,
+    src: 'Arctic satellite survey (north of 60°), 5 m.', srcM: 5,
+    facts: 'Summit 1,675 m; west face about 1,250 m, overhanging on average.' },
+  { id: 'angel-falls', name: 'Angel Falls, Venezuela', lat: 5.9675, lon: -62.5356, box: 3,
+    src: 'Worldwide radar survey, 30 m (about 90 m in quality).', srcM: 30,
+    facts: 'Falls drop 979 m off the edge of a flat-topped mountain.' },
+  { id: 'trango', name: 'Trango Towers, Pakistan', lat: 35.7400, lon: 76.1600, box: 3,
+    src: 'Worldwide radar survey, 30 m (about 90 m in quality); gaps in steep mountains filled in.', srcM: 30,
+    facts: 'Great Trango 6,286 m; east face about 1,340 m near-vertical granite.' },
+  { id: 'preikestolen', name: 'Preikestolen, Norway', lat: 58.9863, lon: 6.1904, box: 2,
+    src: 'Norwegian mapping agency, 10 m.', srcM: 10,
+    facts: 'Flat-topped cliff 604 m above Lysefjord.' },
+  { id: 'victoria-falls', name: 'Victoria Falls, Zambia/Zimbabwe', lat: -17.9244, lon: 25.8569, box: 2,
+    src: 'Worldwide radar survey, 30 m (about 90 m in quality).', srcM: 30,
+    facts: 'Drops about 108 m into a chasm 60 to 120 m wide.' },
+  { id: 'mitre-peak', name: 'Mitre Peak, Milford Sound', lat: -44.6371, lon: 167.8570, box: 3,
+    src: 'New Zealand mapping agency, 8 m.', srcM: 8,
+    facts: 'Rises 1,692 m straight out of the fjord.' },
+  { id: 'grand-canyon', name: 'Grand Canyon (for comparison)', lat: 36.0600, lon: -112.1100, box: 2.5,
+    src: 'US national survey, 10 m.', srcM: 10,
+    facts: 'Included for comparison: a place where the data is known to be good.' },
+];
+const ZOOMS = [10, 11, 12, 13, 14, 15];
+const APP_FINEST = 12;          // the app's finest terrain level today
+const EARTH = 40075016.686;
+
+const tileX = (lon, z) => (lon + 180) / 360 * 2 ** z;
+const tileY = (lat, z) => { const r = lat * Math.PI / 180; return (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * 2 ** z; };
+
+const cache = new Map();
+async function tile(z, x, y) {
+  const key = z + '/' + x + '/' + y;
+  if (!cache.has(key)) cache.set(key, (async () => {
+    const url = TILE_URL.replace('{z}', z).replace('{x}', x).replace('{y}', y);
+    const res = await fetch(url, { mode: 'cors' });
+    if (!res.ok) throw new Error(url + ': HTTP ' + res.status);
+    const bmp = await createImageBitmap(await res.blob(), { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
+    const cv = new OffscreenCanvas(PX, PX), cx = cv.getContext('2d', { willReadFrequently: true });
+    cx.drawImage(bmp, 0, 0);
+    const d = cx.getImageData(0, 0, PX, PX).data, h = new Float32Array(PX * PX);
+    for (let i = 0, p = 0; i < h.length; i++, p += 4) h[i] = d[p] * 256 + d[p + 1] + d[p + 2] / 256 - 32768;
+    return h;
+  })());
+  return cache.get(key);
+}
+
+// All tiles covering the site's box at zoom z, as one height grid in global pixel units.
+async function mosaic(s, z) {
+  const halfLat = s.box / 2 / 111.32, halfLon = s.box / 2 / (111.32 * Math.cos(s.lat * Math.PI / 180));
+  const gx0 = tileX(s.lon - halfLon, z) * PX, gx1 = tileX(s.lon + halfLon, z) * PX;
+  const gy0 = tileY(s.lat + halfLat, z) * PX, gy1 = tileY(s.lat - halfLat, z) * PX;
+  const tx0 = Math.floor(gx0 / PX), tx1 = Math.floor(gx1 / PX), ty0 = Math.floor(gy0 / PX), ty1 = Math.floor(gy1 / PX);
+  const W = (tx1 - tx0 + 1) * PX, H = (ty1 - ty0 + 1) * PX;
+  const raw = new Float32Array(W * H);
+  let spikes = 0;
+  const jobs = [];
+  for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) jobs.push([tx, ty]);
+  await Promise.all(jobs.map(async ([tx, ty]) => {
+    const h = await tile(z, tx, ty);
+    const copy = h.slice();
+    spikes += despike(copy, EARTH * Math.cos(s.lat * Math.PI / 180) / (2 ** z * PX));   // what the app would change
+    for (let j = 0; j < PX; j++) raw.set(h.subarray(j * PX, j * PX + PX), ((ty - ty0) * PX + j) * W + (tx - tx0) * PX);
+  }));
+  const at = (gx, gy) => {            // bilinear, global pixel coordinates (pixel centres at i + 0.5)
+    const x = Math.max(0, Math.min(W - 1.001, gx - tx0 * PX - 0.5)), y = Math.max(0, Math.min(H - 1.001, gy - ty0 * PX - 0.5));
+    const x0 = x | 0, y0 = y | 0, fx = x - x0, fy = y - y0, i = y0 * W + x0;
+    return (raw[i] * (1 - fx) + raw[i + 1] * fx) * (1 - fy) + (raw[i + W] * (1 - fx) + raw[i + W + 1] * fx) * fy;
+  };
+  return { z, at, box: [gx0, gy0, gx1, gy1], tiles: jobs.length, spikes,
+           px: EARTH * Math.cos(s.lat * Math.PI / 180) / (2 ** z * PX) };
+}
+
+function measure(m) {
+  const [gx0, gy0, gx1, gy1] = m.box;
+  const w = Math.floor(gx1 - gx0), h = Math.floor(gy1 - gy0);
+  const G = new Float32Array(w * h);
+  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) G[j * w + i] = m.at(gx0 + i + 0.5, gy0 + j + 0.5);
+  let lo = Infinity, hi = -Infinity, maxSlope = 0, steep = 0, drop100 = 0;
+  const k = Math.max(1, Math.round(100 / m.px));
+  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+    const v = G[j * w + i];
+    lo = Math.min(lo, v); hi = Math.max(hi, v);
+    if (i + 1 < w && j + 1 < h) {
+      const sx = (G[j * w + i + 1] - v) / m.px, sy = (G[(j + 1) * w + i] - v) / m.px;
+      const deg = Math.atan(Math.hypot(sx, sy)) * 180 / Math.PI;
+      maxSlope = Math.max(maxSlope, deg);
+      if (deg > 60) steep++;
+    }
+    if (i + k < w) drop100 = Math.max(drop100, Math.abs(G[j * w + i + k] - v));
+    if (j + k < h) drop100 = Math.max(drop100, Math.abs(G[(j + k) * w + i] - v));
+  }
+  return { z: m.z, pxM: +m.px.toFixed(1), tiles: m.tiles, low: Math.round(lo), high: Math.round(hi),
+           relief: Math.round(hi - lo), maxSlopeDeg: +maxSlope.toFixed(1),
+           steepPct: +(100 * steep / (w * h)).toFixed(2), biggestDropOver100m: Math.round(drop100),
+           despikeFixes: m.spikes, G, w, h };
+}
+
+function shade(r, canvas) {
+  const N = 170, c = canvas.getContext('2d'), img = c.createImageData(N, N);
+  const { G, w, h, pxM, low, high } = r;
+  const s = (x, y) => G[Math.min(h - 1, Math.max(0, Math.round(y))) * w + Math.min(w - 1, Math.max(0, Math.round(x)))];
+  const L = [-0.5, -0.5, 0.7071];
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const fx = x / N * (w - 1), fy = y / N * (h - 1), d = Math.max(1, (w - 1) / N);
+    const dzdx = (s(fx + d, fy) - s(fx - d, fy)) / (2 * d * pxM), dzdy = (s(fx, fy + d) - s(fx, fy - d)) / (2 * d * pxM);
+    const n = [-dzdx, -dzdy, 1], nl = Math.hypot(...n);
+    const lit = Math.max(0, (n[0] * L[0] + n[1] * L[1] + n[2] * L[2]) / nl);
+    const t = (s(fx, fy) - low) / Math.max(1, high - low);
+    const p = (y * N + x) * 4, g = 40 + 200 * lit;
+    img.data[p] = g * (0.75 + 0.25 * t); img.data[p + 1] = g * (0.85 + 0.1 * t); img.data[p + 2] = g * (0.95 - 0.1 * t); img.data[p + 3] = 255;
+  }
+  c.putImageData(img, 0, 0);
+}
+
+const results = [];
+const out = document.getElementById('out'), status = document.getElementById('status');
+
+async function runSite(s) {
+  const box = document.createElement('div');
+  box.className = 'site';
+  const fly = `index.html#lat=${s.lat}&lon=${s.lon}&alt=${s.box > 2.5 ? 2500 : 900}&mode=fly&pitch=-20`;
+  box.innerHTML = `<div class="head"><span class="name">${s.name}</span><a href="${fly}" target="_blank">fly there</a></div>
+    <div class="facts">${s.facts}</div><div class="verdict">measuring…</div><div class="row"></div><table></table>`;
+  out.appendChild(box);
+  const row = box.querySelector('.row'), table = box.querySelector('table'), verdictEl = box.querySelector('.verdict');
+  try {
+    const rows = [];
+    for (const z of ZOOMS) {
+      status.textContent = `${s.name}: zoom ${z}`;
+      const m = await mosaic(s, z);
+      const r = measure(m);
+      rows.push(r);
+      const cell = document.createElement('div');
+      cell.className = 'lvl';
+      const cv = document.createElement('canvas'); cv.width = cv.height = 170;
+      shade(r, cv);
+      cell.append(cv, `zoom ${z} · ${r.pxM} m`);
+      row.appendChild(cell);
+    }
+    const app = rows.find((r) => r.z === APP_FINEST);
+    const match = rows.find((r) => r.pxM <= s.srcM) || rows[rows.length - 1];
+    table.innerHTML = '<tr><th>zoom</th><th>spacing</th><th>low</th><th>high</th><th>relief</th><th>steepest</th>' +
+      '<th>&gt;60°</th><th>biggest drop over 100 m</th><th>despike</th></tr>' +
+      rows.map((r) => `<tr><td>${r.z}${r.z === APP_FINEST ? ' (app now)' : ''}${r === match ? ' (as fine as the source)' : ''}</td>` +
+        `<td class="${r.z <= match.z ? 'new' : 'old'}">${r.pxM} m</td><td>${r.low}</td><td>${r.high}</td>` +
+        `<td>${r.relief} m</td><td>${r.maxSlopeDeg}°</td><td>${r.steepPct}%</td><td>${r.biggestDropOver100m} m</td>` +
+        `<td>${r.despikeFixes}</td></tr>`).join('');
+    verdictEl.textContent = `Source: ${s.src} ` + (match.z > APP_FINEST
+      ? `The app stops at zoom ${APP_FINEST} (${app.pxM} m); zoom ${match.z} (${match.pxM} m) is the first level as fine as the source. ` +
+        `Steepest slope ${app.maxSlopeDeg}° now, ${match.maxSlopeDeg}° there.`
+      : `The app's zoom ${APP_FINEST} (${app.pxM} m) is already as fine as the source; finer levels are only enlarged copies.`);
+    box.classList.add('done');
+    results.push({ id: s.id, name: s.name, facts: s.facts, source: s.src, sourceM: s.srcM, firstLevelAsFine: match.z,
+      levels: rows.map(({ G, w, h, ...r }) => r) });
+  } catch (e) {
+    box.classList.add('bad');
+    verdictEl.textContent = 'Failed: ' + e.message;
+    results.push({ id: s.id, error: e.message });
+  }
+}
+
+document.getElementById('run').onclick = async (e) => {
+  e.target.disabled = true; out.textContent = ''; results.length = 0;
+  for (const s of SITES) await runSite(s);
+  status.textContent = 'done';
+};
+document.getElementById('copy').onclick = () => {
+  const text = JSON.stringify({ checked: new Date().toISOString().slice(0, 10), sites: results }, null, 1);
+  navigator.clipboard.writeText(text).then(() => { status.textContent = 'report copied'; },
+    () => { status.textContent = 'could not copy; report is in the console'; console.log(text); });
+};
+</script>
+</body>
+</html>
