@@ -50,6 +50,7 @@ tiles are built on your own computer and are not in the repo (see
 
 | Input | Action |
 | --- | --- |
+| `Tab` | switch between the two modes, each with its own key menu: **Navigation** (moving about, what is shown) and **Tools** (changing things: dropping landmarks). Moving, flying and the reports work in both. |
 | click | capture the mouse, `esc` releases |
 | `W` `A` `S` `D` | move |
 | `shift` | run (walking) |
@@ -67,15 +68,15 @@ tiles are built on your own computer and are not in the repo (see
 | `8` | building colours: next colour set (stone, brick, render, concrete, mixed) |
 | `9` | building colours: warmer light on/off |
 | `P` | pin this place to the saved places list |
-| `M` | drop a landmark where the crosshair meets the ground: press again for the next one, and after the last, off. Click to drop (mouse captured); `,` / `.` turn it; `Delete` removes a dropped one under the crosshair. A reload clears them all. |
+| `M` | (Tools) drop a landmark where the crosshair meets the ground: press again for the next one, and after the last, off. Click to drop (mouse captured); `,` / `.` turn it; `Delete` removes a dropped one under the crosshair. A reload clears them all. |
 | `K` | copy a building-height report to the clipboard |
 | `L` | copy the performance log to the clipboard |
-| `H` | hide the key menu and performance graph |
+| `H` | hide the key menus and performance graph |
 | `1` `2` `3` `4` | debugging: tile grid, freeze loading, flat shading, show the map buildings a landmark hides |
 
 The building colour keys are also buttons under BUILDING COLOURS, lit when on.
-Every key is defined in one table, `src/ui/keys.js`; the key menu is built
-from it.
+Every key is defined in one table, `src/ui/keys.js`, with the mode it works
+in; both key menus are built from it.
 
 The view slider sets render distance, from about 27 km to about 600 km.
 

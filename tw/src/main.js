@@ -23,7 +23,7 @@ import { loadPlaceTiles } from './placetiles.js';
 import { Dropper } from './dropper.js';
 import { LOOK, SETS } from './look.js';
 import { settings, LAYERS, layerOn, toggleLayer } from './settings.js';
-import { helpHtml, bindKeys } from './ui/keys.js';
+import { helpHtml, bindKeys, MODES, modeName } from './ui/keys.js';
 import { initPanels } from './ui/panels.js';
 import { initCompass } from './ui/compass.js';
 import { Hud, fatal } from './ui/hud.js';
@@ -143,8 +143,14 @@ const actions = {
   strainLog: () => perf.copyLog(),
   heightReport: () => heightReport(cam, nearField, farField, landmarks, terrain),
   toggleHelp: () => {
-    document.getElementById('help').classList.toggle('hide');
+    document.getElementById('menus').classList.toggle('hide');
     perfEl.classList.toggle('hide');
+  },
+  // Tab: Navigation <-> Tools. Leaving Tools puts away whatever tool was armed.
+  switchMode: () => {
+    settings.mode = settings.mode === 'nav' ? 'tools' : 'nav';
+    if (settings.mode !== 'tools') dropper.off();
+    showMode();
   },
   // R: back to the start point, and normal speed.
   reset: () => {
@@ -156,12 +162,42 @@ const actions = {
     controls.walkMult = 1;
   },
 };
-bindKeys(actions);
+bindKeys(actions, window, () => settings.mode);
 // A click while the mouse is captured drops the armed landmark. (The first
 // click only captures the mouse: the lock is not on yet when it arrives.)
-canvas.addEventListener('click', () => { if (controls.locked) dropper.drop(); });
+canvas.addEventListener('click', () => { if (controls.locked && settings.mode === 'tools') dropper.drop(); });
 const dropEl = document.getElementById('drop');
-document.getElementById('help').innerHTML = helpHtml();
+// The key menus, one per mode, stacked: the current mode's in front, the
+// other tucked behind it, its title peeking out below. Clicking the one behind
+// (mouse not captured) switches to it, as Tab does.
+const menuEl = {
+  nav: document.getElementById('help'),
+  tools: document.getElementById('tools'),
+};
+for (const m of MODES) {
+  menuEl[m.id].innerHTML = helpHtml(m.id) +
+    `<div class="mtitle">${modeName(m.id).toUpperCase()}<span>Tab</span></div>`;
+  menuEl[m.id].addEventListener('click', () => { if (settings.mode !== m.id) actions.switchMode(); });
+}
+function showMode() {
+  const front = menuEl[settings.mode];
+  for (const m of MODES) {
+    const isFront = m.id === settings.mode;
+    menuEl[m.id].classList.toggle('front', isFront);
+    menuEl[m.id].classList.toggle('back', !isFront);
+    menuEl[m.id].style.height = menuEl[m.id].style.width = '';
+  }
+  // Then size the one behind like the one in front (measured only now, once
+  // the front one shows its keys), so only its edge and title peek out.
+  for (const m of MODES) {
+    if (m.id === settings.mode) continue;
+    menuEl[m.id].style.height = front.offsetHeight + 'px';
+    menuEl[m.id].style.width = front.offsetWidth + 'px';
+    menuEl[m.id].title = 'Tab: switch to ' + modeName(m.id);
+  }
+  front.title = '';
+}
+showMode();
 const syncPanels = initPanels(actions, controls, cam);
 const setHeading = initCompass();
 const hud = new Hud();

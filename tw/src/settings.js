@@ -10,6 +10,7 @@ export const settings = {
   frozen: false,     // stop all tile updates; anything that survives is not loading-related
   showMasked: false, // draw the map buildings a landmark hides (key 4), to check the mask
   levels: 9,         // view slider: how many terrain levels may be drawn
+  mode: 'nav',       // 'nav' (moving about) or 'tools' (changing things); Tab swaps (ui/keys.js MODES)
 };
 
 // Map layers. The first four are channels in the terrain shader (uLayers.xyzw,

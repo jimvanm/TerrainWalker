@@ -46,17 +46,30 @@
   /* The key menu: a column down the left, one key per row, under headings.
      On a short screen it splits into two columns rather than running into
      the status bar. */
-  #help { left: 10px; top: 10px; padding: 4px 10px 8px; line-height: 1.45; }
-  #help .grp { break-inside: avoid; display: grid; grid-template-columns: max-content auto; column-gap: 12px; }
-  #help .gh { grid-column: 1 / -1; color: #93a1b2; font-size: 10px; letter-spacing: .08em;
+  /* The key menus: one per mode, stacked. The current mode's is in front; the
+     other sits behind, shifted down and right so its title peeks out below. */
+  #menus { position: fixed; left: 10px; top: 10px; }
+  #menus.hide { display: none; }
+  #menus .menu { position: absolute; left: 0; top: 0; padding: 4px 10px 6px; line-height: 1.45;
+                 background: rgba(12,16,22,.86); }
+  #menus .menu.front { z-index: 2; }
+  #menus .menu.back { z-index: 1; left: 10px; top: 24px; overflow: hidden; background: rgba(42,51,64,.9);
+                      pointer-events: auto; cursor: pointer; display: flex; flex-direction: column; }
+  #menus .menu.back > :not(.mtitle) { display: none; }
+  #menus .menu.back .mtitle { margin-top: auto; }
+  #menus .mtitle { color: #ffd479; font-size: 10px; letter-spacing: .12em; font-weight: 600;
+                   margin-top: 6px; display: flex; justify-content: space-between; gap: 12px; }
+  #menus .mtitle span { color: #6d7d90; letter-spacing: 0; font-weight: 400; }
+  #menus .menu.front .mtitle { color: #93a1b2; }
+  #menus .grp { break-inside: avoid; display: grid; grid-template-columns: max-content auto; column-gap: 12px; }
+  #menus .gh { grid-column: 1 / -1; color: #93a1b2; font-size: 10px; letter-spacing: .08em;
               text-transform: uppercase; margin: 6px 0 1px; border-bottom: 1px solid #2a3340; }
-  #help .row { display: contents; }
-  #help .k { color: #93a1b2; }
-  #help b { color: #ffd479; font-weight: 600; }
-  #help.hide { display: none; }
+  #menus .row { display: contents; }
+  #menus .k { color: #93a1b2; }
+  #menus b { color: #ffd479; font-weight: 600; }
   #drop { left: 50%; top: 10px; transform: translateX(-50%); color: #ffd479; }
   #drop.hide { display: none; }
-  @media (max-height: 760px) { #help { column-count: 2; column-gap: 18px; } }
+  @media (max-height: 760px) { #menus .menu.front { column-count: 2; column-gap: 18px; } }
   #ctrl {
     position: fixed; right: 10px; top: 10px; background: rgba(12,16,22,.72);
     padding: 6px 10px; border-radius: 4px; display: flex; gap: 8px; align-items: center;
@@ -119,7 +132,10 @@
 <div id="loading" class="panel">loading terrain&hellip;</div>
 
 <!-- Built from the key table in src/ui/keys.js. -->
-<div id="help" class="panel"></div>
+<div id="menus">
+  <div id="tools" class="panel menu"></div>
+  <div id="help" class="panel menu"></div>
+</div>
 <!-- What M (drop a landmark) is about to do. -->
 <div id="drop" class="panel hide"></div>
 

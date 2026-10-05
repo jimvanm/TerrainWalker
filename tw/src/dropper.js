@@ -77,6 +77,12 @@ export class Dropper {
     }
   }
 
+  // Leaving Tools mode: put the armed landmark away.
+  off() {
+    if (this.preview) { this.L.remove(this.preview); this.preview = null; }
+    this.choice = -1;
+  }
+
   turn(sign) {
     if (!this.armed) return;
     this.yawDeg = ((this.yawDeg + sign * TURN) % 360 + 360) % 360;
