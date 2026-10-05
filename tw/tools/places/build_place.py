@@ -14,7 +14,8 @@ What it does, for the place defined in places/<id>/spec.json:
      Canada: Natural Resources Canada, HRDEM, 1-2 m (Open Government Licence - Canada)
      US:     US Geological Survey, 3DEP 1 m (public domain)
   2. Reads only the parts it needs (the files are read a piece at a time).
-  3. Joins them on one grid, newest survey first where they overlap.
+  3. Joins them on one grid, newest survey first where they overlap, blended
+     over SEAM_M metres where one survey's data ends, so there is no step.
   4. For each tile the place covers, at each zoom: starts from the usual tile
      the app streams, and lays the survey data over it inside the corridor,
      blending over the last feather_m metres so there is no step at the edge.
@@ -50,6 +51,7 @@ EARTH = 40075016.686
 HALF = EARTH / 2
 PX = 256
 FINEST = 16                      # the finest zoom this builds the joined grid at
+SEAM_M = 60                      # metres over which two surveys are blended where they meet
 TERRARIUM = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
 STAC = "https://datacube.services.geo.ca/stac/api/search"
 TNM = "https://tnmaccess.nationalmap.gov/api/v1/products"
@@ -216,6 +218,22 @@ def encode(h):
     return Image.fromarray(np.stack([r, g, b], -1).astype(np.uint8), "RGB")
 
 
+def near_fraction(mask, r, rows=512):
+    """For each pixel, the fraction of the (2r+1) x (2r+1) square around it
+    where mask is true. A strip of rows at a time, to keep memory small."""
+    H, W = mask.shape
+    c = np.zeros((H + 1, W + 1), dtype=np.int32)
+    np.cumsum(np.cumsum(mask, axis=0, dtype=np.int32), axis=1, out=c[1:, 1:])
+    x0, x1 = np.clip(np.arange(W) - r, 0, W), np.clip(np.arange(W) + r + 1, 0, W)
+    out = np.empty((H, W), dtype=np.float32)
+    for a in range(0, H, rows):
+        ys = np.arange(a, min(H, a + rows))
+        y0, y1 = np.clip(ys - r, 0, H), np.clip(ys + r + 1, 0, H)
+        s = c[y1][:, x1] - c[y0][:, x1] - c[y1][:, x0] + c[y0][:, x0]
+        out[a:a + len(ys)] = s / ((y1 - y0)[:, None] * (x1 - x0)[None, :])
+    return out
+
+
 def block_mean(a, f):
     """Average f x f blocks, ignoring NaN; NaN where a block is mostly empty."""
     H, W = a.shape[0] // f * f, a.shape[1] // f * f
@@ -296,9 +314,24 @@ def main():
         except Exception as ex:
             print(f"  {src['name']}: could not read ({ex}); skipped")
             continue
-        fill = np.isnan(joined) & np.isfinite(part)
+        have, new = np.isfinite(joined), np.isfinite(part)
+        both = have & new
+        note = ""
+        if both.any():
+            # Two surveys rarely agree exactly, above all on water: the river
+            # was at a different level on each survey's day. Rather than a step
+            # where one survey's data ends, blend over SEAM_M metres.
+            r = max(1, round(SEAM_M / (res * cor.k)))
+            w_old = np.clip(2 * near_fraction(have, r) - 1, 0, 1)   # 0 at the edge of what is laid, 1 well inside
+            w_new = np.clip(2 * near_fraction(new, r) - 1, 0, 1)    # likewise for this survey
+            t = (1 - w_old[both]) * w_new[both]
+            note = f", differs from the data already laid by {np.median(np.abs(joined[both] - part[both])):.1f} m where both have data"
+            joined[both] += t * (part[both] - joined[both])
+            del w_old, w_new, t
+        fill = ~have & new
         joined[fill] = part[fill]
-        print(f"  {src['name']}: {fill.mean() * 100:.1f}% of the area, {time.time() - t0:.0f} s")
+        del part, have, new, both
+        print(f"  {src['name']}: {fill.mean() * 100:.1f}% of the area{note}, {time.time() - t0:.0f} s")
     covered = np.isfinite(joined)
     X = gw + (np.arange(W) + 0.5) * res
     Y = gn - (np.arange(H) + 0.5) * res
