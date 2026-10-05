@@ -55,6 +55,11 @@ always with everything loaded.
   Canyon, Norway and New Zealand, and change nothing for Thor Peak or the
   30 m-only places. Hand-built ground patches (a modelled Niagara) do not scale.
   Flat water with hard edges was considered and not chosen.
+- **Places of interest: survey tiles per area, not hand-built ground.** Where
+  even zoom 14 is wrong (Niagara), a place gets its own tiles built from 1-2 m
+  laser-survey data (`places/`, `tools/places/build_place.py`), with zoom 15
+  and 16 there only. Open question: they are built ahead of time, not streamed
+  from the public source (see Features).
 - **Labels must be toggleable**, never always-on.
 - **Overlay direction is VFR sectional symbology**, not place labels. Detail
   level and altitude behaviour both undecided; explicitly a thing to play with
@@ -64,55 +69,30 @@ always with everything loaded.
 
 ## Bugs and rough edges
 
+- [ ] **Niagara, US side, after the seam fix.** The Canadian survey made the
+      Horseshoe Falls right. On the US side, white lines crossed the upper
+      river where one survey's data ended; the builder now blends surveys over
+      60 m. Rebuild and look. If the American Falls is still rough, the US
+      survey itself smooths water (it does not measure it), and that needs its
+      own fix.
+- [ ] **Rogers Centre mask, small pieces.** The footprint mask hid the main
+      map building; the smaller pieces around the rim were the open question.
+      Confirm with key 4 (on and off) that nothing pokes through.
+- [ ] **Version number.** The status bar still says v0.12.10 (`BUILD` in
+      `src/config.js`); it has not changed for many changes. Bump it with each
+      change, or remove it.
 - [ ] **A spike in Lake Erie.** A thin white column several kilometres tall
       stands in the lake near 42.88, -79.24 (off Port Colborne), seen from
       40 km up. Probably a bad value in the usual elevation tiles that the
       spike filter (despike) misses, drawn white as steep water. Find which
       tile and zoom it comes from, and why despike lets it through.
 
-- [ ] **Roads look bad, and are close to useless on foot.** They render as flat
-      uniform stripes: no casing, no width hierarchy beyond major/minor, and
-      aliasing at mask resolution. At walking height the problem stops being
-      cosmetic — a road rasterised into a 26 m texel is a smear, and the thing
-      you are standing on has no edge.
-
-      **A raster mask physically cannot draw a road at zoom 12.** One texel is
-      27.7 m of ground and a road is about 10 m wide, so it is 2.8x too wide
-      before any filtering. Correct road width from a raster needs zoom 14,
-      which is 16x the tiles. No amount of tuning fixes this.
-
-      **Suggestion: draw roads as vector geometry in the near field.** The MVT
-      linestrings are already decoded and then thrown away after rasterising.
-      Keep them for the finest level or two, extrude them into ribbons, and let
-      the raster mask carry the middle and far distance where a texture is the
-      right tool. Same data, two renderers, chosen by distance.
-
-      Costs, roughly:
-
-      - **Bandwidth: zero.** The geometry is already downloaded and decoded.
-      - **Geometry:** a ribbon segment is 4 vertices and 2 triangles. ~1,500
-        segments per tile (motorway to tertiary) is about 50k triangles across
-        the finest level; ~6,000 segments (adding residential and service, dense
-        urban) is about 200k. Against 839k already drawn, even the generous case
-        is roughly 20%.
-      - **Draping is free.** The worker already holds the 256x256 height grid,
-        so terrain height can be sampled per road vertex and the ribbon follows
-        the ground exactly.
-      - **CPU:** one-time ribbon generation per tile, in the worker.
-
-      **The trap is depth, and this project has hit it twice already.** Do not
-      offset the ribbon by a fixed height. Use `gl.polygonOffset`, which scales
-      the bias with depth slope; a fixed offset that works underfoot z-fights at
-      a kilometre.
-
-      **Width scaling matters more than it sounds.** Constant world width is
-      physically right but distant roads shrink below a pixel and shimmer out.
-      Constant screen width is what charts do, stays legible, and looks wrong up
-      close. The standard answer is world width with a minimum screen width of
-      about one pixel: correct near you, still visible to the horizon. This is
-      most of why vector roads read well at every distance, and it is also the
-      natural path toward sectional-style symbology.
-
+- [ ] **Painted roads, middle distance.** Close up, roads are now real ribbons
+      draped on the ground (the near field, `src/near.js`, `src/roads.js`),
+      and the painted roads hide where those are drawn. Beyond the near field
+      roads are still painted into the map texture: flat stripes, no casing,
+      and too wide for their texels at zoom 12. Worth a look if they bother
+      you; not urgent.
 - [ ] **Residual white squares.** Much reduced across 0.6.x and 0.7.x but not
       confirmed gone. Best remaining theory: OpenMapTiles carries little or no
       `landcover` at low zooms, so a coarse substitute tile falls back to the
@@ -141,13 +121,14 @@ always with everything loaded.
 
 ## Untested, in rough order of risk
 
-- [ ] **Antimeridian crossing.** `rawX` wrapping in `rings.js` is unexercised.
-      At coarse levels a block near the date line may generate duplicate tile
-      keys with different offsets, drawing one and leaving a gap.
+- [ ] **Antimeridian crossing.** Flown once (Naples to Banff eastward) with no
+      visible gap, and the saved longitude now wraps. Still untested: `rawX`
+      wrapping in `rings.js` at coarse levels near the date line, which could
+      give duplicate tile keys with different offsets.
 - [ ] **High latitude and poles.** `computeBlocks` skips out-of-range `y`, but
       behaviour above 80 degrees has never been looked at. There is a hole at
       each pole by construction, since Web Mercator stops at 85 degrees.
-- [ ] **LRU eviction.** `CACHE_TILES` is 512 and tests never reach it, so the GL
+- [ ] **LRU eviction.** `CACHE_TILES` is 800 and tests never reach it, so the GL
       deletion path has effectively never run under test. A leak here would only
       show after a long session.
 - [ ] **The real worker path.** Tests mock `Worker` entirely. The actual fetch,
@@ -242,8 +223,6 @@ holes wherever tiles have not loaded.
 - [ ] **FABDEM or Copernicus GLO-30 as an alternate source.** Bare earth, so
       forest edges stop appearing as 20 m cliffs.
 - [ ] **Optional atmospheric fog** as realism rather than as a distance limiter.
-- [ ] **Prefetch along the velocity vector**, so tiles arrive before they are
-      needed rather than as they become needed.
 - [ ] **Service worker**, so a region can be cached and flown offline.
 - [ ] **Native port to Rust and wgpu.** Every line of tile, clipmap and shader
       logic ports across unchanged.

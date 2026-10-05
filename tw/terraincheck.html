@@ -81,7 +81,9 @@ const SITES = [
     facts: 'Included for comparison: a place where the data is known to be good.' },
 ];
 const ZOOMS = [10, 11, 12, 13, 14, 15];
-const APP_FINEST = LEVELS[0].z;   // the app's finest terrain level, close up
+// The app's finest level everywhere, close up. (The place levels, zoom 15 and
+// 16, exist only in a place of interest, from its own tiles.)
+const APP_FINEST = LEVELS.find((L) => !L.place).z;
 const EARTH = 40075016.686;
 
 const tileX = (lon, z) => (lon + 180) / 360 * 2 ** z;
