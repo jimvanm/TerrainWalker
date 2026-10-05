@@ -46,7 +46,15 @@ export class Controls {
       if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     };
     this.kbLocked = false;
-    canvas.addEventListener('click', () => this.grab());
+    // Tools mode frees the mouse: you point at things instead of steering.
+    // Only the pointer capture is let go; full screen and the keyboard lock
+    // stay, so Ctrl+W is still caught and nothing jumps out of full screen.
+    this.freeMouse = false;
+    this.pointer = null;         // { x, y } in CSS pixels on the canvas, when the mouse is free
+    this.canvas = canvas;
+    canvas.addEventListener('click', () => { if (!this.freeMouse) this.grab(); });
+    // Right-drag looks around while the mouse is free; no menu on right-click.
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     // Hiding the cursor is state that must be undone by more than one route.
     // pointerlockchange alone is not enough: if the window loses focus or the
     // tab is hidden, the lock can end without that event arriving, and the
@@ -68,7 +76,11 @@ export class Controls {
     window.addEventListener('pagehide', release);
 
     document.addEventListener('mousemove', (e) => {
-      if (!this.locked) return;
+      if (this.freeMouse && !this.locked) {
+        const r = canvas.getBoundingClientRect ? canvas.getBoundingClientRect() : { left: 0, top: 0 };
+        this.pointer = { x: e.clientX - r.left, y: e.clientY - r.top };
+        if (!(e.buttons & 2)) return;            // looking only while the right button is held
+      } else if (!this.locked) return;
       this.cam.yaw += e.movementX * MOUSE_SENS;
       this.cam.pitch -= e.movementY * MOUSE_SENS;
       this.cam.pitch = Math.max(-HALF_PI, Math.min(HALF_PI, this.cam.pitch));
@@ -101,6 +113,21 @@ export class Controls {
     window.addEventListener('wheel', (e) => {
       this.bump(Math.exp(-e.deltaY * 0.0012));
     }, { passive: true });
+  }
+
+  // Tools mode on (free mouse) or off (captured again). Capturing needs a key
+  // press or click to have just happened; Tab is one. If the browser refuses,
+  // the next click captures as usual.
+  setFreeMouse(on) {
+    this.freeMouse = on;
+    if (on) {
+      if (document.pointerLockElement) document.exitPointerLock();
+    } else {
+      this.pointer = null;
+      if (document.fullscreenElement && !document.pointerLockElement) {
+        try { const p = this.canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (e) { /* next click */ }
+      }
+    }
   }
 
   // Scale the speed of whichever mode is active. Used by the wheel and the pad.

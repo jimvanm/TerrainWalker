@@ -30,6 +30,22 @@ const k = geo.mercScale(lat);
   console.log('ok  the crosshair point is where the line of sight meets the ground');
 }
 
+// ---- the pointer's direction (Tools mode) ----
+{
+  const { screenDir, forward } = await import('../src/dropper.js');
+  const f = forward(cam), mid = screenDir(cam, 400, 300, 800, 600, 68);
+  assert.ok(Math.abs(mid.e - f.e) < 1e-9 && Math.abs(mid.n - f.n) < 1e-9 && Math.abs(mid.u - f.u) < 1e-9, 'the middle of the screen is straight ahead');
+  const level = { ...cam, pitch: 0 };
+  const right = screenDir(level, 800, 300, 800, 600, 68), top = screenDir(level, 400, 0, 800, 600, 68);
+  const deg = (r) => r * 180 / Math.PI;
+  assert.ok(Math.abs(deg(Math.atan2(right.e, right.n)) - deg(Math.atan(Math.tan(34 * Math.PI / 180) * 800 / 600))) < 0.01, 'the right edge is half the width of view to the right (east, facing north)');
+  assert.ok(Math.abs(deg(Math.asin(top.u)) - 34) < 0.01, 'the top edge is half the height of view up');
+  const flat = () => 1000;
+  const lower = aimPoint(cam, flat, screenDir(cam, 400, 450, 800, 600, 68));
+  assert.ok((lower.my - cam.mercY) * k < 100, 'pointing lower on the screen meets the ground nearer');
+  console.log('ok  the pointer aims where it points');
+}
+
 // ---- arm, cycle, turn, drop, remove, keep ----
 const mesh = { buffers: () => ({ vao: {}, count: 0 }), freeBuffers() {} };
 const list = [

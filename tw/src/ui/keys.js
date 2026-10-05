@@ -28,8 +28,10 @@ export const KEYS = [
   { group: 'Mode', label: 'Tab', help: 'switch to Tools', code: 'Tab', act: 'switchMode', mode: 'nav' },
   { group: 'Mode', label: 'Tab', help: 'switch to Navigation', code: 'Tab', act: 'switchMode', mode: 'tools' },
 
-  { group: 'Mouse', label: 'click', help: 'capture mouse' },
-  { group: 'Mouse', label: 'esc', help: 'release mouse' },
+  { group: 'Mouse', label: 'click', help: 'capture mouse', mode: 'nav' },
+  { group: 'Mouse', label: 'esc', help: 'release mouse', mode: 'nav' },
+  { group: 'Mouse', label: 'point', help: 'aim (the mouse is free here)', mode: 'tools' },
+  { group: 'Mouse', label: 'right-drag', help: 'look around', mode: 'tools' },
 
   { group: 'Moving', label: 'WASD', help: 'move', hold: ['KeyW', 'KeyA', 'KeyS', 'KeyD'] },
   { group: 'Moving', label: 'Q/E', help: 'down / up', hold: ['KeyQ', 'KeyE'] },
@@ -58,7 +60,7 @@ export const KEYS = [
   { group: 'Landmarks', label: 'click', help: 'drop it', mode: 'tools' },
   { group: 'Landmarks', label: ',', help: 'or', code: 'Comma', act: 'dropLeft', mode: 'tools' },
   { group: 'Landmarks', label: '.', help: 'turn it', code: 'Period', act: 'dropRight', mode: 'tools' },
-  { group: 'Landmarks', label: 'Delete', help: 'remove the dropped one aimed at', code: 'Delete', act: 'dropRemove', mode: 'tools' },
+  { group: 'Landmarks', label: 'Delete', help: 'remove the dropped one pointed at', code: 'Delete', act: 'dropRemove', mode: 'tools' },
 
   { group: 'Places', label: 'P', help: 'pin this place', code: 'KeyP', act: 'pin', mode: 'nav' },
 

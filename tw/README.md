@@ -50,7 +50,7 @@ tiles are built on your own computer and are not in the repo (see
 
 | Input | Action |
 | --- | --- |
-| `Tab` | switch between the two modes, each with its own key menu: **Navigation** (moving about, what is shown) and **Tools** (changing things: dropping landmarks). Moving, flying and the reports work in both. |
+| `Tab` | switch between the two modes, each with its own key menu: **Navigation** (moving about, what is shown) and **Tools** (changing things: dropping landmarks). Moving, flying and the reports work in both. In Tools the mouse is free: you aim with the pointer, and right-drag looks around. Full screen and the keyboard lock stay on. |
 | click | capture the mouse, `esc` releases |
 | `W` `A` `S` `D` | move |
 | `shift` | run (walking) |
@@ -68,7 +68,7 @@ tiles are built on your own computer and are not in the repo (see
 | `8` | building colours: next colour set (stone, brick, render, concrete, mixed) |
 | `9` | building colours: warmer light on/off |
 | `P` | pin this place to the saved places list |
-| `M` | (Tools) drop a landmark where the crosshair meets the ground: press again for the next one, and after the last, off. Click to drop (mouse captured); `,` / `.` turn it; `Delete` removes a dropped one under the crosshair. A reload clears them all. |
+| `M` | (Tools) drop a landmark where the crosshair meets the ground: press again for the next one, and after the last, off. It stands where you point; click to drop it; `,` / `.` turn it; `Delete` removes a dropped one you point at. A reload clears them all. |
 | `K` | copy a building-height report to the clipboard |
 | `L` | copy the performance log to the clipboard |
 | `H` | hide the key menus and performance graph |

@@ -12,6 +12,7 @@
   #c { display: block; width: 100vw; height: 100vh; cursor: pointer; }
   /* :has() means the cursor can only hide while a lock is actually held. */
   body.locked #c { cursor: none; }
+  body.tools #c { cursor: crosshair; }
   html:not(:has(#c)) , body:not(.locked) #c { cursor: pointer; }
   .panel {
     position: fixed; background: rgba(12,16,22,.72); padding: 6px 10px;

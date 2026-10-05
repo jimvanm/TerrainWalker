@@ -16,22 +16,45 @@ const TURN = 15;            // degrees per press
 const REACH = 100000;       // metres: the farthest ground the crosshair can pick
 
 
-// Where a line from the eye along (yaw, pitch) first meets the ground, as it is
-// drawn: the ground drops away with the Earth's curve. groundAt(mercX, mercY)
-// gives the height or null where nothing has loaded. Returns { mx, my, d }
-// (d = metres along the ground) or null if the line meets no loaded ground.
-export function aimPoint(cam, groundAt) {
-  const k = mercScale(mercYToLat(cam.mercY));
+// The direction you look in: { e, n, u } (east, north, up), length 1.
+export function forward(cam) {
+  const cp = Math.cos(cam.pitch);
+  return { e: Math.sin(cam.yaw) * cp, n: Math.cos(cam.yaw) * cp, u: Math.sin(cam.pitch) };
+}
+
+// The direction through a point on the screen: sx, sy in pixels from the top
+// left of a w x h view, fovDeg the view's height in degrees. The middle of the
+// screen gives forward(cam). For the pointer in Tools mode.
+export function screenDir(cam, sx, sy, w, h, fovDeg) {
   const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
-  const east = Math.sin(cam.yaw) * cp, north = Math.cos(cam.yaw) * cp;
+  const cy = Math.cos(cam.yaw), syaw = Math.sin(cam.yaw);
+  const f = { e: syaw * cp, n: cy * cp, u: sp };
+  const r = { e: cy, n: -syaw, u: 0 };                 // right
+  const up = { e: -sp * syaw, n: -sp * cy, u: cp };    // up, on the screen
+  const t = Math.tan(fovDeg * Math.PI / 360);
+  const x = (2 * sx / w - 1) * t * (w / h), y = (1 - 2 * sy / h) * t;
+  const d = { e: f.e + x * r.e + y * up.e, n: f.n + x * r.n + y * up.n, u: f.u + x * r.u + y * up.u };
+  const L = Math.hypot(d.e, d.n, d.u);
+  return { e: d.e / L, n: d.n / L, u: d.u / L };
+}
+
+// Where a line from the eye along dir (default: where you look) first meets
+// the ground, as it is drawn: the ground drops away with the Earth's curve.
+// groundAt(mercX, mercY) gives the height or null where nothing has loaded.
+// Returns { mx, my, d } (d = metres along the ground) or null if the line
+// meets no loaded ground.
+export function aimPoint(cam, groundAt, dir = forward(cam)) {
+  const k = mercScale(mercYToLat(cam.mercY));
+  const { e: east, n: north, u: up } = dir;
+  const flat = Math.hypot(east, north);
   const curv = 1 / (2 * R_MEAN);
   // Above ground (> 0) or below it (< 0) at t metres along the line; null where unknown.
   const above = (t) => {
     const mx = cam.mercX + east * t / k, my = cam.mercY + north * t / k;
     const g = groundAt(mx, my);
     if (g === null || g === undefined) return null;
-    const d = t * cp;
-    return cam.alt + sp * t - (g - curv * d * d);
+    const d = t * flat;
+    return cam.alt + up * t - (g - curv * d * d);
   };
   let t0 = 0, t = 1;
   while (t < REACH) {
@@ -41,7 +64,7 @@ export function aimPoint(cam, groundAt) {
         const m = (t0 + t) / 2, am = above(m);
         if (am !== null && am <= 0) t = m; else t0 = m;
       }
-      return { mx: cam.mercX + east * t / k, my: cam.mercY + north * t / k, d: t * cp };
+      return { mx: cam.mercX + east * t / k, my: cam.mercY + north * t / k, d: t * flat };
     }
     t0 = t;
     t = t * 1.03 + 1;
@@ -89,11 +112,13 @@ export class Dropper {
     this.L.turnTo(this.preview, this.yawDeg);
   }
 
-  // Every frame, before landmarks.update(): stand the preview at the crosshair.
-  update(cam, groundAt) {
+  // Every frame, before landmarks.update(): stand the preview where you aim:
+  // dir is the pointer's direction in Tools mode, or left out for the crosshair.
+  update(cam, groundAt, dir) {
+    this.dir = dir;
     const note = this.note && Date.now() < this.noteUntil ? this.note : '';
     if (!this.armed) { this.aim = null; this.message = note; return; }
-    this.aim = aimPoint(cam, groundAt);
+    this.aim = aimPoint(cam, groundAt, dir || forward(cam));
     const kd = this.L.kinds[this.choice];
     if (this.aim) {
       this.L.moveTo(this.preview, this.aim.mx, this.aim.my);
@@ -119,16 +144,16 @@ export class Dropper {
   // dropped landmark as an upright column, nearest first. Failing that, the
   // ground point under the crosshair, within the landmark's mask radius.
   removeAimed(cam, groundAt) {
-    const best = this.aimedAt(cam, groundAt);
+    const best = this.aimedAt(cam, groundAt, this.dir);
     if (best) { this.L.remove(best); this._say(`Removed ${best.name}`); }
     else this._say('No dropped landmark under the crosshair');
     return best;
   }
 
-  aimedAt(cam, groundAt) {
+  aimedAt(cam, groundAt, dir) {
+    dir = dir || forward(cam);
     const k = mercScale(mercYToLat(cam.mercY));
-    const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
-    const e = Math.sin(cam.yaw) * cp, n = Math.cos(cam.yaw) * cp;
+    const { e, n, u: sp } = dir;
     const curv = 1 / (2 * R_MEAN);
     let best = null, bestT = Infinity;
     for (const it of this.L.items) {
@@ -146,7 +171,7 @@ export class Dropper {
       if (miss <= r && y >= foot - r && y <= top + r && t < bestT) { best = it; bestT = t; }
     }
     if (best) return best;
-    const aim = aimPoint(cam, groundAt);
+    const aim = aimPoint(cam, groundAt, dir);
     if (!aim) return null;
     let bestD = Infinity;
     for (const it of this.L.items) {

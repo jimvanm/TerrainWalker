@@ -20,7 +20,7 @@ import { MeshProgram } from './meshprogram.js';
 import { Landmarks } from './landmarks.js';
 import { Detail } from './detail.js';
 import { loadPlaceTiles } from './placetiles.js';
-import { Dropper } from './dropper.js';
+import { Dropper, screenDir } from './dropper.js';
 import { LOOK, SETS } from './look.js';
 import { settings, LAYERS, layerOn, toggleLayer } from './settings.js';
 import { helpHtml, bindKeys, MODES, modeName } from './ui/keys.js';
@@ -150,6 +150,8 @@ const actions = {
   switchMode: () => {
     settings.mode = settings.mode === 'nav' ? 'tools' : 'nav';
     if (settings.mode !== 'tools') dropper.off();
+    controls.setFreeMouse(settings.mode === 'tools');
+    document.body.classList.toggle('tools', settings.mode === 'tools');
     showMode();
   },
   // R: back to the start point, and normal speed.
@@ -163,9 +165,9 @@ const actions = {
   },
 };
 bindKeys(actions, window, () => settings.mode);
-// A click while the mouse is captured drops the armed landmark. (The first
-// click only captures the mouse: the lock is not on yet when it arrives.)
-canvas.addEventListener('click', () => { if (controls.locked && settings.mode === 'tools') dropper.drop(); });
+// In Tools mode a click (the mouse is free there) drops the armed landmark
+// where the pointer is. In Navigation a click captures the mouse (controls.js).
+canvas.addEventListener('click', () => { if (settings.mode === 'tools') dropper.drop(); });
 const dropEl = document.getElementById('drop');
 // The key menus, one per mode, stacked: the current mode's in front, the
 // other tucked behind it, its title peeking out below. Clicking the one behind
@@ -246,7 +248,10 @@ function frame(now) {
     terrain.update(v);
     handover.update(v);
   }
-  dropper.update(cam, (x, y) => terrain.heightAt(x, y));   // before landmarks: it moves the preview
+  // In Tools mode you aim with the pointer; otherwise with the crosshair.
+  const pt = settings.mode === 'tools' && controls.pointer;
+  const aimDir = pt ? screenDir(cam, pt.x, pt.y, canvas.clientWidth || innerWidth, canvas.clientHeight || innerHeight, FOV) : null;
+  dropper.update(cam, (x, y) => terrain.heightAt(x, y), aimDir);   // before landmarks: it moves the preview
   landmarks.update(v, (x, y) => terrain.groundAt(x, y));
   if (dropEl.textContent !== dropper.message) { dropEl.textContent = dropper.message; dropEl.classList.toggle('hide', !dropper.message); }
 

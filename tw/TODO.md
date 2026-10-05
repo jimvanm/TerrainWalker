@@ -206,10 +206,9 @@ holes wherever tiles have not loaded.
       web page (CORS) and it is fast enough. Otherwise: host the built tiles
       publicly, or keep them in git (Niagara is about 15 MB).
 
-- [ ] **Tools mode, next steps.** Tab now swaps Navigation and Tools, each
-      with its own key menu. Agreed plan, in order: (2) in Tools the mouse is
-      released, you point and click on the ground with the pointer instead of
-      the crosshair, right-drag looks around, WASD and the wheel still move;
+- [ ] **Tools mode, next steps.** Tab swaps Navigation and Tools, each with
+      its own key menu; in Tools the mouse is free (pointer aims, right-drag
+      looks; full screen and the keyboard lock stay). Next, agreed:
       (3) a transplant tool: draw an outline (corners clicked on the ground,
       Enter closes), pick it up, fly anywhere, turn it, click to lay it down.
       Two ways to lay it: replace the ground (mountains; default height is its
