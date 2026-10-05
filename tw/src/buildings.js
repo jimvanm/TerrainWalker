@@ -168,6 +168,24 @@ export function touchesPolygon(a, b) {
 // A landmark's mask: its footprint outline when known, and its circle.
 export const masks = (mask, ring) => mask.find((c) => touchesCircle(ring, c) || (c.poly && touchesPolygon(ring, c.poly)));
 
+// For the K report: a map building near a landmark that the mask did NOT hide,
+// in metres east and north of the landmark. Within 300 m only, 20 at most.
+function recordNearMiss(stats, mask, ring, g, h) {
+  let sx = 0, sy = 0;
+  const n = ring.length / 2;
+  for (let i = 0; i < n; i++) { sx += ring[2 * i]; sy += ring[2 * i + 1]; }
+  sx /= n; sy /= n;
+  for (const c of mask) {
+    const east = (sx - c.x) * g.cosLat, north = -(sy - c.y) * g.cosLat;
+    if (Math.hypot(east, north) > 300) continue;
+    const list = stats.nearMisses || (stats.nearMisses = []);
+    if (list.length < 20) {
+      list.push({ id: c.id, east: Math.round(east), north: Math.round(north),
+        m2: Math.round(Math.abs(signedArea(ring)) * g.cosLat * g.cosLat), h: h > 0 ? Math.round(h) : null });
+    }
+  }
+}
+
 // Keep the outline of a masked building so orient.js can read its heading. Points
 // become true metres east and north of the landmark. Edges that run along the tile
 // edge are cut by the tile, not by the building, so they are left out.
@@ -238,7 +256,7 @@ export function buildBuildings(layer, g, mb, maxTris = BUILDING_TRIS, opt = {}) 
       if (hit) {
         stats.masked = (stats.masked || 0) + 1;
         recordOutline(stats, hit, rings[0], g);
-      }
+      } else if (opt.mask && opt.mask.length) recordNearMiss(stats, opt.mask, rings[0], g, h);
       let area = Math.abs(signedArea(rings[0]));
       for (let k = 1; k < rings.length; k++) area -= Math.abs(signedArea(rings[k]));
       area *= g.cosLat * g.cosLat;                   // m2 true

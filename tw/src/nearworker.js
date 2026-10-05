@@ -143,6 +143,9 @@ export async function buildNearTile(spec) {
   const stats = buildBuildings(layers.building, g, bb, undefined,
     { ...(skyline ? { minHeight: skyMin, sunk: SKY_SUNK } : {}), mask, landuse: layers.landuse });
   Object.assign(stats, counts);
+  // For the K report: which landmark masks reached this tile, and whether the
+  // landmark's outline loaded (without it only the circle masks).
+  if (mask.length) stats.maskInfo = mask.map((m) => ({ id: m.id, footprint: !!m.poly }));
   const r = mb.finish(), b = bb.finish();
   return { vertices: r.vertices, indices: r.indices, verts: r.verts, info: r.info,
            bVertices: b.vertices, bIndices: b.indices, bVerts: b.verts, bInfo: b.info, stats, rEnds };

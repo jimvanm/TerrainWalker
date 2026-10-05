@@ -134,7 +134,16 @@ void main() {
   float wet = m.r * uLayers.x;
   vec3 deep = mix(vec3(0.16, 0.34, 0.52), vec3(0.09, 0.20, 0.33),
                   clamp(vHeight / 400.0, 0.0, 1.0));
-  c = mix(c, deep * (0.82 + 0.18 * lit), smoothstep(0.35, 0.65, wet));
+  // Calm water is lit evenly. The ground under it is rough in the height data
+  // (radar does badly on water), and relief shading showed every bump.
+  vec3 water = deep * 0.92;
+  // Water on steep ground is falling: a waterfall or rapids. Paint it white, as
+  // it looks. Steep means over about 25 degrees, fully white past 40 (n.y is the
+  // cosine of the slope). Only well inside the water, so the soft edge of the
+  // water texture on a steep bank does not turn white.
+  float falling = (1.0 - smoothstep(0.766, 0.906, n.y)) * smoothstep(0.6, 0.9, wet);
+  water = mix(water, vec3(0.90, 0.93, 0.95) * (0.72 + 0.28 * lit), falling);
+  c = mix(c, water, smoothstep(0.35, 0.65, wet));
 
   float d = length(vPos);
   float f = clamp(1.0 - exp(-pow(d * uFogDensity, 2.0)), 0.0, 1.0);

@@ -109,6 +109,11 @@ assert.equal(masked.masked, 1);
   const out = mb.finish(), infos = new Uint32Array(out.info.buffer);
   const flagged = [...infos].filter((v) => ((v >>> 24) & 8) !== 0).length;
   assert.ok(flagged > 0 && st2.kept === 1, 'the masked building is built but flagged, and not counted as kept');
+  // A building beside the landmark that the mask does not hide is reported for K.
+  const beside = { extent: E, features: [feat(tileSq(1000, 1000, 300)), feat(tileSq(1400, 1000, 100))] };
+  const st3 = buildBuildings(beside, g, new MeshBuilder(), undefined, { mask: [{ id: 'x', x: at(1150), y: at(1150), r: 20 / g.cosLat }] });
+  assert.ok(st3.nearMisses && st3.nearMisses.length === 1 && st3.nearMisses[0].id === 'x' && st3.nearMisses[0].east > 0,
+    'an unhidden building beside a landmark is recorded, east of it: ' + JSON.stringify(st3.nearMisses));
   console.log('ok  footprint masks catch rim pieces a circle misses; masked buildings are flagged, not dropped');
 }
 // ---- the mask footprint turns exactly like the drawn shape ----
