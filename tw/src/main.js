@@ -158,7 +158,10 @@ const actions = {
   outline: () => { dropper.off(); transplant.toggle(); },
   outlineUndo: () => transplant.undo(),
   outlineClose: () => transplant.close(),
-  pieceHeight: () => transplant.toggleHeight(),
+  pieceHeight: () => {
+    if (transplant.state === 'carrying') transplant.toggleHeight();
+    else if (!transplant.active) transplant.toggleAt(aimPoint(cam, groundH, aimDir || undefined), groundH);
+  },
   toolLeft: () => (transplant.active ? transplant.turn(-1) : dropper.turn(-1)),
   toolRight: () => (transplant.active ? transplant.turn(1) : dropper.turn(1)),
   toolRemove: () => {
@@ -174,7 +177,6 @@ const actions = {
   // Tab: Navigation <-> Tools. Leaving Tools puts away whatever tool was armed.
   switchMode: () => {
     settings.mode = settings.mode === 'nav' ? 'tools' : 'nav';
-    if (settings.mode !== 'tools') { dropper.off(); transplant.cancel(); }
     controls.setFreeMouse(settings.mode === 'tools');
     document.body.classList.toggle('tools', settings.mode === 'tools');
     showMode();
@@ -322,10 +324,13 @@ function frame(now) {
   const pt = settings.mode === 'tools' && controls.pointer;
   const vw = canvas.clientWidth || innerWidth, vh = canvas.clientHeight || innerHeight;
   aimDir = pt ? screenDir(cam, pt.x, pt.y, vw, vh, FOV) : null;
-  // Before landmarks.update(): these move what is in hand.
-  dropper.update(cam, groundH, aimDir);
-  transplant.update(cam, groundH, aimDir);
-  drawOutline(transplant.outline(), vw, vh);
+  // Before landmarks.update(): these move what is in hand. Out of Tools mode
+  // what is in hand is kept, hidden, until you come back.
+  if (settings.mode === 'tools') {
+    dropper.update(cam, groundH, aimDir);
+    transplant.update(cam, groundH, aimDir);
+  } else { dropper.park(); transplant.park(); }
+  drawOutline(settings.mode === 'tools' ? transplant.outline() : null, vw, vh);
   setCursor();
   landmarks.update(v, (x, y) => terrain.groundAt(x, y));
   const msg = transplant.message || dropper.message;

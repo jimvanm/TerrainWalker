@@ -100,7 +100,13 @@ export class Dropper {
     }
   }
 
-  // Leaving Tools mode: put the armed landmark away.
+  // Out of Tools mode: the armed landmark is kept, only hidden.
+  park() {
+    if (this.preview) this.preview.hidden = true;
+    this.message = '';
+  }
+
+  // Esc: put the armed landmark away.
   off() {
     if (this.preview) { this.L.remove(this.preview); this.preview = null; }
     this.choice = -1;

@@ -111,11 +111,21 @@ const { Landmarks } = await import('../src/landmarks.js');
   L.update({ mercX: cam.mercX, mercY: cam.mercY, k: geo.mercScale(43.6), agl: 20000 }, () => 500);
   assert.equal(laid[0].base, 75, 'and the ground under its middle does not move it');
   assert.equal(tp.state, 'carrying', 'still in hand, for another');
-  // Put it away, then pick the laid one up again by clicking it.
+  // U over a laid piece, nothing in hand: changes it where it lies.
   tp.toggle();
+  assert.ok(tp.toggleAt(tp.aim, ground), 'U over a laid piece');
+  const sea = L.items.find((it) => it.piece);
+  assert.ok(sea.piece.mode === 'sea' && sea.base === 0 && Math.abs(sea.piece.rise - 4000) < 80 && sea.yawDeg === 15, 'it now stands at its height above sea level, where it lay, turned as it was');
+  assert.ok(tp.toggleAt(tp.aim, ground) && L.items.find((it) => it.piece).base === 75, 'and back');
+  laid[0] = L.items.find((it) => it.piece);
+  // Put it away, then pick the laid one up again by clicking it.
   assert.equal(tp.state, 'off');
   assert.ok(tp.pickUpAt(tp.aim) && tp.state === 'carrying' && !L.items.includes(laid[0]), 'a click with nothing in hand picks up a laid piece');
   assert.ok(tp.yawDeg === 15 && tp.mode === 'rise', 'turned as it lay');
+  tp.update(cam, ground, null); tp.park();
+  assert.ok(tp.state === 'carrying' && tp.preview.hidden, 'out of Tools mode it is hidden but still in hand');
+  tp.update(cam, ground, null);
+  assert.ok(!tp.preview.hidden, 'and back in Tools it is there again');
   tp.update(cam, ground, null); tp.toggleHeight();
   assert.ok(Math.abs(tp.piece.rise - 4000) < 80, 'and U still works on it');
   tp.toggleHeight(); tp.update(cam, ground, null);

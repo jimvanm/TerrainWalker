@@ -5,7 +5,8 @@
 //              meets the ground
 //   Backspace  take back the last corner
 //   Enter      close the outline and pick the ground up
-//   , and .    turn it 15 degrees;  U  how high it stands (below)
+//   , and .    turn it 15 degrees;  U  how high it stands (below); U over a
+//              laid piece, with nothing in hand, changes it where it lies
 //   click      lay it down; it stays in hand, so click again for another.
 //              With nothing in hand, a click on a laid piece picks it up again.
 //   Delete     remove a laid piece the pointer is on
@@ -287,19 +288,47 @@ export class Transplant {
     const p = this.preview;
     if (!this.aim) { p.hidden = true; this.message = 'Point at the ground to place it'; return; }
     this.L.moveTo(p, this.aim.mx, this.aim.my);
-    // Its base: the destination's ground along the turned outline's edge, or sea level.
-    if (this.mode === 'sea') p.base = 0;
-    else {
-      const k = mercScale(mercYToLat(this.aim.my));
-      const hs = alongEdge(this.piece.poly, Math.max(20, Math.sqrt(area(this.piece.poly)) / 12)).map(([e, n]) => {
-        const [te, tn] = turnEN(e, n, this.yawDeg);
-        return groundAt(this.aim.mx + te / k, this.aim.my + tn / k);
-      });
-      p.base = median(hs);
-    }
+    p.base = this._base(this.piece.poly, this.mode, this.aim.mx, this.aim.my, this.yawDeg, groundAt);
     p.hidden = p.base === null;
     const rise = Math.round(this.piece.rise);
     this.message = note || `${this.mode === 'rise' ? `Rises ${rise} m above its edge` : 'Height above sea level'} (U changes)  ·  click lays it down  ·  , . turn  ·  N puts it away`;
+  }
+
+  // Where a piece stands: the destination's ground along its turned outline's
+  // edge (rise), or sea level.
+  _base(poly, mode, mx, my, yawDeg, groundAt) {
+    if (mode === 'sea') return 0;
+    const k = mercScale(mercYToLat(my));
+    return median(alongEdge(poly, Math.max(20, Math.sqrt(area(poly)) / 12)).map(([e, n]) => {
+      const [te, tn] = turnEN(e, n, yawDeg);
+      return groundAt(mx + te / k, my + tn / k);
+    }));
+  }
+
+  // Out of Tools mode: what is in hand is kept, only hidden, and comes back
+  // on returning. An outline half drawn is kept too.
+  park() {
+    if (this.preview) this.preview.hidden = true;
+    this.message = '';
+  }
+
+  // U with nothing in hand: switch the laid piece the pointer is on between
+  // rise and sea level, where it lies. Returns true if there was one.
+  toggleAt(aim, groundAt) {
+    const it = this._pieceAt(aim);
+    if (!it) return false;
+    const mode = it.piece.mode === 'rise' ? 'sea' : 'rise';
+    const built = buildPiece(it.piece.heightAt, it.piece.poly, mode);
+    const id = 'piece-model:' + (count++);
+    this.L.addModel(id, built);
+    const base = this._base(it.piece.poly, mode, it.mx, it.my, it.yawDeg, groundAt);
+    if (base === null) return false;
+    this.L.remove(it);
+    const nu = this.L.add({ model: id, name: it.name, lat: it.lat, lon: it.lon, height: Math.max(built.rise, 50), yawDeg: it.yawDeg,
+      maskR: 0, id: 'piece:' + (count++), dropped: true, piece: { ...it.piece, ...built, mode, modelId: id } });
+    nu.fixedBase = true; nu.base = base;
+    this._say(mode === 'rise' ? `Now rises ${Math.round(built.rise)} m above its edge` : 'Now at its height above sea level');
+    return true;
   }
 
   // A click with nothing in hand: pick up the laid piece the pointer is on,

@@ -61,7 +61,7 @@ export const KEYS = [
   { group: 'Move ground', label: 'N', help: 'draw an outline (again: put it away)', code: 'KeyN', act: 'outline', mode: 'tools' },
   { group: 'Move ground', label: 'Backspace', help: 'take back a corner', code: 'Backspace', act: 'outlineUndo', mode: 'tools' },
   { group: 'Move ground', label: 'Enter', help: 'pick up the ground inside', code: 'Enter', act: 'outlineClose', mode: 'tools' },
-  { group: 'Move ground', label: 'U', help: 'rise above its edge / above sea level', code: 'KeyU', act: 'pieceHeight', mode: 'tools' },
+  { group: 'Move ground', label: 'U', help: 'rise above its edge / above sea level (in hand, or pointed at)', code: 'KeyU', act: 'pieceHeight', mode: 'tools' },
 
   { group: 'In hand', label: 'click', help: 'drop it, or add a corner', mode: 'tools' },
   { group: 'In hand', label: 'click', help: 'with nothing in hand: pick up the one pointed at', mode: 'tools' },
