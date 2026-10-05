@@ -34,12 +34,13 @@ Listed in `landmarks/index.json`; nothing else to wire.
 Results: outline overlap 99.4% (from the south), 99.4% (from the east), 97.9% (from above); roof 98.9% and 99.4%.
 
 ## Direction
-`yawDeg` 0 puts the fixed roof panel and the open stack at the north end (Wikipedia). The CN Tower in
-the same file sits 57 degrees east of north from the stadium; in reality it is 53 degrees. So the file's
-frame (x east, z south) is right. Footprint edges are weak (strength 0.37, `fold: 4`). No K report yet.
+`yawDeg` -15.6, from the K report (map outlines of the stadium: -15.6, -16.2 and -15.3
+degrees agree; the main one is 41,600 m2 against the model's 40,500 m2). It matches
+Toronto's street grid. At 0 the fixed roof panel and the open stack sit at the north end
+(Wikipedia); the turn keeps them there. Footprint edges are weak (strength 0.38, `fold: 4`).
 
 ## Known gaps
-- Roof built open, as in the model.
+- Roof built open.
 - Field and diamond about 20% smaller than real (the measured stands are thick).
 - The terrain is a surface model: if it has a bump at the stadium, the ground sample can be high, and
   the bump can show through the open field.
