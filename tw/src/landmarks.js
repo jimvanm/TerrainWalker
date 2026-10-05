@@ -1,14 +1,28 @@
-// Landmarks: a few famous towers, drawn as small solid models at true size.
-// They are drawn like the near field (camera-relative, same curve drop, same
-// shading) but are never fetched and never culled by distance: the Earth's
-// curve hides them when they are over the horizon, which is the right rule.
-import { lonToMercX, latToMercY, mercScale, wrapMercDx } from './geo.js';
-import { MODELS } from './landmark_models.js';
-import { SITES } from './landmark_sites.js';
+// Landmarks: famous buildings drawn as small solid models at true size.
+//
+// Two separate things:
+//   placements  where a shape stands and which way it faces. One per landmark
+//               in landmarks/index.json; add() makes more (the same shape can
+//               stand in several places).
+//   shapes      the models, loaded only when a placement using one could be
+//               above your horizon, and freed again when you are well past it.
+//
+// Drawn like the near field (camera-relative, same curve drop, same shading).
+// The Earth's curve hides a landmark beyond the horizon, which is also why that
+// is the right distance to load it.
+import { lonToMercX, latToMercY, mercScale, wrapMercDx, R_MEAN } from './geo.js';
+import { loadList, loadModel } from './landmark_list.js';
 import { hull, polygonArea, edgesOf, dominantBearing, suggestYaw, ovalAxis, wrapTo } from './orient.js';
 
-export const LANDMARKS = SITES;
-const SINK = 6;   // metres below the ground sample, so a sloping site never shows a gap
+const SINK = 6;          // metres below the ground sample, so a sloping site never shows a gap
+const UNLOAD = 1.5;      // free a shape once every placement using it is this many times out of range
+const MIN_RANGE = 20000; // always load within 20 km, however short the landmark
+
+// Distance at which the top of something `height` tall can just show above the
+// horizon for an eye `agl` up: the two horizon distances added.
+export function sightRange(height, agl) {
+  return Math.max(MIN_RANGE, Math.sqrt(2 * R_MEAN * height) + Math.sqrt(2 * R_MEAN * Math.max(agl, 1)));
+}
 
 // Interleaved 16-byte vertices (float32 xyz + RGBA8), same layout as the near field.
 // x and z come out in TRUE metres, y is height above the base.
@@ -34,60 +48,128 @@ export function buildVertices(model, yawDeg = 0) {
 export class Landmarks {
   // mesh: the shared MeshProgram (meshprogram.js). Landmark vertices are
   // already in true metres, so they are drawn with uScale = 1.
-  constructor(gl, mesh) {
+  // list: the landmark list (for tests); normally read from landmarks/index.json.
+  constructor(gl, mesh, list = null) {
     this.gl = gl;
     this.mesh = mesh;
-    this.items = LANDMARKS.map((L) => {
-      const model = MODELS[L.id];
-      const { vertices, indices } = buildVertices(model, L.yawDeg);
-      const { vao } = mesh.buffers(vertices, indices, null);
-      // Ground footprint in [east, north] metres, before any yaw, for orient.js.
-      const foot = [];
-      for (let i = 0; i < model.pos.length; i += 3) if (model.pos[i + 1] < 4) foot.push([model.pos[i], -model.pos[i + 2]]);
-      const fh = hull(foot);
-      return {
-        ...L, vao, count: indices.length, height: model.height, footprint: fh,
-        mx: lonToMercX(L.lon), my: latToMercY(L.lat), k: mercScale(L.lat),
-        base: null,   // ground height, filled in once that terrain has loaded
-      };
+    this.items = [];             // placements
+    this.models = new Map();     // shape id -> { state: 'loading' | 'ready' | 'failed', vao, count, footprint, ... }
+    this.listed = false;
+    (list ? Promise.resolve(list) : loadList()).then((all) => {
+      for (const L of all) this.add({ ...L, model: L.id });
+      this.listed = true;
     });
   }
 
-  // Ground height is only known once the terrain under the tower has loaded.
-  update(heightAt) {
+  // Stand a shape somewhere. p: { model, name, lat, lon, height, yawDeg, fold, oval, maskR }
+  add(p) {
+    const it = {
+      yawDeg: 0, fold: 0, oval: false, ...p,
+      id: p.id || p.model + '@' + this.items.length,
+      mx: lonToMercX(p.lon), my: latToMercY(p.lat), k: mercScale(p.lat),
+      base: null,     // ground height, filled in once that terrain has loaded
+      km: Infinity,   // distance from the camera, updated every frame
+      inRange: false,
+    };
+    this.items.push(it);
+    return it;
+  }
+
+  _ready(it) { const m = this.models.get(it.model); return !!m && m.state === 'ready'; }
+
+  _load(id) {
+    const m = { state: 'loading', vao: null, count: 0, footprint: [], buffers: null };
+    this.models.set(id, m);
+    loadModel(id).then((model) => {
+      if (this.models.get(id) !== m) return;            // freed while loading
+      m.model = model;
+      m.state = 'ready';
+    }).catch((e) => {
+      console.warn('landmarks: shape "' + id + '" did not load: ' + e.message);
+      m.state = 'failed';
+    });
+  }
+
+  // GPU buffers are made per placement, because the turn (yaw) is baked into
+  // the vertices. Cheap: a few thousand triangles each.
+  _buffers(it) {
+    if (it.vao) return true;
+    const m = this.models.get(it.model);
+    if (!m || m.state !== 'ready') return false;
+    const { vertices, indices } = buildVertices(m.model, it.yawDeg);
+    it.buf = this.mesh.buffers(vertices, indices, null);
+    it.vao = it.buf.vao; it.count = indices.length;
+    if (!m.footprint.length) {
+      // Ground footprint in [east, north] metres, before any yaw, for orient.js.
+      const foot = [], pos = m.model.pos;
+      for (let i = 0; i < pos.length; i += 3) if (pos[i + 1] < 4) foot.push([pos[i], -pos[i + 2]]);
+      m.footprint = hull(foot);
+    }
+    return true;
+  }
+
+  // view: from detail.js. heightAt: terrain height, or null where not loaded.
+  update(view, heightAt) {
+    const used = new Map();     // shape id -> nearest placement, in units of its range
     for (const it of this.items) {
+      const dx = wrapMercDx(it.mx - view.mercX) * view.k, dy = (it.my - view.mercY) * view.k;
+      it.km = Math.hypot(dx, dy) / 1000;
+      const range = sightRange(it.height, view.agl);
+      const r = it.km * 1000 / range;
+      used.set(it.model, Math.min(used.has(it.model) ? used.get(it.model) : Infinity, r));
+      it.inRange = r <= 1;
+      if (!it.inRange) continue;
+      if (!this.models.has(it.model)) this._load(it.model);
       if (it.base === null) {
         const h = heightAt(it.mx, it.my);
         if (h !== null && h !== undefined) it.base = h - SINK;
       }
+      this._buffers(it);
+    }
+    // Free shapes nobody is near any more, with their placements' buffers.
+    for (const [id, m] of this.models) {
+      if ((used.get(id) ?? Infinity) <= UNLOAD) continue;
+      for (const it of this.items) {
+        if (it.model !== id || !it.buf) continue;
+        this.mesh.freeBuffers(it.buf);
+        it.buf = null; it.vao = null; it.count = 0;
+      }
+      this.models.delete(id);
     }
   }
 
-  get resolved() { return this.items.filter((it) => it.base !== null).length; }
+  // In range, and everything needed to draw it has arrived (or failed for good).
+  get inRange() { return this.items.filter((it) => it.inRange).length; }
+  get resolved() {
+    return this.items.filter((it) => it.inRange &&
+      ((it.vao && it.base !== null) || (this.models.get(it.model) || {}).state === 'failed')).length;
+  }
 
-  // Draws every tower whose ground is known. The mesh program must already be
-  // in use for this pass; uScale and uCamAlt are changed here, so landmarks are
-  // drawn last.
+  // Draws every placement whose shape and ground are known. The mesh program
+  // must already be in use for this pass; uScale and uCamAlt are changed here,
+  // so landmarks are drawn last.
   draw(pass) {
     const gl = this.gl, u = this.mesh.u;
     gl.uniform1f(u.uScale, 1);
     for (const it of this.items) {
-      if (it.base === null) continue;
-      // Height is relative to the tower's own base: shift the camera, not the model.
+      if (!it.vao || it.base === null) continue;
+      // Height is relative to the landmark's own base: shift the camera, not the model.
       gl.uniform1f(u.uCamAlt, pass.alt - it.base);
       // Offset uses the camera's scale, exactly like tile offsets do.
-      // The camera's longitude can have wrapped past 180, so take the nearest copy of the tower.
+      // The camera's longitude can have wrapped past 180, so take the nearest copy.
       gl.uniform2f(u.uTileOffset, wrapMercDx(it.mx - pass.mercX) * pass.k, (pass.mercY - it.my) * pass.k);
       gl.bindVertexArray(it.vao);
       gl.drawElements(gl.TRIANGLES, it.count, gl.UNSIGNED_INT, 0);
     }
   }
 
-  // What the map's building outlines say about each tower's heading. `outlines` are
-  // the { id, area, edges } records gathered from the loaded tiles. Prints a suggested
-  // yaw per tower; the number is then copied into landmark_sites.js.
+  // What the map's building outlines say about each landmark's heading. `outlines`
+  // are the { id, area, edges } records gathered from the loaded tiles. Gives a
+  // suggested yaw per landmark; the number is then copied into its landmark.json.
+  // Only landmarks whose shape is loaded (you are near them) can be compared.
   orientation(outlines) {
-    return this.items.map((it) => {
+    return this.items.filter((it) => this._ready(it)).map((it) => {
+      it = { ...it, footprint: this.models.get(it.model).footprint };
       const modelEdges = edgesOf(it.footprint), modelArea = Math.round(polygonArea(it.footprint));
       const own = dominantBearing(modelEdges, it.fold);
       const seen = [];
@@ -118,10 +200,10 @@ export class Landmarks {
     });
   }
 
-  report(camMercX, camMercY, k) {
-    return this.items.map((it) => ({
-      name: it.name, ground: it.base === null ? null : Math.round(it.base + SINK),
-      km: +(Math.hypot(wrapMercDx(it.mx - camMercX) * k, (it.my - camMercY) * k) / 1000).toFixed(1),
+  report() {
+    return this.items.filter((it) => it.inRange || it.km < 200).map((it) => ({
+      name: it.name, ground: it.base === null ? null : Math.round(it.base + SINK), km: +it.km.toFixed(1),
+      shape: this.models.has(it.model) ? this.models.get(it.model).state : 'not loaded (out of range)',
     }));
   }
 }

@@ -1,0 +1,10 @@
+{
+  "name": "Eiffel Tower",
+  "city": "Paris",
+  "lat": 48.85837,
+  "lon": 2.294481,
+  "height": 330,
+  "yawDeg": 44.2,
+  "fold": 4,
+  "maskR": 75
+}

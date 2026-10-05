@@ -1,0 +1,10 @@
+{
+  "name": "CN Tower",
+  "city": "Toronto",
+  "lat": 43.642567,
+  "lon": -79.387057,
+  "height": 553.3,
+  "yawDeg": 0,
+  "fold": 3,
+  "maskR": 40
+}

@@ -1,12 +1,12 @@
 import json, numpy as np
 from PIL import Image, ImageDraw
-prof=json.load(open('canton_profile.json')); S=prof['scale']; MB=prof['mast']['base']
+prof=json.load(open('profile.json')); S=prof['scale']; MB=prof['mast']['base']
 SK=np.load('/home/claude/canton2/skel_tris.npy'); MN=np.load('/home/claude/canton2/main_tris.npy'); lab=np.load('/home/claude/canton2/main_lab.npy')
 mast=MN[np.isin(lab,[0,1,2,3,4,5,6,7])].copy()
 mast[:,:,0]+=27.65; mast[:,:,2]+=MB
 ref=np.concatenate([SK,mast])*S
 Rt=np.stack([ref[:,:,0],ref[:,:,2],-ref[:,:,1]],2)           # x, up, z(mirrored)
-m=json.load(open('models.json'))['canton']
+m=json.load(open('model.json'))
 pos=np.array(m['pos']).reshape(-1,3); idx=np.array(m['idx']).reshape(-1,3); Mt=pos[idx]
 def sil(tris,ax,x0,x1,y0,y1,W,H):
     im=Image.new('L',(W,H),0); d=ImageDraw.Draw(im); sx=W/(x1-x0); sy=H/(y1-y0)

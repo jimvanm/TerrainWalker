@@ -1,0 +1,11 @@
+{
+  "name": "Canton Tower",
+  "city": "Guangzhou",
+  "lat": 23.10889,
+  "lon": 113.31889,
+  "height": 602,
+  "yawDeg": 0,
+  "fold": 2,
+  "oval": true,
+  "maskR": 60
+}

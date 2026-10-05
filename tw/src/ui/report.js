@@ -3,7 +3,6 @@
 // clipboard, logged, and left on window.twReport.
 
 import { lookLabel } from '../look.js';
-import { mercScale } from '../geo.js';
 
 export function heightReport(cam, near, sky, landmarks) {
   const rep = {
@@ -11,7 +10,7 @@ export function heightReport(cam, near, sky, landmarks) {
     colours: lookLabel(),
     near: near.report(cam.mercX, cam.mercY), sky: sky.report(cam.mercX, cam.mercY),
     skyStatus: sky.status, nearStatus: near.status,
-    landmarks: landmarks.report(cam.mercX, cam.mercY, mercScale(cam.lat)),
+    landmarks: landmarks.report(),
     landmarkOrientation: landmarks.orientation([near, sky].flatMap((nf) =>
       [...nf.tiles.values()].flatMap((t) => (t.stats && t.stats.outlines) || []))),
   };

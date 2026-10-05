@@ -3,7 +3,7 @@ from PIL import Image, ImageDraw
 T=np.load('cn_tower_tris.npy'); N=np.load('cn_tower_names.npy'); S=553.3/1870.3
 keep=~(np.isin(N,['Ground','Box001','Box002','Catwalk','Inner Bottom Railing','Shape001'])|np.array([str(n).startswith(('Edgewalk','Bottom Safety')) for n in N]))
 Tb=T[keep].copy(); Tb[:,:,0]-=1.5; Tb[:,:,2]-=0.2; Tb[:,:,1]+=1.9; Tb*=S
-m=json.load(open('models.json'))['cn']
+m=json.load(open('model.json'))
 pos=np.array(m['pos']).reshape(-1,3); idx=np.array(m['idx']).reshape(-1,3); Mt=pos[idx]
 def sil(tris,ax,x0,x1,y0,y1,W,H):
     im=Image.new('L',(W,H),0); d=ImageDraw.Draw(im)

@@ -11,7 +11,7 @@ import { tileSizeMerc, tileToMerc, tileCentreMerc, mercYToLat } from './geo.js';
 import { decodeTerrarium, meshNodes, pxMetersFor, PX } from './heightgrid.js';
 import { buildRoads } from './roads.js';
 import { buildBuildings } from './buildings.js';
-import { SITES } from './landmark_sites.js';
+import { loadList } from './landmark_list.js';
 import { lonToMercX, latToMercY, wrapMercDx } from './geo.js';
 import { signedArea } from './earclip.js';
 import { POLYGON } from './mvt.js';
@@ -96,9 +96,10 @@ export async function buildNearTile(spec) {
   if (spec.marker) return markTile(spec);
   const { x, y, z = 14, vurl, eurl, skyline = false, skyMin = 50 } = spec;
   const d = z - EZ;
-  const [layers, nodes] = await Promise.all([
+  const [layers, nodes, sites] = await Promise.all([
     vectorLayers(vurl, skyline ? ['building', 'landuse'] : ['transportation', 'aeroway', 'building', 'landuse']),
     elevationNodes(eurl, y >> d),
+    loadList(),
   ]);
   const nw12 = tileToMerc(x >> d, y >> d, EZ);
   const c = tileCentreMerc(x, y, z);
@@ -119,7 +120,7 @@ export async function buildNearTile(spec) {
   // a landmark is left out. Only sites that can reach into this tile are passed.
   const half = g.size14 / 2;
   const mask = [];
-  for (const L of SITES) {
+  for (const L of sites) {
     const r = L.maskR / g.cosLat;
     const mx = wrapMercDx(lonToMercX(L.lon) - c.x), my = c.y - latToMercY(L.lat);
     if (Math.abs(mx) < half + r && Math.abs(my) < half + r) mask.push({ id: L.id, x: mx, y: my, r });

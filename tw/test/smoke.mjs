@@ -94,9 +94,19 @@ globalThis.performance = globalThis.performance || { now: () => Date.now() };
 globalThis.devicePixelRatio = 1;
 globalThis.innerWidth = 1920;
 globalThis.innerHeight = 1080;
-globalThis.location = { hash: '' };
+// Start in Toronto, in sight of the CN Tower, so a landmark is loaded and drawn.
+globalThis.location = { hash: '#lat=43.6300&lon=-79.4000&alt=1500&mode=fly' };
 // Stands in for the OpenFreeMap TileJSON.
-globalThis.fetch = async () => ({ json: async () => ({ tiles: ['https://x/{z}/{x}/{y}.pbf'] }) });
+// Landmark files come off the disk; anything else gets the stand-in TileJSON.
+const { readFileSync, existsSync } = await import('node:fs');
+globalThis.fetch = async (url) => {
+  const u = String(url);
+  if (u.startsWith('file:')) {
+    const ok = existsSync(new URL(u));
+    return { ok, status: ok ? 200 : 404, json: async () => JSON.parse(readFileSync(new URL(u), 'utf8')) };
+  }
+  return { ok: true, status: 200, json: async () => ({ tiles: ['https://x/{z}/{x}/{y}.pbf'] }) };
+};
 globalThis.history = { replaceState() {} };
 const ELS = {};
 globalThis.document = {
@@ -217,6 +227,8 @@ ok(log.uniforms.size === 23, `resolved ${log.uniforms.size} distinct uniform nam
 ok(log.badUniform.length === 0, `no null uniform locations (${log.badUniform.length})`);
 ok(log.nan.length === 0, `no NaN/Inf uniform values (${log.nan.length}${log.nan.length ? ': ' + log.nan.slice(0, 3) : ''})`);
 const rep = globalThis.twReport;   // left behind by the K key
+ok(rep && rep.landmarks.some((L) => L.shape === 'ready' && L.ground !== null),
+  `a landmark in sight loaded and stood on the ground (${rep && JSON.stringify(rep.landmarks)})`);
 ok(rep && /bldg/.test(rep.nearStatus), `near field loaded and drew buildings (${rep && rep.nearStatus})`);
 ok(rep && /urban [1-9]/.test(rep.skyStatus), `skyline found built-up tiles (${rep && rep.skyStatus})`);
 ok(log.draws > 0, `issued ${log.draws} draw calls over ${FRAMES} frames`);
