@@ -130,6 +130,22 @@ export class Dropper {
     this.message = note || `Drop: ${kd.name} (${where})  ·  click drop  ·  , . turn  ·  M next/off`;
   }
 
+  // A click with nothing in hand: pick up the dropped landmark pointed at,
+  // turned as it stood. Returns true if there was one.
+  pickUp(cam, groundAt) {
+    if (this.armed) return false;
+    const it = this.aimedAt(cam, groundAt, this.dir);
+    if (!it) return false;
+    const i = this.L.kinds.findIndex((q) => q.id === it.model);
+    if (i < 0) return false;
+    this.L.remove(it);
+    this.yawDeg = it.yawDeg;
+    this.choice = i - 1;
+    this.cycle();                 // arms kinds[i], with the preview
+    this._say(`Picked up ${it.name}`);
+    return true;
+  }
+
   // Click: a copy of the preview stays where it is.
   drop() {
     if (!this.armed || !this.aim) return null;

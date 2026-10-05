@@ -194,7 +194,10 @@ bindKeys(actions, window, () => settings.mode);
 // where the pointer is. In Navigation a click captures the mouse (controls.js).
 canvas.addEventListener('click', () => {
   if (settings.mode !== 'tools') return;
-  if (transplant.active) transplant.click(groundH); else dropper.drop();
+  if (transplant.active) transplant.click(groundH);
+  else if (dropper.armed) dropper.drop();
+  // Nothing in hand: pick up the laid piece or dropped landmark pointed at.
+  else if (!transplant.pickUpAt(aimPoint(cam, groundH, aimDir || undefined))) dropper.pickUp(cam, groundH);
 });
 const overlayEl = document.getElementById('overlay');
 const dropEl = document.getElementById('drop');

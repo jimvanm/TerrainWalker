@@ -6,7 +6,8 @@
 //   Backspace  take back the last corner
 //   Enter      close the outline and pick the ground up
 //   , and .    turn it 15 degrees;  U  how high it stands (below)
-//   click      lay it down; it stays in hand, so click again for another
+//   click      lay it down; it stays in hand, so click again for another.
+//              With nothing in hand, a click on a laid piece picks it up again.
 //   Delete     remove a laid piece the pointer is on
 //   N again    put it away (or Esc, where the browser passes Esc on)
 //
@@ -204,7 +205,7 @@ export class Transplant {
     } else if (this.state === 'carrying' && this.preview && this.preview.base !== null && !this.preview.hidden) {
       const p = this.preview;
       const it = this.L.add({ model: p.model, name: p.name, lat: p.lat, lon: p.lon, height: p.height, yawDeg: p.yawDeg,
-        maskR: 0, id: 'piece:' + (count++), dropped: true, piece: { poly: this.piece.poly } });
+        maskR: 0, id: 'piece:' + (count++), dropped: true, piece: { ...this.piece, mode: this.mode, modelId: p.model } });
       it.fixedBase = true; it.base = p.base;
       this._say('Laid down. Click again for another; N to put it away.');
     }
@@ -301,17 +302,41 @@ export class Transplant {
     this.message = note || `${this.mode === 'rise' ? `Rises ${rise} m above its edge` : 'Height above sea level'} (U changes)  ·  click lays it down  ·  , . turn  ·  N puts it away`;
   }
 
-  // Delete: the laid piece the pointer is on. Returns it, or null.
-  removeAt(aim) {
+  // A click with nothing in hand: pick up the laid piece the pointer is on,
+  // turned as it lay, so it can be moved again. Returns true if there was one.
+  pickUpAt(aim) {
+    const it = this._pieceAt(aim);
+    if (!it) return false;
+    this.L.remove(it);
+    this.piece = it.piece;
+    this.mode = it.piece.mode;
+    this.yawDeg = it.yawDeg;
+    this.state = 'carrying';
+    this.preview = this.L.add({ model: it.piece.modelId, name: it.name, lat: it.lat, lon: it.lon, height: it.height,
+      yawDeg: it.yawDeg, maskR: 0, id: 'piece-preview', preview: true });
+    this.preview.fixedBase = true;
+    this.preview.hidden = true;
+    this._say('Picked it up. Click to lay it down again.');
+    return true;
+  }
+
+  _pieceAt(aim) {
     if (!aim) return null;
     for (const it of this.L.items) {
       if (!it.piece) continue;
       const k = mercScale(mercYToLat(it.my));
       const e = wrapMercDx(aim.mx - it.mx) * k, n = (aim.my - it.my) * k;
       const [pe, pn] = turnEN(e, n, -it.yawDeg);       // back into the piece's own frame
-      if (inside(it.piece.poly, pe, pn)) { this.L.remove(it); this._say('Removed the piece.'); return it; }
+      if (inside(it.piece.poly, pe, pn)) return it;
     }
     return null;
+  }
+
+  // Delete: the laid piece the pointer is on. Returns it, or null.
+  removeAt(aim) {
+    const it = this._pieceAt(aim);
+    if (it) { this.L.remove(it); this._say('Removed the piece.'); }
+    return it;
   }
 
   // The outline being drawn, for the screen overlay: [{ mx, my, h }], plus the

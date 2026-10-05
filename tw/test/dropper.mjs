@@ -92,6 +92,11 @@ const flat = () => 1000;
   assert.equal(d2.aimedAt({ ...level, yaw: 0.2 }, flat), null, 'aiming well to the side of the tower: not it');
   assert.equal(d2.removeAimed(level, flat), t, 'aiming at the tower\'s shaft from 2 km removes it');
   assert.match(d2.message || (d2.update(cam, flat), d2.message), /Removed CN Tower/, 'and says so');
-  console.log('ok  arm, next, turn, drop, remove (aiming at the tower, not its foot); a reload clears them');
+  // Pick a dropped landmark up again: a click with nothing in hand.
+  const t2 = d2._add({ model: 'rogers', lat: geo.mercYToLat(cam.mercY + 2000 / k), lon, yawDeg: 45 });
+  t2.base = 1000;
+  assert.ok(d2.pickUp({ ...level, alt: 1050 }, flat) && d2.armed && L2.kinds[d2.choice].id === 'rogers', 'a click on a dropped landmark picks it up');
+  assert.ok(d2.yawDeg === 45 && !L2.items.includes(t2), 'turned as it stood, and gone from where it was');
+  console.log('ok  arm, next, turn, drop, pick up again, remove (aiming at the tower, not its foot); a reload clears them');
 }
 console.log('dropper ok');

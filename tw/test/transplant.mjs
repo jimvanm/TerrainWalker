@@ -111,7 +111,17 @@ const { Landmarks } = await import('../src/landmarks.js');
   L.update({ mercX: cam.mercX, mercY: cam.mercY, k: geo.mercScale(43.6), agl: 20000 }, () => 500);
   assert.equal(laid[0].base, 75, 'and the ground under its middle does not move it');
   assert.equal(tp.state, 'carrying', 'still in hand, for another');
-  assert.ok(tp.removeAt(tp.aim) === laid[0] && !L.items.includes(laid[0]), 'Delete removes the laid piece pointed at');
+  // Put it away, then pick the laid one up again by clicking it.
+  tp.toggle();
+  assert.equal(tp.state, 'off');
+  assert.ok(tp.pickUpAt(tp.aim) && tp.state === 'carrying' && !L.items.includes(laid[0]), 'a click with nothing in hand picks up a laid piece');
+  assert.ok(tp.yawDeg === 15 && tp.mode === 'rise', 'turned as it lay');
+  tp.update(cam, ground, null); tp.toggleHeight();
+  assert.ok(Math.abs(tp.piece.rise - 4000) < 80, 'and U still works on it');
+  tp.toggleHeight(); tp.update(cam, ground, null);
+  tp.click(ground);
+  const again = L.items.find((it) => it.piece);
+  assert.ok(again && tp.removeAt(tp.aim) === again && !L.items.includes(again), 'Delete removes the laid piece pointed at');
   tp.toggle();
   assert.ok(tp.state === 'off' && !L.items.some((it) => it.preview), 'N again puts it away');
   console.log('ok  draw, take back, pick up, carry, turn, change height, lay down, remove, put away');

@@ -64,6 +64,7 @@ export const KEYS = [
   { group: 'Move ground', label: 'U', help: 'rise above its edge / above sea level', code: 'KeyU', act: 'pieceHeight', mode: 'tools' },
 
   { group: 'In hand', label: 'click', help: 'drop it, or add a corner', mode: 'tools' },
+  { group: 'In hand', label: 'click', help: 'with nothing in hand: pick up the one pointed at', mode: 'tools' },
   { group: 'In hand', label: ',', help: 'or', code: 'Comma', act: 'toolLeft', mode: 'tools' },
   { group: 'In hand', label: '.', help: 'turn it', code: 'Period', act: 'toolRight', mode: 'tools' },
   { group: 'In hand', label: 'Delete', help: 'remove the dropped one pointed at', code: 'Delete', act: 'toolRemove', mode: 'tools' },
