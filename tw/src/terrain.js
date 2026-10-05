@@ -31,6 +31,8 @@ export class Terrain {
     this.loader = loader;
     this.tiles = new Map();     // key -> record, iteration order is LRU order
     this.visible = [];
+    this.holes = 0;             // set by plan(); 0 until the first one, not undefined
+    this.missing = 0;
     loader.onTile = (key, spec, msg) => this._upload(key, spec, msg);
   }
 
