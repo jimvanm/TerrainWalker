@@ -7,6 +7,9 @@ Everything lives in [`tw/`](tw/). Start with [`tw/README.md`](tw/README.md).
 
 ```
 cd tw
-python serve.py           # then open http://localhost:8080/
+caddy run                 # then open http://localhost:8080/
 node test/run.mjs         # run every test
 ```
+
+The local web server is [Caddy](https://caddyserver.com/download); on Windows,
+`tw/serve.bat` starts it. Details in [`tw/README.md`](tw/README.md#run-it).

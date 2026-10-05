@@ -3,26 +3,31 @@
 Walk or fly across the real surface of the Earth, in a browser, with no install
 and no account. Elevation is streamed from open data as you move.
 
-No dependencies. No build step. No package manager. About 5,000 lines of
+No dependencies. No build step. No package manager. About 6,000 lines of
 plain ES modules, run straight from the folder.
 
 ## Run it
 
+The app is a folder of plain files, served by a local web server. Use
+[Caddy](https://caddyserver.com/download): one program, nothing to install
+alongside it. The `Caddyfile` here sets it up (port 8080, no caching, so a
+reload picks up edits). From this folder:
+
 ```
-python serve.py
+caddy run
 ```
+
+On Windows, `serve.bat` does the same: open it and set the line naming where
+`caddy` is on your computer, then double-click it.
 
 Then open <http://localhost:8080/>.
 
-**Use `serve.py`, not `python -m http.server`.** On Windows, Python's built-in
-server reads MIME types from the registry, where `.js` is frequently registered
-as `text/plain`. Browsers refuse to execute ES modules served with a
-non-JavaScript MIME type, so the page loads, the spinner sits there, and not one
-line of the code ever runs. `serve.py` sets the types explicitly. It also
-disables caching so reloads pick up edits.
-
-Any correctly configured static server works too (`npx serve`, nginx, GitHub
-Pages). It does have to be HTTP — `file://` blocks both ES modules and workers.
+**Not Python's `http.server`.** On Windows it takes file types from the
+registry, where `.js` is often registered as plain text. Browsers will not run
+code served as plain text, so the page loads, the spinner sits there, and not
+one line of the code runs. Any other correctly set-up web server works
+(nginx, GitHub Pages). It does have to be a server: opening `index.html` as a
+file blocks the code from loading.
 
 ### If it does not work
 
@@ -36,8 +41,10 @@ To see how good the height data is at a given place, open
 famously difficult places (Niagara Falls, Yosemite, Thor Peak and others) with
 published facts, and names the source of the data at each.
 
-To publish, push the repo and turn on GitHub Pages from the root. That is the
-whole deployment.
+To publish, push the repo and turn on GitHub Pages from the root; the app is
+then at `.../TerrainWalker/tw/`. Places of interest are the exception: their
+tiles are built on your own computer and are not in the repo (see
+`places/README.md`), so a published copy has none.
 
 ## Controls
 
@@ -112,12 +119,12 @@ tiles instead of the usual ones, and only there adds two finer levels, zoom 15
 and 16. Niagara is the first.
 
 **Clipmap.** Thirteen levels, zoom 16 down to zoom 4 (zoom 15 and 16 only in
-a place of interest). Each level is a 4x4 block of
-tiles whose origin is snapped to an **even** tile coordinate. That one
+a place of interest). Each level is a 4x4 block of tiles whose origin is
+snapped to an **even** tile coordinate. That one
 constraint makes the nesting exact: a 4x4 block at zoom z+1 covers precisely 2x2
 whole tiles at zoom z, aligned to the coarse grid, so the coarse level drops
-exactly those and there is no gap and no overlap anywhere. Low down, 136 tiles
-and about 1.6 million triangles when fully loaded; higher up, without the two
+exactly those and there is no gap and no overlap anywhere. Low down (outside a
+place of interest), 136 tiles and about 1.6 million triangles when fully loaded; higher up, without the two
 close-up levels, 112 tiles and about 839k. Levels that fog or the horizon would
 hide are never requested.
 
@@ -135,15 +142,16 @@ the cracks between levels. Back-face culling is off, so the winding does not
 matter.
 
 **Two depth passes.** A single 0.5 m to 600 km depth range has nowhere near
-enough precision and distant ridges z-fight into mush. Far levels are drawn
-first, the depth buffer is cleared, then the near levels are drawn over the top.
-The split planes are derived from the actual block extents; a fixed constant
-opens a visible gap ring on the horizon.
+enough precision and distant ridges z-fight into mush. The scene is drawn
+twice: once for the far range, then, after clearing the depth buffer, once for
+the near range. The split is placed where depth precision falls to about 20 m,
+not at a detail level's edge, and the two ranges overlap so nothing falls
+between them (`src/main.js` explains why).
 
-**No normals, no textures, no colour attributes.** The only vertex attribute is
-a `vec4`. Flat shading comes from screen-space derivatives and the colour ramp
-is computed from elevation in the fragment shader, then quantised to 5 bits per
-channel.
+**No normals and one vertex attribute.** Terrain vertices are a single `vec4`.
+Flat shading comes from screen-space derivatives and the colour ramp is
+computed from elevation in the fragment shader, then quantised to 5 bits per
+channel. The map layers below are draped over that as textures.
 
 ### How the code fits together
 
@@ -180,14 +188,14 @@ The pipeline:
 
 1. Fetch the OpenStreetMap vector tile alongside the elevation tile. The tile
    URL comes from OpenFreeMap's TileJSON at runtime, never hardcoded.
-2. Decode it with a hand-written MVT reader in `src/mvt.js`, about 130 lines and
-   no dependencies. Water polygons, waterway lines, and the `class` tag.
-3. Rasterise to a 256x256 single-channel mask in the worker with Canvas 2D path
-   fills. Nonzero winding gives island holes for free.
-4. Upload per tile as an `R8` texture and sample it in the fragment shader.
+2. Decode it with a hand-written map-tile reader in `src/mvt.js`, no
+   dependencies: water, waterways, land cover, land use, roads and airports.
+3. Draw them into the two 256x256 images above in the helper (a web worker),
+   with Canvas 2D path fills. Nonzero winding gives island holes for free.
+4. Upload them per tile as textures and sample them in the fragment shader.
 
-Vectors travel over the wire; pixels are materialised at load time and never
-stored or transmitted. All 76 tiles cost about 5 MB of GPU memory. UVs fall out
+Vectors travel over the wire; pixels are made at load time and never stored or
+transmitted. About 600 KB of GPU memory per tile, mipmaps included. UVs fall out
 of the tile-local vertex positions, so there is no extra attribute, and skirt
 vertices inherit their edge's UV so shorelines do not tear at LOD seams.
 
@@ -199,6 +207,11 @@ them. NASADEM already flattened large lakes during processing anyway.
 chart symbology are all the same path: rasterise vectors, drape on terrain. What
 remains is drawing code, not architecture.
 
+Close up, roads and buildings are also real geometry: the near field
+(`src/near.js`) builds road ribbons and extruded buildings from the same map
+tiles for the area around you, and the skyline (`src/skyline.js`) adds tall
+buildings out to about 20 km.
+
 ## Performance
 
 Up to about 1.6 million triangles low down (839k higher up) across about 270
@@ -209,7 +222,7 @@ kilometre travelled: about 0.6 KB/s walking, about 56 KB/s at full boost. The
 initial load is around 6 MB, requested coarsest-first so the whole scene appears
 immediately and then sharpens.
 
-Requests are capped at six in flight. This endpoint is a free public good and
+Requests are capped at ten in flight. This endpoint is a free public good and
 does not deserve to be hammered. Please do not point automated flythroughs at
 it.
 
@@ -237,9 +250,11 @@ exactly, checked against 150,000 sampled points.
 
 Stated plainly, because you will notice all of these within a minute:
 
-- **The ground under your feet is invented.** Source data is sampled every 30 m
-  and your eye is 1.7 m up. Large landforms are real and recognisable. Anything
-  within walking distance is smooth interpolation.
+- **The ground under your feet is invented.** Over most of the world the source
+  data is sampled every 30 m and your eye is 1.7 m up. Large landforms are real
+  and recognisable. Anything within walking distance is smooth interpolation.
+  (Better in the US, the UK and a few other countries, and in a place of
+  interest.)
 - **Forest canopy is baked into the terrain.** This is a surface model, not a
   bare-earth model, so forest edges appear as cliffs.
 - **You cannot fall.** Walking clamps you to the ground surface, so walking at a
@@ -247,7 +262,9 @@ Stated plainly, because you will notice all of these within a minute:
   which is its own project.
 - **Lakes are not flat and rivers do not always run downhill.** Nothing in a raw
   elevation model enforces hydrology.
-- **The ocean is a flat plane at 0 m.** No bathymetry.
+- **There is no sea surface.** Out at sea the height data is the sea floor,
+  so you fly over the floor, painted as water, and the height shown is the
+  floor's: thousands of metres below zero in the open ocean.
 - **Heights are ellipsoidal, not orthometric.** Expect a vertical offset from
   published map elevations, up to about 100 m in some regions.
 - **High latitudes distort.** Mercator tiles are square in projection, not on
@@ -261,8 +278,7 @@ Stated plainly, because you will notice all of these within a minute:
 4. Deterministic, position-seeded fractal detail inside 300 m, so the near field
    stops being smooth putty
 5. ESA WorldCover land classes driving the palette instead of elevation bands
-6. Extruded OpenStreetMap building footprints
-7. A native port to Rust and wgpu. Every line of tile, clipmap and shader logic
+6. A native port to Rust and wgpu. Every line of tile, clipmap and shader logic
    ports across unchanged.
 
 ## Data sources, attribution and courtesy

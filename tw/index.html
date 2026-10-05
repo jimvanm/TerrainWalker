@@ -177,7 +177,7 @@
       (e.filename ? e.filename + ':' + e.lineno : '') +
       '\n\nIf this says "Failed to fetch" or mentions CORS, you are probably ' +
       'opening the file directly. Serve the folder over HTTP instead:\n\n' +
-      '    python serve.py\n\nthen open http://localhost:8080/';
+      '    caddy run      (in the tw folder; see the README)\n\nthen open http://localhost:8080/';
     el.style.display = 'block';
   });
 </script>

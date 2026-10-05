@@ -50,7 +50,7 @@ fetch('./src/main.js', { cache: 'no-store' }).then(function (r) {
   } else {
     t1.fail('served as "' + ct + '", which browsers will not execute as a module.',
       'This is the Windows registry MIME bug in Python\'s http.server.\n' +
-      'Fix: stop that server and run  python serve.py  from the tw folder instead.');
+      'Fix: stop that server and run Caddy instead:  caddy run  in the tw folder (see the README).');
   }
 }).catch(function (e) { t1.fail('fetch failed: ' + e.message); });
 

@@ -316,7 +316,7 @@ This is the layout as built.
 index.html          page, styles, panels (filled in by src/ui/)
 diag.html           standalone fault finder; uses no modules on purpose
 terraincheck.html   height data quality at hard places, per detail level
-serve.py            dev server with correct MIME types
+Caddyfile, serve.bat  local web server (Caddy) settings, and a Windows starter
 
 src/main.js         start-up and the frame loop; wires the parts, owns no logic
 src/config.js       constants, URL hash

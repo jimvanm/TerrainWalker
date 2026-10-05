@@ -13,7 +13,7 @@ const NO_TILES = 'Could not load any terrain tiles.\n\n' +
   'Open /diag.html in this browser. It tests each layer separately and ' +
   'will name the cause.\n\n' +
   'The usual ones:\n' +
-  '  - served with the wrong MIME type (run python serve.py, not ' +
+  '  - served with the wrong file type (use Caddy, see the README, not ' +
   'python -m http.server)\n' +
   '  - an ad blocker or corporate proxy blocking s3.amazonaws.com\n' +
   '  - no network route to the tile server';

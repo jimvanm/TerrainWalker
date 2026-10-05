@@ -10,7 +10,7 @@ export const keyOf = (z, x, y) => z + '/' + x + '/' + y;
 
 const HELPER_FAILED = 'The tile helper failed to load.\n\n%ERR%\n\n' +
   'Almost always means src/worker.js is being served with the wrong MIME ' +
-  'type. Run  python serve.py  instead of  python -m http.server, ' +
+  'type. Serve the folder with Caddy (caddy run, in the tw folder), not python -m http.server, ' +
   'and open /diag.html to confirm.';
 
 export class Loader {
