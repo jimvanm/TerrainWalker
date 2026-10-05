@@ -53,8 +53,8 @@ const flat = () => 1000;
   assert.ok(it && it.dropped && it.yawDeg === 30 && Math.abs(it.lat - p.lat) < 1e-9, 'click drops a copy where the preview stands');
   d.cycle(); assert.equal(L.kinds[d.choice].id, 'rogers', 'M again: the next landmark');
   d.cycle(); assert.ok(!d.armed && !L.items.some((q) => q.preview), 'and after the last, off, with no preview left');
-  d.update(cam, flat);
-  assert.equal(d.message, '', 'and the message goes');
+  d.noteUntil = 0; d.update(cam, flat);
+  assert.equal(d.message, '', 'and the message goes (once the last note has shown)');
 }
 {
   const saved = JSON.parse(mem.get('tw.drops'));
@@ -69,6 +69,13 @@ const flat = () => 1000;
   d2.drop(); // not armed: nothing
   assert.equal(L2.items.filter((q) => q.dropped).length, 0, 'a click while not armed drops nothing');
   assert.equal(d2.removeAimed(far, flat), null, 'Delete aimed elsewhere removes nothing');
-  console.log('ok  arm, next, turn, drop, keep, remove');
+  // Aiming at the tower itself, 2 km away and level, not at its foot.
+  const t = d2._add({ model: 'cn', lat: geo.mercYToLat(cam.mercY + 2000 / k), lon, yawDeg: 0 });
+  t.base = 1000;
+  const level = { ...cam, alt: 1300, pitch: 0 };
+  assert.equal(d2.aimedAt({ ...level, yaw: 0.2 }, flat), null, 'aiming well to the side of the tower: not it');
+  assert.equal(d2.removeAimed(level, flat), t, 'aiming at the tower\'s shaft from 2 km removes it');
+  assert.match(d2.message || (d2.update(cam, flat), d2.message), /Removed CN Tower/, 'and says so');
+  console.log('ok  arm, next, turn, drop, keep, remove (aiming at the tower, not its foot)');
 }
 console.log('dropper ok');

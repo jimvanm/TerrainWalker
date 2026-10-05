@@ -86,7 +86,8 @@ export class Dropper {
 
   // Every frame, before landmarks.update(): stand the preview at the crosshair.
   update(cam, groundAt) {
-    if (!this.armed) { this.message = ''; return; }
+    const note = this.note && Date.now() < this.noteUntil ? this.note : '';
+    if (!this.armed) { this.aim = null; this.message = note; return; }
     this.aim = aimPoint(cam, groundAt);
     const kd = this.L.kinds[this.choice];
     if (this.aim) {
@@ -96,7 +97,7 @@ export class Dropper {
       this.preview.hidden = true;
     }
     const where = this.aim ? `${(this.aim.d / 1000).toFixed(1)} km away` : 'aim at the ground';
-    this.message = `Drop: ${kd.name} (${where})  ·  click drop  ·  , . turn  ·  M next/off`;
+    this.message = note || `Drop: ${kd.name} (${where})  ·  click drop  ·  , . turn  ·  M next/off`;
   }
 
   // Click: a copy of the preview stays where it is.
@@ -105,23 +106,55 @@ export class Dropper {
     const p = this.preview;
     const it = this._add({ model: p.model, lat: p.lat, lon: p.lon, yawDeg: this.yawDeg });
     this._save();
+    if (it) this._say(`Dropped ${it.name}`);
     return it;
   }
 
-  // Delete: the dropped landmark nearest the crosshair, if the crosshair is on or near it.
+  // Delete: the dropped landmark the crosshair is on. You aim at the tower
+  // itself, not at its foot, so this tests the line of sight against each
+  // dropped landmark as an upright column, nearest first. Failing that, the
+  // ground point under the crosshair, within the landmark's mask radius.
   removeAimed(cam, groundAt) {
-    const aim = this.aim || aimPoint(cam, groundAt);
-    if (!aim) return null;
-    let best = null, bestD = Infinity;
-    for (const it of this.L.items) {
-      if (!it.dropped) continue;
-      const k = mercScale(mercYToLat(aim.my));
-      const d = Math.hypot(wrapMercDx(it.mx - aim.mx), it.my - aim.my) * k;
-      if (d <= Math.max(60, it.maskR || 0) && d < bestD) { best = it; bestD = d; }
-    }
-    if (best) { this.L.remove(best); this._save(); }
+    const best = this.aimedAt(cam, groundAt);
+    if (best) { this.L.remove(best); this._save(); this._say(`Removed ${best.name}`); }
+    else this._say('No dropped landmark under the crosshair');
     return best;
   }
+
+  aimedAt(cam, groundAt) {
+    const k = mercScale(mercYToLat(cam.mercY));
+    const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+    const e = Math.sin(cam.yaw) * cp, n = Math.cos(cam.yaw) * cp;
+    const curv = 1 / (2 * R_MEAN);
+    let best = null, bestT = Infinity;
+    for (const it of this.L.items) {
+      if (!it.dropped || it.base === null) continue;
+      const dx = wrapMercDx(it.mx - cam.mercX) * k, dn = (it.my - cam.mercY) * k;
+      const hh = e * e + n * n;
+      if (hh < 1e-6) continue;                       // looking straight down: the ground test below
+      const t = (dx * e + dn * n) / hh;              // along the line, where it passes the column closest
+      if (t <= 0) continue;
+      const miss = Math.hypot(dx - e * t, dn - n * t);
+      const d = Math.hypot(dx, dn);
+      const foot = it.base - curv * d * d, top = foot + it.height;   // as drawn, with the Earth's curve
+      const r = Math.max(25, it.maskR || 0);
+      const y = cam.alt + sp * t;
+      if (miss <= r && y >= foot - r && y <= top + r && t < bestT) { best = it; bestT = t; }
+    }
+    if (best) return best;
+    const aim = aimPoint(cam, groundAt);
+    if (!aim) return null;
+    let bestD = Infinity;
+    for (const it of this.L.items) {
+      if (!it.dropped) continue;
+      const d = Math.hypot(wrapMercDx(it.mx - aim.mx), it.my - aim.my) * mercScale(mercYToLat(aim.my));
+      if (d <= Math.max(60, it.maskR || 0) && d < bestD) { best = it; bestD = d; }
+    }
+    return best;
+  }
+
+  // A short note in the drop line, for a couple of seconds.
+  _say(text) { this.note = text; this.noteUntil = Date.now() + 2500; }
 
   _add(d) {
     const kd = this.L.kinds.find((q) => q.id === d.model);
