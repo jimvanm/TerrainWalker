@@ -1,7 +1,8 @@
 @echo off
 rem Apply changes sent as .mbox files: drag one or more onto this file.
 rem They are applied in the order given and committed. Pushing is up to you.
-rem If one does not apply, nothing from it is kept and it stops there.
+rem Each one that applies is deleted. If one does not apply, nothing from it
+rem is kept, its file stays, and it stops there.
 rem (No labels or goto on purpose: cmd misreads those in a file saved with
 rem Unix line endings, which is how git may write this one.)
 setlocal
@@ -33,15 +34,17 @@ for %%F in (%*) do (
     if errorlevel 1 (
       git am --abort
       set FAILED=%%~nxF
+    ) else (
+      del "%%~F"
     )
   )
 )
 
 echo.
 if defined FAILED (
-  echo %FAILED% did NOT apply, and nothing from it was kept.
+  echo %FAILED% did NOT apply, and nothing from it was kept. The file is still there.
   echo Usually an earlier change is missing: apply that one first.
-  echo Anything listed above it applied fine.
+  echo Anything listed above it applied fine, and its file was deleted.
   pause
   exit /b 1
 )
