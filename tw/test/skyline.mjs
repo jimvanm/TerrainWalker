@@ -30,6 +30,7 @@ for (let i = 0; i < 2; i++) { far.update(view(mx, my), R, near.block, true); con
 far.update(view(mx, my), R, near.block, true);
 const sent = posted.filter((m) => m.marker);
 assert.ok(sent.length >= 2 && sent.every((m) => m.skyline && m.z === 13), 'markers go to the worker flagged marker/skyline at z13');
+assert.ok(sent.every((m) => m.ez === 12 && m.eurl.includes('/12/')), 'skyline jobs still drape on zoom-12 ground');
 const dense = [...far.pool.inflight.values()][0], rural = [...far.pool.inflight.values()][1];
 reply(dense, { ...bare, cover: 0.4, built: 0.6 });
 reply(rural, { ...bare, cover: 0.01, built: 0.05 });

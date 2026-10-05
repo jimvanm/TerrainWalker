@@ -19,11 +19,13 @@ import { MeshBuilder } from './meshbuilder.js';
 import { cachedFetch } from './cache.js';
 
 const SKY_SUNK = 6;   // far terrain is coarse, so skyline walls start deeper
-const EZ = 12;     // elevation tile that the finest terrain level uses
+// Which elevation zoom to drape on comes with each job (spec.ez): the finest
+// terrain level for the near field, zoom 12 for the distant skyline.
+const EZ_DEFAULT = 12;
 
 const cache = new Map();   // elevation url -> Promise<Float32Array nodes>
 
-function elevationNodes(url, y) {
+function elevationNodes(url, ez, y) {
   let p = cache.get(url);
   if (!p) {
     p = (async () => {
@@ -34,11 +36,11 @@ function elevationNodes(url, y) {
       const ctx = cv.getContext('2d', { willReadFrequently: true });
       ctx.drawImage(bmp, 0, 0, PX, PX);
       bmp.close();
-      return meshNodes(decodeTerrarium(ctx.getImageData(0, 0, PX, PX).data, pxMetersFor(EZ, y)));
+      return meshNodes(decodeTerrarium(ctx.getImageData(0, 0, PX, PX).data, pxMetersFor(ez, y)));
     })();
     cache.set(url, p);
     p.catch(() => cache.delete(url));
-    if (cache.size > 6) cache.delete(cache.keys().next().value);
+    if (cache.size > 12) cache.delete(cache.keys().next().value);
   }
   return p;
 }
@@ -95,17 +97,17 @@ async function markTile({ vurl }) {
 export async function buildNearTile(spec) {
   if (spec.marker) return markTile(spec);
   const { x, y, z = 14, vurl, eurl, skyline = false, skyMin = 50 } = spec;
-  const d = z - EZ;
+  const EZ = spec.ez || EZ_DEFAULT, d = z - EZ;
   const [layers, nodes, sites] = await Promise.all([
     vectorLayers(vurl, skyline ? ['building', 'landuse'] : ['transportation', 'aeroway', 'building', 'landuse']),
-    elevationNodes(eurl, y >> d),
+    elevationNodes(eurl, EZ, y >> d),
     loadList(),
   ]);
   const nw12 = tileToMerc(x >> d, y >> d, EZ);
   const c = tileCentreMerc(x, y, z);
   const g = {
     size14: tileSizeMerc(z),          // this tile's size (the name dates from when it was always z14)
-    size12: tileSizeMerc(EZ),
+    size12: tileSizeMerc(EZ),         // the elevation tile's size (named from when it was always zoom 12)
     bx: c.x - nw12.x,
     by: nw12.y - c.y,
     cosLat: Math.cos(mercYToLat(c.y) * Math.PI / 180),

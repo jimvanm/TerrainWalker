@@ -89,4 +89,15 @@ const settle = (d, alt, motion = still, o = opts, frames = 400) => {
   assert.equal(settle(new Detail(), 500).lead.use, false, 'standing still, no look-ahead');
   console.log('ok  look-ahead points the way you are moving');
 }
+// ---- close-up levels only while the near field is on ----
+{
+  const low = settle(new Detail(), 300), high = settle(new Detail(), 8000);
+  assert.equal(LEVELS[low.minLevel].z, 14, 'low and slow: the finest close-up level (zoom 14) is fetched');
+  assert.equal(LEVELS[high.minLevel].z, 12, 'high up (no near field): zoom 12 is the finest fetched');
+  const d = new Detail();
+  settle(d, 300); const back = settle(d, 8000);
+  assert.equal(LEVELS[back.minLevel].z, 12, 'climbing out of near-field height stops fetching the close-up levels');
+  assert.equal(LEVELS[settle(d, 300).minLevel].z, 14, 'and coming back down starts again');
+  console.log('ok  zoom 13 and 14 are fetched only while low enough for the near field');
+}
 console.log('detail ok');

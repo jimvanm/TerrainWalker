@@ -195,7 +195,7 @@ function frame(now) {
     terrain.update(v);
     handover.update(v);
   }
-  landmarks.update(v, (x, y) => terrain.heightAt(x, y));
+  landmarks.update(v, (x, y) => terrain.groundAt(x, y));
 
   const roadsOn = layerOn('roads'), bldOn = layerOn('built'), landOn = layerOn('land');
   const shading = {

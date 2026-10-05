@@ -22,6 +22,12 @@ const t = mercToTile(mx, my, 14), cx = Math.floor(t.x), cy = Math.floor(t.y);
 const ex = tileToMerc(cx - 1, cy - 1, 14), ey = tileToMerc(cx + 2, cy + 2, 14);
 assert.ok(Math.abs(nf.rect.w - ex.x) < 1e-6 && Math.abs(nf.rect.e - ey.x) < 1e-6, 'rect spans the 3x3 full-detail block');
 console.log('ok  5x5 loads; the painted-road cover is the 3x3 full-detail block');
+{
+  const job = posted.find((m) => m.z === 14 && !m.skyline);
+  assert.ok(job && job.ez === 14 && job.eurl.includes('/14/' + job.x + '/' + job.y + '.'),
+    'near-field jobs drape on the zoom-14 elevation tile under them: ' + (job && job.eurl));
+  console.log('ok  roads and buildings drape on the finest (zoom 14) ground');
+}
 
 // fetch gating: fast flight asks for nothing new but keeps drawing what it has
 const posted0 = posted.length;

@@ -166,7 +166,18 @@ for (const it of lm.items) {
   const nap = viewAt(vesuvius.mx, vesuvius.my, vesuvius.k, 2);
   lm2.update(nap, () => 1000); await settle(); lm2.update(nap, () => 1000);
   assert.ok(vesuvius.vao && vesuvius.base === 1000 - 6, 'a second placement of a shape draws where it was put');
+  // From far away only a coarse tile covers the ground; a finer one replaces it.
+  let ground = { h: 120, z: 9 };
+  const far = lm2.add({ model: 'cn', name: 'test', lat: 48.86, lon: 2.30, height: 553.3, maskR: 0 });
+  const v2 = viewAt(far.mx, far.my, far.k, 2);
+  lm2.update(v2, () => ground); await settle(); lm2.update(v2, () => ground);
+  assert.equal(far.base, 120 - 6, 'from far away the coarse ground is used');
+  ground = { h: 93, z: 14 }; lm2.update(v2, () => ground);
+  assert.equal(far.base, 93 - 6, 'and replaced when finer ground arrives');
+  ground = { h: 130, z: 10 }; lm2.update(v2, () => ground);
+  assert.equal(far.base, 93 - 6, 'but never by coarser ground');
   console.log('ok  shapes load within sight and are freed far away; one shape can stand in several places');
+  console.log('ok  far landmarks stand on coarse ground until finer ground arrives');
 }
 // the yaw turns the model clockwise: east becomes south
 const one = buildVertices({ pos: [10, 0, 0, 0, 5, 0, 0, 0, 5], col: new Array(9).fill(0), idx: [0, 1, 2] }, 90);

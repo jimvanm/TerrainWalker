@@ -7,6 +7,7 @@ import { computeBlocks } from './rings.js';
 import { keyOf } from './tiles.js';
 import { CACHE_TILES, LEVELS, SKIRT } from './config.js';
 import { tileSizeMerc, mercToTile, HALF } from './geo.js';
+import { nodeHeightAt, COARSE } from './heightgrid.js';
 
 const PX = 256;
 
@@ -97,6 +98,7 @@ export class Terrain {
       z: spec.z, level: spec.level,
       centre: msg.centre, nw: msg.nw, size: msg.size,
       heights: msg.heights || null,
+      coarse: msg.coarse || null,     // 33 x 33 heights, for lookups far from the camera
       used: performance.now(),
     });
     this._evict();
@@ -241,28 +243,34 @@ export class Terrain {
     return drawn;
   }
 
-  // Ground elevation at a mercator position, bilinear from the level-0 tile
-  // that contains it. Returns null when that tile has not arrived yet.
+  // Ground height at a mercator position, from the finest loaded tile that
+  // has it: full detail where the tile kept its heights (near the camera), its
+  // small 33 x 33 copy elsewhere. Null only when no tile covers the point.
   heightAt(mercX, mercY) {
-    const z = LEVELS[this.minLevel || 0].z;
-    const s = tileSizeMerc(z);
-    const n = Math.pow(2, z);
-    const fx = (mercX + HALF) / s;
-    const fy = (HALF - mercY) / s;
-    const tx = ((Math.floor(fx) % n) + n) % n;
-    const ty = Math.floor(fy);
-    const t = this.tiles.get(keyOf(z, tx, ty));
-    if (!t || !t.heights) return null;
+    const r = this.groundAt(mercX, mercY);
+    return r ? r.h : null;
+  }
 
-    const px = (fx - Math.floor(fx)) * (PX - 1);
-    const py = (fy - Math.floor(fy)) * (PX - 1);
-    const x0 = Math.max(0, Math.min(PX - 2, Math.floor(px)));
-    const y0 = Math.max(0, Math.min(PX - 2, Math.floor(py)));
-    const ax = px - x0, ay = py - y0;
-    const h = t.heights;
-    const a = h[y0 * PX + x0], b = h[y0 * PX + x0 + 1];
-    const c = h[(y0 + 1) * PX + x0], d = h[(y0 + 1) * PX + x0 + 1];
-    return (a + (b - a) * ax) * (1 - ay) + (c + (d - c) * ax) * ay;
+  // As heightAt, plus the zoom it came from: { h, z }.
+  groundAt(mercX, mercY) {
+    for (const L of LEVELS) {
+      const z = L.z, s = tileSizeMerc(z), n = Math.pow(2, z);
+      const fx = (mercX + HALF) / s, fy = (HALF - mercY) / s;
+      const t = this.tiles.get(keyOf(z, ((Math.floor(fx) % n) + n) % n, Math.floor(fy)));
+      if (!t || !(t.heights || t.coarse)) continue;
+      const u = fx - Math.floor(fx), v = fy - Math.floor(fy);
+      if (t.heights) {
+        const px = u * (PX - 1), py = v * (PX - 1);
+        const x0 = Math.max(0, Math.min(PX - 2, Math.floor(px)));
+        const y0 = Math.max(0, Math.min(PX - 2, Math.floor(py)));
+        const ax = px - x0, ay = py - y0, h = t.heights;
+        const a = h[y0 * PX + x0], b = h[y0 * PX + x0 + 1];
+        const c = h[(y0 + 1) * PX + x0], d = h[(y0 + 1) * PX + x0 + 1];
+        return { h: (a + (b - a) * ax) * (1 - ay) + (c + (d - c) * ax) * ay, z };
+      }
+      return { h: nodeHeightAt(t.coarse, u, v, COARSE), z };
+    }
+    return null;
   }
 
   get loaded() { return this.tiles.size; }

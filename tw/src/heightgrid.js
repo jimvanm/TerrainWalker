@@ -6,6 +6,7 @@
 
 export const PX = 256;      // terrarium tile size in pixels
 export const GRID = 128;    // quads per edge of the finest terrain mesh level
+export const COARSE = 32;   // quads per edge of each terrain tile's small height copy
 
 // Ground metres covered by one pixel of the elevation tile (z, y).
 export function pxMetersFor(z, y) {

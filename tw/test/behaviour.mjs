@@ -101,6 +101,24 @@ function mkCam(lat, lon, yawDeg) {
      'heightAt returns null for an unloaded tile');
 }
 
+// --- the ground is found from the finest tile that has it, down to coarse copies ---
+{
+  const fakeGL = new Proxy({}, { get: () => () => ({}) });
+  const t = new Terrain(fakeGL, { onTile: null });
+  const mx = geo.lonToMercX(-79.0757), my = geo.latToMercY(43.0779);
+  const at = (z) => { const tl = geo.mercToTile(mx, my, z); return keyOf(z, Math.floor(tl.x), Math.floor(tl.y)); };
+  ok(t.groundAt(mx, my) === null && t.heightAt(mx, my) === null, 'no tiles: no ground');
+  const flat = (v, n) => new Float32Array(n).fill(v);
+  t.tiles.set(at(9), { coarse: flat(150, 33 * 33) });             // far: only the small copy
+  let g = t.groundAt(mx, my);
+  ok(g && g.z === 9 && Math.abs(g.h - 150) < 1e-6, 'only a coarse zoom-9 tile: its small copy gives the ground');
+  t.tiles.set(at(12), { coarse: flat(120, 33 * 33) });
+  ok(t.groundAt(mx, my).z === 12, 'a finer tile is preferred');
+  t.tiles.set(at(14), { heights: flat(100, 256 * 256), coarse: flat(101, 33 * 33) });
+  g = t.groundAt(mx, my);
+  ok(g.z === 14 && Math.abs(g.h - 100) < 1e-6, 'the finest tile, at full detail, wins');
+}
+
 console.log(R.join('\n'));
 
 // --- Q and E fly, and the on-screen pad drives the same paths as the keys ---

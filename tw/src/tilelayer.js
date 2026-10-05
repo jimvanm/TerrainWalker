@@ -16,12 +16,13 @@ const RETRY_MS = 10000;   // a failed tile is asked for again after this long
 export class TileLayer {
   // mesh:        the shared MeshProgram
   // getTemplate: () => vector tile URL template, or null until it is known
-  // opts:        { zoom, workers }
+  // opts:        { zoom, elevationZoom, workers }
   constructor(gl, mesh, getTemplate, opts) {
     this.gl = gl;
     this.mesh = mesh;
     this.getTemplate = getTemplate;
     this.Z = opts.zoom;
+    this.EZ = opts.elevationZoom;   // the terrain zoom roads and buildings drape on
     this.tiles = new Map();      // key -> tile record (see _upload)
     this.failed = new Map();     // key -> retry-after timestamp
     this.want = [];              // what update() asked for, nearest first
@@ -76,15 +77,16 @@ export class TileLayer {
     if (tpl) this.pool.pump(rank);
   }
 
-  // The job for one tile. The elevation is the zoom-12 tile underneath.
+  // The job for one tile. The elevation is the zoom-EZ tile underneath.
   _message(spec) {
     const Z = spec.z || this.Z;
     const nT = Math.pow(2, Z), x = ((spec.rawX % nT) + nT) % nT;
     const sub = (u, z, xx, yy) => u.replace('{z}', z).replace('{x}', xx).replace('{y}', yy);
+    const ez = this.EZ;
     return {
-      x, y: spec.y, z: Z, ...this._jobOptions(spec),
+      x, y: spec.y, z: Z, ez, ...this._jobOptions(spec),
       vurl: sub(this.getTemplate(), Z, x, spec.y),
-      eurl: sub(TILE_URL, 12, x >> (Z - 12), spec.y >> (Z - 12)),
+      eurl: sub(TILE_URL, ez, x >> (Z - ez), spec.y >> (Z - ez)),
     };
   }
 

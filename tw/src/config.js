@@ -16,6 +16,13 @@ export const TILE_URL =
 // the level below it. That exact nesting is what lets us cull without gaps.
 // `grid` is the number of quads per tile edge.
 export const LEVELS = [
+  // Close-up levels: fetched only while the real roads and buildings are on
+  // (low down, see detail.js), because they drape on this ground. Where the
+  // height data is better than 30 m (the US, Arctic, Norway, New Zealand...)
+  // these show cliffs and gorges that zoom 12 smooths away. Elsewhere they are
+  // enlarged copies of zoom 12 and cost a little bandwidth for nothing.
+  { z: 14, grid: 128, close: true },
+  { z: 13, grid: 128, close: true },
   { z: 12, grid: 128 },
   { z: 11, grid: 64 },
   { z: 10, grid: 32 },

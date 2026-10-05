@@ -6,7 +6,7 @@
 // camera only changes uniforms, exactly like the terrain.
 
 import { mercToTile, tileToMerc } from './geo.js';
-import { NF_Z, NF_WORKERS } from './config.js';
+import { NF_Z, NF_WORKERS, LEVELS } from './config.js';
 import { TileLayer } from './tilelayer.js';
 
 const MAX_RING = 14;      // never draw tiles farther than this, in tiles
@@ -14,7 +14,8 @@ const KEEP_TILES = 360;   // tiles held before the farthest unwanted ones are fr
 
 export class NearLayer extends TileLayer {
   constructor(gl, mesh, getTemplate) {
-    super(gl, mesh, getTemplate, { zoom: NF_Z, workers: NF_WORKERS });
+    // Drapes on the finest terrain level, which is loaded whenever this layer is on.
+    super(gl, mesh, getTemplate, { zoom: NF_Z, elevationZoom: LEVELS[0].z, workers: NF_WORKERS });
     this.block = null;     // wanted area in tiles { x0, x1, y0, y1 }; null when off
     this.rect = null;      // the loaded full-detail area, where painted roads are hidden
     this.ready = false;

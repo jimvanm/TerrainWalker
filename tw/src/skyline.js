@@ -23,7 +23,8 @@ export function insideBlock(block, x, y, z) {
 
 export class SkylineLayer extends TileLayer {
   constructor(gl, mesh, getTemplate, opts = {}) {
-    super(gl, mesh, getTemplate, { zoom: 13, workers: opts.workers || SKY_WORKERS });
+    // Far away and sunk into the ground, so the coarser zoom-12 ground is plenty.
+    super(gl, mesh, getTemplate, { zoom: 13, elevationZoom: 12, workers: opts.workers || SKY_WORKERS });
     this.R = 1;
     this.maxRing = 1;
     this.cx14 = 0; this.cy14 = 0;

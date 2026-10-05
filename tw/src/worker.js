@@ -12,7 +12,7 @@
 
 import { tileSizeMerc, tileCentreMerc, tileToMerc, mercYToLat } from './geo.js';
 import { decodeMVT, POLYGON, LINESTRING } from './mvt.js';
-import { decodeTerrarium, pxMetersFor, sample, PX } from './heightgrid.js';
+import { decodeTerrarium, pxMetersFor, sample, meshNodes, PX, COARSE } from './heightgrid.js';
 import { cachedFetch } from './cache.js';
 
 export { decodeTerrarium };
@@ -272,10 +272,14 @@ self.onmessage = async (ev) => {
     const transfer = [positions.buffer, indices.buffer];
     if (ov) transfer.push(ov.mask.buffer, ov.cover.buffer);
     let hcopy = null;
+    // A small copy of every tile's heights (33 x 33 points), so the ground can
+    // be looked up anywhere something is drawn, not only near the camera.
+    const coarse = meshNodes(heights, COARSE);
+    transfer.push(coarse.buffer);
     if (keepHeights) { hcopy = heights; transfer.push(hcopy.buffer); }
     self.postMessage(
       { id, ok: true, positions, indices, centre, nw, size: tileSizeMerc(z),
-        heights: hcopy, mask: ov && ov.mask, cover: ov && ov.cover },
+        heights: hcopy, coarse, mask: ov && ov.mask, cover: ov && ov.cover },
       transfer
     );
   } catch (e) {

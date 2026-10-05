@@ -13,6 +13,9 @@
 // Every threshold has a dead band, so hovering at a boundary does not flicker.
 
 import { LEVELS, NF_MAX_AGL, NF_MAX_SPEED, LEAD_SECONDS } from './config.js';
+
+// The close-up levels at the start of LEVELS: fetched only while the near field is on.
+const CLOSE = LEVELS.filter((L) => L.close).length;
 import { mercScale, tileSizeMerc, R_MEAN } from './geo.js';
 
 // How long a tile takes to arrive. Finer levels are not fetched if you would
@@ -60,13 +63,21 @@ export class Detail {
     if (!opts.fog) while (d < active && span(d - 1) < horizon) d++;
     this.drawLevels = d;
 
-    // Only ask for detail we can keep at this speed.
+    // The real roads and buildings: drawn whenever we are low enough to see
+    // them (height only; speed never switches them off).
+    if (this.nearOn) { if (agl > NF_MAX_AGL * 1.15) this.nearOn = false; }
+    else if (agl < NF_MAX_AGL) this.nearOn = true;
+
+    // Only ask for detail we can keep at this speed. The close-up levels only
+    // while the near field is on: it drapes on them, and from higher up their
+    // detail is too small to see.
     const speed = Math.max(motion.speed, 1);
-    let want = 0;
+    let want = this.nearOn ? 0 : Math.min(CLOSE, d - 1);
     while (want < d - 1 && tileSizeMerc(LEVELS[want].z) * k / speed < LOAD_S) want++;
     let m = this.minLevel;
+    const floor = this.nearOn ? 0 : Math.min(CLOSE, d - 1);
     if (want > m) m = want;
-    else if (want < m && tileSizeMerc(LEVELS[m - 1].z) * k / speed > LOAD_S * 1.8) m--;
+    else if (want < m && m - 1 >= floor && tileSizeMerc(LEVELS[m - 1].z) * k / speed > LOAD_S * 1.8) m--;
     this.minLevel = Math.max(0, Math.min(m, d - 1));
 
     // Look-ahead: also load around where we will be in LEAD_SECONDS. Loading
@@ -84,10 +95,7 @@ export class Detail {
       y: useLead ? cam.mercY - (this.lvz / vmag) * leadDist / k : cam.mercY,
     };
 
-    // Near field. Drawn whenever we are low enough to see it; fetched only at a
-    // speed where a tile can finish loading; radius grows with height.
-    if (this.nearOn) { if (agl > NF_MAX_AGL * 1.15) this.nearOn = false; }
-    else if (agl < NF_MAX_AGL) this.nearOn = true;
+    // Near field block: radius grows with height.
     // 5x5 low down, 7x7 from about 500 m, 9x9 from about 1.5 km. Far rings
     // carry only major roads and tall buildings, so extra tiles cost little.
     if (this.nearR < 3 && agl > 550) this.nearR = 3;

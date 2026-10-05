@@ -68,6 +68,7 @@ export class Landmarks {
       id: p.id || p.model + '@' + this.items.length,
       mx: lonToMercX(p.lon), my: latToMercY(p.lat), k: mercScale(p.lat),
       base: null,     // ground height, filled in once that terrain has loaded
+      baseZ: -1,      // the terrain zoom the ground height came from
       km: Infinity,   // distance from the camera, updated every frame
       inRange: false,
     };
@@ -108,7 +109,8 @@ export class Landmarks {
     return true;
   }
 
-  // view: from detail.js. heightAt: terrain height, or null where not loaded.
+  // view: from detail.js. heightAt: (mercX, mercY) -> { h, z } (terrain.groundAt),
+  // a plain height, or null where no terrain has loaded.
   update(view, heightAt) {
     const used = new Map();     // shape id -> nearest placement, in units of its range
     for (const it of this.items) {
@@ -120,10 +122,11 @@ export class Landmarks {
       it.inRange = r <= 1;
       if (!it.inRange) continue;
       if (!this.models.has(it.model)) this._load(it.model);
-      if (it.base === null) {
-        const h = heightAt(it.mx, it.my);
-        if (h !== null && h !== undefined) it.base = h - SINK;
-      }
+      // Ground under it: take the first answer, then a better one whenever a
+      // finer terrain tile arrives (from far away only coarse tiles cover it).
+      const g = heightAt(it.mx, it.my);
+      const gz = g === null || g === undefined ? null : typeof g === 'number' ? { h: g, z: 99 } : g;
+      if (gz && (it.base === null || gz.z > it.baseZ)) { it.base = gz.h - SINK; it.baseZ = gz.z; }
       this._buffers(it);
     }
     // Free shapes nobody is near any more, with their placements' buffers.
