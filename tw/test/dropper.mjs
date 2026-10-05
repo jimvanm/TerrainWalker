@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 
 const mem = new Map();
-globalThis.localStorage = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, String(v)) };
+globalThis.localStorage = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };
 
 const geo = await import('../src/geo.js');
 const { Landmarks } = await import('../src/landmarks.js');
@@ -57,14 +57,14 @@ const flat = () => 1000;
   assert.equal(d.message, '', 'and the message goes (once the last note has shown)');
 }
 {
-  const saved = JSON.parse(mem.get('tw.drops'));
-  assert.equal(saved.length, 1, 'the drop is kept in this browser');
+  assert.equal(L.items.filter((q) => q.dropped).length, 1, 'one dropped');
+  assert.ok(d.removeAimed(cam, flat), 'Delete removes the dropped one under the crosshair');
+  assert.equal(L.items.filter((q) => q.dropped).length, 0);
+  mem.set('tw.drops', '[{"model":"cn","lat":1,"lon":1}]');      // left by an earlier version
   const L2 = new Landmarks(null, mesh, list), d2 = new Dropper(L2);
   await L2.ready; await Promise.resolve();
-  assert.equal(L2.items.filter((q) => q.dropped).length, 1, 'and comes back after a reload');
-  assert.ok(d2.removeAimed(cam, flat), 'Delete removes the dropped one under the crosshair');
-  assert.equal(L2.items.filter((q) => q.dropped).length, 0);
-  assert.equal(JSON.parse(mem.get('tw.drops')).length, 0, 'and forgets it');
+  assert.equal(L2.items.filter((q) => q.dropped).length, 0, 'a reload starts with none');
+  assert.ok(!mem.has('tw.drops'), 'and forgets any kept by an earlier version');
   const far = { ...cam, yaw: Math.PI };
   d2.drop(); // not armed: nothing
   assert.equal(L2.items.filter((q) => q.dropped).length, 0, 'a click while not armed drops nothing');
@@ -76,6 +76,6 @@ const flat = () => 1000;
   assert.equal(d2.aimedAt({ ...level, yaw: 0.2 }, flat), null, 'aiming well to the side of the tower: not it');
   assert.equal(d2.removeAimed(level, flat), t, 'aiming at the tower\'s shaft from 2 km removes it');
   assert.match(d2.message || (d2.update(cam, flat), d2.message), /Removed CN Tower/, 'and says so');
-  console.log('ok  arm, next, turn, drop, keep, remove (aiming at the tower, not its foot)');
+  console.log('ok  arm, next, turn, drop, remove (aiming at the tower, not its foot); a reload clears them');
 }
 console.log('dropper ok');

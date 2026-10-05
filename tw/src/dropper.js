@@ -7,16 +7,14 @@
 //   Delete   remove the dropped landmark under the crosshair
 //
 // While armed, the chosen landmark stands where the crosshair meets the ground,
-// so you see what you will get. Dropped landmarks are kept in this browser
-// (localStorage), like the saved places, and come back after a reload.
+// so you see what you will get. Dropped landmarks last until the page is
+// reloaded: they are quick to drop again, and nothing is left to forget about.
 
 import { mercScale, mercYToLat, wrapMercDx, R_MEAN } from './geo.js';
 
-const KEY = 'tw.drops';
 const TURN = 15;            // degrees per press
 const REACH = 100000;       // metres: the farthest ground the crosshair can pick
 
-const store = () => { try { return globalThis.localStorage || null; } catch (e) { return null; } };
 
 // Where a line from the eye along (yaw, pitch) first meets the ground, as it is
 // drawn: the ground drops away with the Earth's curve. groundAt(mercX, mercY)
@@ -60,7 +58,8 @@ export class Dropper {
     this.aim = null;
     this.message = '';
     this.count = 0;
-    landmarks.ready.then(() => this._restore());
+    // Earlier versions kept drops in the browser; forget any left from then.
+    try { globalThis.localStorage && globalThis.localStorage.removeItem('tw.drops'); } catch (e) { /* none */ }
   }
 
   get armed() { return this.choice >= 0; }
@@ -105,7 +104,6 @@ export class Dropper {
     if (!this.armed || !this.aim) return null;
     const p = this.preview;
     const it = this._add({ model: p.model, lat: p.lat, lon: p.lon, yawDeg: this.yawDeg });
-    this._save();
     if (it) this._say(`Dropped ${it.name}`);
     return it;
   }
@@ -116,7 +114,7 @@ export class Dropper {
   // ground point under the crosshair, within the landmark's mask radius.
   removeAimed(cam, groundAt) {
     const best = this.aimedAt(cam, groundAt);
-    if (best) { this.L.remove(best); this._save(); this._say(`Removed ${best.name}`); }
+    if (best) { this.L.remove(best); this._say(`Removed ${best.name}`); }
     else this._say('No dropped landmark under the crosshair');
     return best;
   }
@@ -166,20 +164,5 @@ export class Dropper {
   list() {
     return this.L.items.filter((it) => it.dropped)
       .map((it) => ({ model: it.model, lat: +it.lat.toFixed(6), lon: +it.lon.toFixed(6), yawDeg: it.yawDeg }));
-  }
-
-  _save() {
-    const s = store();
-    if (s) try { s.setItem(KEY, JSON.stringify(this.list())); } catch (e) { /* storage is a bonus */ }
-  }
-
-  _restore() {
-    const s = store();
-    if (!s) return;
-    let saved = [];
-    try { saved = JSON.parse(s.getItem(KEY) || '[]'); } catch (e) { return; }
-    for (const d of Array.isArray(saved) ? saved : []) {
-      if (Number.isFinite(d.lat) && Number.isFinite(d.lon)) this._add(d);
-    }
   }
 }

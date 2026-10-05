@@ -60,7 +60,7 @@ whole deployment.
 | `8` | building colours: next colour set (stone, brick, render, concrete, mixed) |
 | `9` | building colours: warmer light on/off |
 | `P` | pin this place to the saved places list |
-| `M` | drop a landmark where the crosshair meets the ground: press again for the next one, and after the last, off. Click to drop (mouse captured); `,` / `.` turn it; `Delete` removes a dropped one under the crosshair. Dropped landmarks are kept in this browser. |
+| `M` | drop a landmark where the crosshair meets the ground: press again for the next one, and after the last, off. Click to drop (mouse captured); `,` / `.` turn it; `Delete` removes a dropped one under the crosshair. A reload clears them all. |
 | `K` | copy a building-height report to the clipboard |
 | `L` | copy the performance log to the clipboard |
 | `H` | hide the key menu and performance graph |
