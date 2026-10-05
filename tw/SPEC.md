@@ -329,7 +329,8 @@ src/near.js         real roads and buildings around a low camera (zoom 14)
 src/skyline.js      tall buildings out to ~20 km (zoom 13 markers, zoom 14 detail)
 src/tilelayer.js    what near and skyline share: GPU tiles, drawing, reports
 src/handover.js     the only file that knows both near and skyline: who draws what
-src/landmarks.js    hand-built towers (CN, Eiffel, Canton)
+src/landmarks.js    landmarks: placements, and shapes loaded only within sight
+src/landmark_list.js  reads landmarks/index.json and each landmark.json
 
   graphics
 src/gl.js           WebGL helpers, matrices, shared camera uniforms
@@ -356,8 +357,9 @@ src/favourites.js, places.js   saved places
 src/look.js         building colour sets
 src/perf.js         performance graph and strain log
 
+landmarks/          one folder per landmark; index.json is the list (see its README)
 test/run.mjs        runs every test: node test/run.mjs
-tools/              offline tools (landmark modelling)
+tools/              offline tools: bake_landmark.mjs, landmarks/ (modelling method)
 ```
 
 Each frame: `detail.js` turns the camera into a view; each layer updates from

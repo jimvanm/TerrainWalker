@@ -13,7 +13,6 @@ come out wrong.
   download one. A 3D-printing model is fine. Simpler is better.
 - Two published numbers for scale: total height and one more (roof, deck, base).
   Wikipedia is reachable with the web fetch tool, not from the shell.
-- A licence check. Only measurements are used, but credit CC-BY sources in the README.
 
 ## Steps
 1. **Load it and learn the units.** Find the up-axis, the size, the lean. Check
@@ -28,18 +27,19 @@ come out wrong.
    measuring reported a straight 22 m shaft on the CN Tower.
    - Never slice at a height that is exactly a ring height of your own model.
      Add 0.013 or the cut finds nothing.
-5. **Turn slices into a profile** (a small JSON file per tower):
+5. **Turn slices into a profile** (`landmarks/<id>/profile.json`):
    - round towers: outer radius per height;
    - square legs: centre and width per height;
    - twisted or oval sections: fit an ellipse to the slice's outline (area
      moments of the convex hull give axes and angle);
    - anything tilted: store per-point heights (Canton's top ring is a tilted plane).
-6. **Rebuild from solid shapes** in `towers.mjs` with `mesh.mjs`:
+6. **Rebuild from solid shapes** in `landmarks/<id>/build.mjs`, with the helpers in
+   `tools/landmarks/shared.mjs` (`mesh.mjs`, colours, legs, masts):
    straight-sided segments everywhere; curves only where the real thing is curved
    (the CN toroid, the Canton hourglass). Solid, not lattice. Duplicate a ring
    height to get a hard step or colour change.
 7. **Shadow test.** Project both models onto a white screen from two sides, straight
-   rays, black on white (`shadow_cn.py`, `shadow_eiffel.py`, `shadow_canton.py`).
+   rays, black on white (`shadow_*.py` in each landmark's folder).
    Do whole tower and 5x close-ups of every interesting part.
 8. **Read the shadows, fix, repeat.** What the shadow test found:
    - a funnel that was really a square collar (CN);
@@ -53,12 +53,16 @@ come out wrong.
 10. **Bake and wire** (below).
 
 ## Wiring checklist
-- `tools/bake_landmarks.mjs`: add the id to `KEEP`; run `node tools/bake_landmarks.mjs`.
-- `src/landmark_sites.js`: id, name, lat, lon, `yawDeg`, `maskR` (metres). The mask
-  hides ordinary map buildings under the tower. Use about the model's footprint radius.
-- `src/test_landmarks.mjs`: add the height. Run it, plus the other `src/test_*.mjs`.
-- README controls row, version in `src/config.js`.
-- Render check: a bare page with a fake flat ground is enough for shape and size.
+A landmark is one folder, `landmarks/<id>/` (see `landmarks/README.md`):
+- `landmark.json`: name, city, lat, lon, height, `yawDeg`, `fold` (and `oval`),
+  `maskR` (metres; hides ordinary map buildings under it: about the footprint
+  radius).
+- `build.mjs` exporting `build()`, `profile.json`, the measuring scripts, `NOTES.md`.
+- Bake: `node tools/bake_landmark.mjs <id>` writes `model.json`.
+- Add the id to `landmarks/index.json`. That is the only other change.
+- Run `node test/run.mjs`. Every listed landmark is checked the same way,
+  including height against `landmark.json` and `model.json` against `build.mjs`.
+- Render check: fly there (a URL with lat, lon, alt) and look from two sides.
 
 ## When one reference is not enough
 A simplified file can lose a real feature. The Canton parts file is round; the real
@@ -90,12 +94,12 @@ footprint with the outline. The method depends on the footprint's shape:
 | oval | `fold: 2, oval: true` | long axis, from the outline's area (`ovalAxis`) |
 | round | `fold: 0` | nothing: needs an outside cue |
 
-1. Set the shape in `src/landmark_sites.js`. The model's footprint must really
+1. Set the shape in the landmark's `landmark.json`. The model's footprint must really
    have that shape. A round model of an oval tower gives no direction.
 2. Fly to the tower, wait until `near` in the HUD is complete, press `K`.
-3. Read `landmarkOrientation`. `suggestedYawDeg` goes into `yawDeg`. Several
+3. Read `landmarkOrientation`. `suggestedYawDeg` goes into `yawDeg` in
+   `landmark.json`. Several
    outlines agreeing is the check. `note` says why there is no suggestion.
-4. Bump the version and zip as usual.
 
 Results so far:
 - Eiffel Tower: 4 outlines gave 43.7 to 44.4 degrees. `yawDeg` 44.2. Confirmed by eye.
@@ -114,15 +118,15 @@ distance, in the drawing code and in the map-tile worker. Terrain already wraps.
 The towers vanished in 0.11.4 for this reason.
 
 ## Delivering
-- Name the zip by a NEW version. Never reuse one.
-- Zip paths are relative to the project's `tw` folder (`src/...`, `tools/...`),
-  with no wrapper folder. Include everything changed since the version the user has.
-- Say what to restart (stop and start `serve.py`) and to hard-reload (Ctrl+Shift+R).
+- A new landmark is its folder plus one line in `landmarks/index.json`.
 - Give a test URL with lat, lon, alt, yaw, pitch.
+- Do not commit or push unless the user asks.
 
 ## Known gaps
 - Canton Tower: the direction of the top-ring lean is not confirmed (see above).
 - CN Tower: no K report; direction judged by eye only.
 - Colours are chosen by eye, not from data.
 - The shadow scripts and `oval_slices.py` need the reference models, which are not
-  in the repo. The shadow scripts also have sandbox paths written in.
+  in the repo. Some shadow scripts also have sandbox paths written in.
+- Rogers Centre: see `landmarks/rogers/NOTES.md` (field
+  about 20% small; direction not yet checked with a K report).

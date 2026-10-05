@@ -48,7 +48,7 @@ whole deployment.
 | wheel | flight speed |
 | `R` | return to the spawn point |
 | `V` `X` `B` `C` | toggle water, roads, built-up, land cover |
-| `T` | toggle landmarks (CN Tower, Eiffel Tower, Canton Tower) |
+| `T` | toggle landmarks (the list is `landmarks/index.json`) |
 | `F` | fog on/off (off by default) |
 | `6` | building colours: real map colours on/off (where a mapper entered one) |
 | `7` | building colours: by type on/off (homes, shops/offices, industry, schools/hospitals, tall, public, military) |
