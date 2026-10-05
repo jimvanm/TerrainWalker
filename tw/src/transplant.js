@@ -315,7 +315,7 @@ export class Transplant {
   // U with nothing in hand: switch the laid piece the pointer is on between
   // rise and sea level, where it lies. Returns true if there was one.
   toggleAt(aim, groundAt) {
-    const it = this._pieceAt(aim);
+    const it = this._resolve(aim);
     if (!it) return false;
     const mode = it.piece.mode === 'rise' ? 'sea' : 'rise';
     const built = buildPiece(it.piece.heightAt, it.piece.poly, mode);
@@ -334,7 +334,7 @@ export class Transplant {
   // A click with nothing in hand: pick up the laid piece the pointer is on,
   // turned as it lay, so it can be moved again. Returns true if there was one.
   pickUpAt(aim) {
-    const it = this._pieceAt(aim);
+    const it = this._resolve(aim);
     if (!it) return false;
     this.L.remove(it);
     this.piece = it.piece;
@@ -347,6 +347,36 @@ export class Transplant {
     this.preview.hidden = true;
     this._say('Picked it up. Click to lay it down again.');
     return true;
+  }
+
+  // pickUpAt, removeAt and toggleAt take either a laid piece (from pointedAt)
+  // or a ground point, which finds the piece whose outline it is in.
+  _resolve(x) { return x && x.piece ? x : this._pieceAt(x); }
+
+  // The laid piece your line of sight (dir: the pointer's, or where you look)
+  // meets first, sides and all, as it is drawn. Marched along the line up to
+  // where it meets the ground; failing that, the piece whose outline the
+  // ground point is in.
+  pointedAt(cam, groundAt, dir) {
+    dir = dir || forward(cam);
+    const pieces = this.L.items.filter((it) => it.piece && it.base !== null);
+    if (!pieces.length) return null;
+    const ground = aimPoint(cam, groundAt, dir);
+    const k = mercScale(mercYToLat(cam.mercY)), flat = Math.hypot(dir.e, dir.n);
+    const stop = ground ? ground.d / Math.max(flat, 1e-6) : 100000;
+    const curv = 1 / (2 * R_MEAN);
+    for (let t = 1; t < stop; t = t * 1.02 + 2) {
+      const mx = cam.mercX + dir.e * t / k, my = cam.mercY + dir.n * t / k;
+      const d = t * flat, y = cam.alt + dir.u * t + curv * d * d;   // the line, in the drawn world's heights
+      for (const it of pieces) {
+        const kk = mercScale(mercYToLat(it.my));
+        const [pe, pn] = turnEN(wrapMercDx(mx - it.mx) * kk, (my - it.my) * kk, -it.yawDeg);
+        if (!inside(it.piece.poly, pe, pn)) continue;
+        const h = it.piece.heightAt(pe, pn);
+        if (h !== null && y <= it.base + Math.max(0, h - it.piece.base)) return it;
+      }
+    }
+    return this._pieceAt(ground);
   }
 
   _pieceAt(aim) {
@@ -363,7 +393,7 @@ export class Transplant {
 
   // Delete: the laid piece the pointer is on. Returns it, or null.
   removeAt(aim) {
-    const it = this._pieceAt(aim);
+    const it = this._resolve(aim);
     if (it) { this.L.remove(it); this._say('Removed the piece.'); }
     return it;
   }

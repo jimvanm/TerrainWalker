@@ -160,12 +160,12 @@ const actions = {
   outlineClose: () => transplant.close(),
   pieceHeight: () => {
     if (transplant.state === 'carrying') transplant.toggleHeight();
-    else if (!transplant.active) transplant.toggleAt(aimPoint(cam, groundH, aimDir || undefined), groundH);
+    else if (!transplant.active) transplant.toggleAt(transplant.pointedAt(cam, groundH, aimDir), groundH);
   },
   toolLeft: () => (transplant.active ? transplant.turn(-1) : dropper.turn(-1)),
   toolRight: () => (transplant.active ? transplant.turn(1) : dropper.turn(1)),
   toolRemove: () => {
-    if (!transplant.removeAt(aimPoint(cam, groundH, aimDir || undefined))) dropper.removeAimed(cam, groundH);
+    if (!transplant.removeAt(transplant.pointedAt(cam, groundH, aimDir))) dropper.removeAimed(cam, groundH);
   },
   toolCancel: () => { transplant.cancel(); dropper.off(); },
   strainLog: () => perf.copyLog(),
@@ -199,7 +199,7 @@ canvas.addEventListener('click', () => {
   if (transplant.active) transplant.click(groundH);
   else if (dropper.armed) dropper.drop();
   // Nothing in hand: pick up the laid piece or dropped landmark pointed at.
-  else if (!transplant.pickUpAt(aimPoint(cam, groundH, aimDir || undefined))) dropper.pickUp(cam, groundH);
+  else if (!transplant.pickUpAt(transplant.pointedAt(cam, groundH, aimDir))) dropper.pickUp(cam, groundH);
 });
 const overlayEl = document.getElementById('overlay');
 const dropEl = document.getElementById('drop');
@@ -268,7 +268,7 @@ function setCursor() {
     if (transplant.state === 'carrying' || dropper.armed) c = 'grabbing';
     else if (transplant.active) c = 'crosshair';
     else if (controls.pointer) {
-      const over = transplant._pieceAt(aimPoint(cam, groundH, aimDir || undefined)) || dropper.aimedAt(cam, groundH, aimDir);
+      const over = transplant.pointedAt(cam, groundH, aimDir) || dropper.aimedAt(cam, groundH, aimDir);
       c = over ? 'grab' : 'crosshair';
     } else c = 'crosshair';
   }

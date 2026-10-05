@@ -131,6 +131,13 @@ const { Landmarks } = await import('../src/landmarks.js');
   tp.toggleHeight(); tp.update(cam, ground, null);
   tp.click(ground);
   const again = L.items.find((it) => it.piece);
+  // Pointed at from the side, level, 20 km away: the line meets the
+  // mountain's flank, while the ground behind it is far outside its outline.
+  const kk = geo.mercScale(geo.mercYToLat(again.my));
+  const side = { mercX: again.mx, mercY: again.my - 20000 / kk, alt: 75 + 1500, yaw: 0, pitch: 0 };
+  assert.equal(tp.pointedAt(side, ground, null), again, 'pointing at its side finds it');
+  assert.equal(tp.pointedAt({ ...side, alt: 75 + 3500 }, ground, null), null, 'pointing over its top does not');
+  assert.equal(tp.pointedAt({ ...side, yaw: 0.5 }, ground, null), null, 'nor pointing off to the side of it');
   assert.ok(again && tp.removeAt(tp.aim) === again && !L.items.includes(again), 'Delete removes the laid piece pointed at');
   tp.toggle();
   assert.ok(tp.state === 'off' && !L.items.some((it) => it.preview), 'N again puts it away');
