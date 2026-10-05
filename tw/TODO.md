@@ -195,6 +195,17 @@ holes wherever tiles have not loaded.
 
 ## Features discussed, not started
 
+- [ ] **Place tiles break the premise.** The app is meant to take its data
+      from public sources, live, streaming as you go. A place's tiles are
+      instead made ahead of time on one computer (`tools/places/build_place.py`)
+      and served from there, so only a computer that has run the builder sees
+      them. Not a bug; something to think through. One way back to the
+      premise: both survey sources publish their files in a form a browser can
+      read a piece at a time (cloud-optimised GeoTIFF), so the app could read
+      the survey data directly while you fly, if those servers allow it from a
+      web page (CORS) and it is fast enough. Otherwise: host the built tiles
+      publicly, or keep them in git (Niagara is about 15 MB).
+
 - [ ] **Dropping landmarks, next steps.** `M` drops one at the crosshair
       (src/dropper.js). Still to do: a search to pick from many landmarks
       rather than pressing `M` through them all, and masking: a dropped
