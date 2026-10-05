@@ -81,6 +81,14 @@ always with everything loaded.
 - [ ] **Version number.** The status bar still says v0.12.10 (`BUILD` in
       `src/config.js`); it has not changed for many changes. Bump it with each
       change, or remove it.
+- [ ] **No buildings from airliner height.** At 9.4 km over Toronto,
+      downtown 10 km away shows no buildings at all, only the landmarks.
+      Cause: the near field and the skyline both switch off above
+      `NF_MAX_AGL` (4,000 m above ground, `src/config.js`; the skyline follows
+      `view.nearOn` in `src/skyline.js`). Above that, buildings are only the
+      grey built-up paint. Real cities stay visible from cruise height, so the
+      tall ones at least should: perhaps keep the skyline (tall buildings
+      only) on to a much greater height, or make its reach grow with height.
 - [ ] **A spike in Lake Erie.** A thin white column several kilometres tall
       stands in the lake near 42.88, -79.24 (off Port Colborne), seen from
       40 km up. Probably a bad value in the usual elevation tiles that the
