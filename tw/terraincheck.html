@@ -34,13 +34,14 @@
 facts. The terrain service mixes sources of very different quality (10 m in the US, 5 m in the Arctic,
 30 m radar elsewhere); each place says which it uses. Spacings in green are no finer than the source, so
 they carry real measurements; past that, finer levels are only enlarged copies. Pictures are the same area
-at each level, lit from the north-west. Downloads about 25 MB the first time, from the same free service
+at each level, lit from the north-west. Heights are as the app uses them, after
+"despike" removes stray points; "low before despike" shows what it removed. Downloads about 25 MB the first time, from the same free service
 the app uses.</p>
 <button id="run">Run all</button> <button id="copy">Copy report</button><span id="status"></span>
 <div id="out"></div>
 
 <script type="module">
-import { TILE_URL } from './src/config.js';
+import { TILE_URL, LEVELS } from './src/config.js';
 import { despike, PX } from './src/heightgrid.js';
 
 // box: kilometres across. facts: published numbers to judge the data against.
@@ -80,7 +81,7 @@ const SITES = [
     facts: 'Included for comparison: a place where the data is known to be good.' },
 ];
 const ZOOMS = [10, 11, 12, 13, 14, 15];
-const APP_FINEST = 12;          // the app's finest terrain level today
+const APP_FINEST = LEVELS[0].z;   // the app's finest terrain level, close up
 const EARTH = 40075016.686;
 
 const tileX = (lon, z) => (lon + 180) / 360 * 2 ** z;
@@ -110,7 +111,7 @@ async function mosaic(s, z) {
   const gy0 = tileY(s.lat + halfLat, z) * PX, gy1 = tileY(s.lat - halfLat, z) * PX;
   const tx0 = Math.floor(gx0 / PX), tx1 = Math.floor(gx1 / PX), ty0 = Math.floor(gy0 / PX), ty1 = Math.floor(gy1 / PX);
   const W = (tx1 - tx0 + 1) * PX, H = (ty1 - ty0 + 1) * PX;
-  const raw = new Float32Array(W * H);
+  const raw = new Float32Array(W * H), fixed = new Float32Array(W * H);   // as served; as the app uses it
   let spikes = 0;
   const jobs = [];
   for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) jobs.push([tx, ty]);
@@ -118,14 +119,18 @@ async function mosaic(s, z) {
     const h = await tile(z, tx, ty);
     const copy = h.slice();
     spikes += despike(copy, EARTH * Math.cos(s.lat * Math.PI / 180) / (2 ** z * PX));   // what the app would change
-    for (let j = 0; j < PX; j++) raw.set(h.subarray(j * PX, j * PX + PX), ((ty - ty0) * PX + j) * W + (tx - tx0) * PX);
+    for (let j = 0; j < PX; j++) {
+      const o = ((ty - ty0) * PX + j) * W + (tx - tx0) * PX;
+      raw.set(h.subarray(j * PX, j * PX + PX), o);
+      fixed.set(copy.subarray(j * PX, j * PX + PX), o);
+    }
   }));
-  const at = (gx, gy) => {            // bilinear, global pixel coordinates (pixel centres at i + 0.5)
+  const sampler = (A) => (gx, gy) => {   // bilinear, global pixel coordinates (pixel centres at i + 0.5)
     const x = Math.max(0, Math.min(W - 1.001, gx - tx0 * PX - 0.5)), y = Math.max(0, Math.min(H - 1.001, gy - ty0 * PX - 0.5));
     const x0 = x | 0, y0 = y | 0, fx = x - x0, fy = y - y0, i = y0 * W + x0;
-    return (raw[i] * (1 - fx) + raw[i + 1] * fx) * (1 - fy) + (raw[i + W] * (1 - fx) + raw[i + W + 1] * fx) * fy;
+    return (A[i] * (1 - fx) + A[i + 1] * fx) * (1 - fy) + (A[i + W] * (1 - fx) + A[i + W + 1] * fx) * fy;
   };
-  return { z, at, box: [gx0, gy0, gx1, gy1], tiles: jobs.length, spikes,
+  return { z, at: sampler(fixed), atRaw: sampler(raw), box: [gx0, gy0, gx1, gy1], tiles: jobs.length, spikes,
            px: EARTH * Math.cos(s.lat * Math.PI / 180) / (2 ** z * PX) };
 }
 
@@ -134,11 +139,12 @@ function measure(m) {
   const w = Math.floor(gx1 - gx0), h = Math.floor(gy1 - gy0);
   const G = new Float32Array(w * h);
   for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) G[j * w + i] = m.at(gx0 + i + 0.5, gy0 + j + 0.5);
-  let lo = Infinity, hi = -Infinity, maxSlope = 0, steep = 0, drop100 = 0;
+  let lo = Infinity, hi = -Infinity, rawLo = Infinity, maxSlope = 0, steep = 0, drop100 = 0;
   const k = Math.max(1, Math.round(100 / m.px));
   for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
     const v = G[j * w + i];
     lo = Math.min(lo, v); hi = Math.max(hi, v);
+    rawLo = Math.min(rawLo, m.atRaw(gx0 + i + 0.5, gy0 + j + 0.5));
     if (i + 1 < w && j + 1 < h) {
       const sx = (G[j * w + i + 1] - v) / m.px, sy = (G[(j + 1) * w + i] - v) / m.px;
       const deg = Math.atan(Math.hypot(sx, sy)) * 180 / Math.PI;
@@ -148,7 +154,7 @@ function measure(m) {
     if (i + k < w) drop100 = Math.max(drop100, Math.abs(G[j * w + i + k] - v));
     if (j + k < h) drop100 = Math.max(drop100, Math.abs(G[(j + k) * w + i] - v));
   }
-  return { z: m.z, pxM: +m.px.toFixed(1), tiles: m.tiles, low: Math.round(lo), high: Math.round(hi),
+  return { z: m.z, pxM: +m.px.toFixed(1), tiles: m.tiles, low: Math.round(lo), rawLow: Math.round(rawLo), high: Math.round(hi),
            relief: Math.round(hi - lo), maxSlopeDeg: +maxSlope.toFixed(1),
            steepPct: +(100 * steep / (w * h)).toFixed(2), biggestDropOver100m: Math.round(drop100),
            despikeFixes: m.spikes, G, w, h };
@@ -199,15 +205,15 @@ async function runSite(s) {
     const app = rows.find((r) => r.z === APP_FINEST);
     const match = rows.find((r) => r.pxM <= s.srcM) || rows[rows.length - 1];
     table.innerHTML = '<tr><th>zoom</th><th>spacing</th><th>low</th><th>high</th><th>relief</th><th>steepest</th>' +
-      '<th>&gt;60°</th><th>biggest drop over 100 m</th><th>despike</th></tr>' +
-      rows.map((r) => `<tr><td>${r.z}${r.z === APP_FINEST ? ' (app now)' : ''}${r === match ? ' (as fine as the source)' : ''}</td>` +
+      '<th>&gt;60°</th><th>biggest drop over 100 m</th><th>despike</th><th>low before despike</th></tr>' +
+      rows.map((r) => `<tr><td>${r.z}${r.z === APP_FINEST ? ' (app, close up)' : r.z === 12 ? ' (app, higher up)' : ''}${r === match ? ' (as fine as the source)' : ''}</td>` +
         `<td class="${r.z <= match.z ? 'new' : 'old'}">${r.pxM} m</td><td>${r.low}</td><td>${r.high}</td>` +
         `<td>${r.relief} m</td><td>${r.maxSlopeDeg}°</td><td>${r.steepPct}%</td><td>${r.biggestDropOver100m} m</td>` +
-        `<td>${r.despikeFixes}</td></tr>`).join('');
+        `<td>${r.despikeFixes}</td><td class="${r.rawLow < r.low - 20 ? 'old' : ''}">${r.rawLow}</td></tr>`).join('');
     verdictEl.textContent = `Source: ${s.src} ` + (match.z > APP_FINEST
-      ? `The app stops at zoom ${APP_FINEST} (${app.pxM} m); zoom ${match.z} (${match.pxM} m) is the first level as fine as the source. ` +
-        `Steepest slope ${app.maxSlopeDeg}° now, ${match.maxSlopeDeg}° there.`
-      : `The app's zoom ${APP_FINEST} (${app.pxM} m) is already as fine as the source; finer levels are only enlarged copies.`);
+      ? `The app's finest level, zoom ${APP_FINEST} (${app.pxM} m), is coarser than the source; zoom ${match.z} (${match.pxM} m) would match it. ` +
+        `Steepest slope ${app.maxSlopeDeg}° in the app, ${match.maxSlopeDeg}° there.`
+      : `Close up the app uses zoom ${APP_FINEST} (${app.pxM} m), as fine as the source or finer: steepest slope ${app.maxSlopeDeg}°.`);
     box.classList.add('done');
     results.push({ id: s.id, name: s.name, facts: s.facts, source: s.src, sourceM: s.srcM, firstLevelAsFine: match.z,
       levels: rows.map(({ G, w, h, ...r }) => r) });

@@ -49,6 +49,12 @@ always with everything loaded.
   interpolate indices into classes that do not exist.
 - **Flight speed proportional to altitude, no realism bend.** Real aircraft
   cruise is a boring experience however impressive the number.
+- **Terrain: two close-up levels (zoom 13, 14), not hand-built places.** The
+  terrain service mixes sources (10 m US, 5 m Arctic, 30 m radar elsewhere);
+  `terraincheck.html` showed finer levels really sharpen Niagara, the Grand
+  Canyon, Norway and New Zealand, and change nothing for Thor Peak or the
+  30 m-only places. Hand-built ground patches (a modelled Niagara) do not scale.
+  Flat water with hard edges was considered and not chosen.
 - **Labels must be toggleable**, never always-on.
 - **Overlay direction is VFR sectional symbology**, not place labels. Detail
   level and altitude behaviour both undecided; explicitly a thing to play with
@@ -183,6 +189,14 @@ holes wherever tiles have not loaded.
 
 ## Features discussed, not started
 
+- [ ] **Place a landmark at the reticle.** A key arms it, a click drops the
+      chosen shape where the reticle meets the ground, and it is drawn from
+      there like any landmark: the CN Tower beside Vesuvius, say. The app is
+      ready for it: `Landmarks.add()` stands a shape anywhere, and one shape
+      can stand in several places. Needs: picking the ground point under the
+      reticle, a way to choose the shape, and whether placements are kept
+      (saved places style) or vanish on reload.
+
 - [ ] **Artificial horizon.** The heading indicator shipped; the pitch half did
       not. Belongs with the sphere, where "level" becomes a computed quantity
       rather than `pitch == 0`. The real disorientation while testing was
@@ -192,8 +206,6 @@ holes wherever tiles have not loaded.
       which maps onto the LOD levels almost directly.
 - [ ] **Lake versus river colouring.** The `class` tag is already decoded and
       currently unused.
-- [ ] **Extruded OSM building footprints.** The `building` layer starts at zoom
-      13 and the finest level here is zoom 12, so this needs a finer level first.
 - [ ] **Procedural, position-seeded near-field detail inside 300 m.** Source data
       is sampled every 30 m and your eye is 1.7 m up, so everything within
       walking distance is smooth interpolation. Must be deterministic from

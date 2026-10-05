@@ -97,16 +97,21 @@ A few to start with:
 **Data.** One endpoint, no API key:
 `s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png`. Elevation is
 packed into RGB with a 32,768 m offset. Underneath it is NASADEM and SRTM at
-about 30 m worldwide, which is why the finest level is zoom 12: past that the
-data is only interpolation.
+about 30 m worldwide. Some places have much better data: about 10 m in the US
+and Norway, 8 m in New Zealand, 2 m in most of the UK. Zoom 12 matches the 30 m
+and is used everywhere; two close-up levels, zoom 13 and 14, are added near you
+while you are low enough to see roads and buildings. Where the data is good
+they show cliffs and gorges zoom 12 smooths away (Niagara, the Grand Canyon);
+elsewhere they are enlarged copies. `terraincheck.html` shows which is which.
 
-**Clipmap.** Nine levels, zoom 12 down to zoom 4. Each level is a 4x4 block of
+**Clipmap.** Eleven levels, zoom 14 down to zoom 4. Each level is a 4x4 block of
 tiles whose origin is snapped to an **even** tile coordinate. That one
 constraint makes the nesting exact: a 4x4 block at zoom z+1 covers precisely 2x2
 whole tiles at zoom z, aligned to the coarse grid, so the coarse level drops
-exactly those and there is no gap and no overlap anywhere. 112 tiles and about
-839k triangles when fully loaded, though levels that fog or the horizon would
-hide are never requested, so ground level costs far less.
+exactly those and there is no gap and no overlap anywhere. Low down, 136 tiles
+and about 1.6 million triangles when fully loaded; higher up, without the two
+close-up levels, 112 tiles and about 839k. Levels that fog or the horizon would
+hide are never requested.
 
 **Camera-relative rendering.** Vertex positions are stored in tile-local
 mercator metres and never change. The camera offset is folded into a per-tile
@@ -188,9 +193,10 @@ remains is drawing code, not architecture.
 
 ## Performance
 
-Up to 839k triangles across about 220 draw calls of static buffers (every level
-is drawn in both depth passes), which any GPU from the last decade handles
-without noticing. Bandwidth is roughly 107 KB per
+Up to about 1.6 million triangles low down (839k higher up) across about 270
+draw calls of static buffers, every level drawn in both depth passes. The close-
+up levels roughly doubled the low-down count; if a GPU struggles, that is the
+first place to look. Bandwidth is roughly 107 KB per
 kilometre travelled: about 0.6 KB/s walking, about 56 KB/s at full boost. The
 initial load is around 6 MB, requested coarsest-first so the whole scene appears
 immediately and then sharpens.
