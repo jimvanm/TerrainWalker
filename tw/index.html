@@ -12,7 +12,6 @@
   #c { display: block; width: 100vw; height: 100vh; cursor: pointer; }
   /* :has() means the cursor can only hide while a lock is actually held. */
   body.locked #c { cursor: none; }
-  body.tools #c { cursor: crosshair; }
   #overlay { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; }
   #overlay polyline, #overlay line { fill: none; stroke: #ffd479; stroke-width: 2; }
   #overlay line.next { stroke-dasharray: 6 5; opacity: .8; }

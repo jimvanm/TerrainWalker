@@ -173,7 +173,7 @@ export class Dropper {
     const curv = 1 / (2 * R_MEAN);
     let best = null, bestT = Infinity;
     for (const it of this.L.items) {
-      if (!it.dropped || it.base === null) continue;
+      if (!it.dropped || it.piece || it.base === null) continue;   // pieces of ground: transplant.js
       const dx = wrapMercDx(it.mx - cam.mercX) * k, dn = (it.my - cam.mercY) * k;
       const hh = e * e + n * n;
       if (hh < 1e-6) continue;                       // looking straight down: the ground test below
@@ -191,7 +191,7 @@ export class Dropper {
     if (!aim) return null;
     let bestD = Infinity;
     for (const it of this.L.items) {
-      if (!it.dropped) continue;
+      if (!it.dropped || it.piece) continue;
       const d = Math.hypot(wrapMercDx(it.mx - aim.mx), it.my - aim.my) * mercScale(mercYToLat(aim.my));
       if (d <= Math.max(60, it.maskR || 0) && d < bestD) { best = it; bestD = d; }
     }

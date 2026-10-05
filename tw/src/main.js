@@ -255,6 +255,24 @@ const startTime = last;
 let hashTime = 0;
 let prev = { nearR: detail.nearR, minLevel: detail.minLevel, drawLevels: detail.drawLevels };
 
+// The pointer in Tools mode says what a click will do: a closed hand while
+// holding something, an open hand over something that can be picked up, a
+// crosshair otherwise (and while drawing an outline). Navigation keeps the
+// page's own pointer (a click there captures the mouse).
+let lastCursor = '';
+function setCursor() {
+  let c = '';
+  if (settings.mode === 'tools') {
+    if (transplant.state === 'carrying' || dropper.armed) c = 'grabbing';
+    else if (transplant.active) c = 'crosshair';
+    else if (controls.pointer) {
+      const over = transplant._pieceAt(aimPoint(cam, groundH, aimDir || undefined)) || dropper.aimedAt(cam, groundH, aimDir);
+      c = over ? 'grab' : 'crosshair';
+    } else c = 'crosshair';
+  }
+  if (c !== lastCursor) { canvas.style.cursor = c; lastCursor = c; }
+}
+
 // The outline being drawn (N), over the view: corners joined, and a dashed
 // line on to where the pointer is.
 let lastOutline = '';
@@ -308,6 +326,7 @@ function frame(now) {
   dropper.update(cam, groundH, aimDir);
   transplant.update(cam, groundH, aimDir);
   drawOutline(transplant.outline(), vw, vh);
+  setCursor();
   landmarks.update(v, (x, y) => terrain.groundAt(x, y));
   const msg = transplant.message || dropper.message;
   if (dropEl.textContent !== msg) { dropEl.textContent = msg; dropEl.classList.toggle('hide', !msg); }
