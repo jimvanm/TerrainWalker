@@ -90,6 +90,44 @@ assert.equal(plain.kept, 2, 'both buildings drawn without a mask');
 assert.equal(masked.kept, 1, 'the building under the landmark is left out, the other stays');
 assert.equal(masked.masked, 1);
 
+// ---- footprint masks: a stadium's separate rim pieces are all caught ----
+{
+  const { touchesPolygon, masks } = await import('../src/buildings.js');
+  const box = (x, y, w, h) => [x, y, x + w, y, x + w, y + h, x, y + h];
+  assert.ok(touchesPolygon(box(0, 0, 10, 10), box(5, 5, 10, 10)), 'overlapping boxes touch');
+  assert.ok(touchesPolygon(box(0, 0, 100, 100), box(40, 40, 5, 5)), 'one inside the other touches');
+  assert.ok(touchesPolygon(box(0, 0, 10, 100), box(-5, 40, 20, 5)), 'crossing without any corner inside touches');
+  assert.ok(!touchesPolygon(box(0, 0, 10, 10), box(20, 0, 10, 10)), 'apart: no touch');
+  // A 230 m footprint, a 95 m circle, and a rim piece 105 m out: only the footprint catches it.
+  const site = { id: 's', x: 0, y: 0, r: 95, poly: new Float64Array(box(-115, -115, 230, 230)) };
+  const rim = box(100, -20, 10, 40);
+  assert.ok(!masks([{ ...site, poly: null }], rim), 'the circle alone misses a rim piece');
+  assert.ok(masks([site], rim), 'the footprint catches it');
+  // Masked buildings are built, flagged, and placed after every tier.
+  const st = buildBuildings(layer, g, new MeshBuilder(), undefined, { mask });
+  const mb = new MeshBuilder(); const st2 = buildBuildings(layer, g, mb, undefined, { mask });
+  const out = mb.finish(), infos = new Uint32Array(out.info.buffer);
+  const flagged = [...infos].filter((v) => ((v >>> 24) & 8) !== 0).length;
+  assert.ok(flagged > 0 && st2.kept === 1, 'the masked building is built but flagged, and not counted as kept');
+  console.log('ok  footprint masks catch rim pieces a circle misses; masked buildings are flagged, not dropped');
+}
+// ---- the mask footprint turns exactly like the drawn shape ----
+{
+  const { footprintOf, turnFootprint } = await import('../src/landmark_list.js');
+  const m = read('rogers/model.json');
+  for (const yaw of [0, -15.6, 37]) {
+    const turned = new Float32Array(buildVertices(m, yaw).vertices);
+    const pos = []; for (let i = 0; i < turned.length; i += 4) pos.push(turned[i], turned[i + 1], turned[i + 2]);
+    const want = footprintOf({ pos });                              // footprint of the shape as drawn
+    const got = turnFootprint(footprintOf(m), yaw);                 // footprint turned as the mask does
+    const area = (P) => Math.abs(P.reduce((a, p, i) => { const q = P[(i + 1) % P.length]; return a + p[0] * q[1] - q[0] * p[1]; }, 0) / 2);
+    const cx = (P) => P.reduce((a, p) => a + p[0], 0) / P.length, cy = (P) => P.reduce((a, p) => a + p[1], 0) / P.length;
+    const far = Math.max(...got.map(([e, n]) => Math.min(...want.map(([e2, n2]) => Math.hypot(e - e2, n - n2)))));
+    assert.ok(Math.abs(area(got) - area(want)) < 0.01 * area(want) && far < 1, `yaw ${yaw}: mask footprint matches the drawn shape (off by ${far.toFixed(2)} m)`);
+  }
+  console.log('ok  the mask footprint turns exactly as the shape is drawn');
+}
+
 // ---- the camera can run past longitude 180; towers must still be found ----
 const { wrapMercDx, EQUATOR } = await import('../src/geo.js');
 assert.ok(Math.abs(wrapMercDx(EQUATOR + 5) - 5) < 1e-6, 'one lap round the world is no distance');

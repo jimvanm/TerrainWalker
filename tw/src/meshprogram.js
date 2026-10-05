@@ -6,6 +6,7 @@
 
 import * as G from './gl.js';
 import { MESH_VS, MESH_FS } from './shaders.js';
+import { settings } from './settings.js';
 import { lookBits, setUniform, TYPE_UNIFORM, ROOF_UNIFORM, AUTO_WALL_UNIFORM, AUTO_ROOF_UNIFORM } from './look.js';
 
 export class MeshProgram {
@@ -30,7 +31,7 @@ export class MeshProgram {
     gl.uniform3fv(u.uRoof, ROOF_UNIFORM);
     gl.uniform3fv(u.uAutoWall, AUTO_WALL_UNIFORM);
     gl.uniform3fv(u.uAutoRoof, AUTO_ROOF_UNIFORM);
-    gl.uniform1i(u.uLook, lookBits());
+    gl.uniform1i(u.uLook, lookBits() | (settings.showMasked ? 16 : 0));
     // Meshes without a facts buffer read this constant: all zero = use aCol.
     if (this.aInfo >= 0) gl.vertexAttrib4f(this.aInfo, 0, 0, 0, 0);
   }

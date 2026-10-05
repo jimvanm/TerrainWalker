@@ -9,6 +9,8 @@
 // A landmark whose files are missing or broken is left out with a warning; it
 // never stops the app.
 
+import { hull } from './orient.js';
+
 const ROOT = new URL('../landmarks/', import.meta.url);
 
 let listPromise = null;
@@ -54,4 +56,29 @@ export function check(id, L) {
 // A landmark's shape: { tris, pos, col, idx }. Metres, y up, x east, z south.
 export function loadModel(id) {
   return readJson(new URL(id + '/model.json', ROOT));
+}
+
+// A shape's ground outline: the convex hull of its points within 4 m of the
+// base, as [east, north] metres before any turn. Used to hide the map's own
+// building under a landmark, and to read its facing from the map (orient.js).
+export function footprintOf(model) {
+  const foot = [], pos = model.pos;
+  for (let i = 0; i < pos.length; i += 3) if (pos[i + 1] < 4) foot.push([pos[i], -pos[i + 2]]);
+  return hull(foot);
+}
+
+const footprints = new Map();
+export function loadFootprint(id) {
+  if (!footprints.has(id)) {
+    const p = loadModel(id).then(footprintOf);
+    p.catch(() => footprints.delete(id));
+    footprints.set(id, p);
+  }
+  return footprints.get(id);
+}
+
+// Turn [east, north] points clockwise by yawDeg, as the shape is turned when drawn.
+export function turnFootprint(points, yawDeg) {
+  const c = Math.cos(yawDeg * Math.PI / 180), s = Math.sin(yawDeg * Math.PI / 180);
+  return points.map(([e, n]) => [e * c + n * s, -e * s + n * c]);
 }

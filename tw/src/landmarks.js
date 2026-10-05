@@ -11,8 +11,8 @@
 // The Earth's curve hides a landmark beyond the horizon, which is also why that
 // is the right distance to load it.
 import { lonToMercX, latToMercY, mercScale, wrapMercDx, R_MEAN } from './geo.js';
-import { loadList, loadModel } from './landmark_list.js';
-import { hull, polygonArea, edgesOf, dominantBearing, suggestYaw, ovalAxis, wrapTo } from './orient.js';
+import { loadList, loadModel, footprintOf } from './landmark_list.js';
+import { polygonArea, edgesOf, dominantBearing, suggestYaw, ovalAxis, wrapTo } from './orient.js';
 
 const SINK = 6;          // metres below the ground sample, so a sloping site never shows a gap
 const UNLOAD = 1.5;      // free a shape once every placement using it is this many times out of range
@@ -100,12 +100,7 @@ export class Landmarks {
     const { vertices, indices } = buildVertices(m.model, it.yawDeg);
     it.buf = this.mesh.buffers(vertices, indices, null);
     it.vao = it.buf.vao; it.count = indices.length;
-    if (!m.footprint.length) {
-      // Ground footprint in [east, north] metres, before any yaw, for orient.js.
-      const foot = [], pos = m.model.pos;
-      for (let i = 0; i < pos.length; i += 3) if (pos[i + 1] < 4) foot.push([pos[i], -pos[i + 2]]);
-      m.footprint = hull(foot);
-    }
+    if (!m.footprint.length) m.footprint = footprintOf(m.model);   // [east, north] metres, before any turn
     return true;
   }
 

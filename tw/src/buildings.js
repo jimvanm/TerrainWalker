@@ -13,7 +13,7 @@
 
 import { POLYGON } from './mvt.js';
 import { nodeHeightAt, GRID } from './heightgrid.js';
-import { rgba, info, INFO_BUILDING, INFO_REAL, INFO_ROOF } from './meshbuilder.js';
+import { rgba, info, INFO_BUILDING, INFO_REAL, INFO_ROOF, INFO_MASKED } from './meshbuilder.js';
 import { LANDUSE_TYPE, TALL, SIZE_LIMITS } from './look.js';
 import { triangulate, signedArea } from './earclip.js';
 
@@ -139,6 +139,35 @@ export function touchesCircle(ring, c) {
   return inside;
 }
 
+// Do two outlines touch: one inside the other, or any edges crossing? Both are
+// flat [x, y, x, y, ...] rings in the same units.
+export function touchesPolygon(a, b) {
+  const inside = (r, x, y) => {
+    let c = false;
+    for (let i = 0, n = r.length / 2, j = n - 1; i < n; j = i++) {
+      const xi = r[2 * i], yi = r[2 * i + 1], xj = r[2 * j], yj = r[2 * j + 1];
+      if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c;
+    }
+    return c;
+  };
+  if (inside(b, a[0], a[1]) || inside(a, b[0], b[1])) return true;
+  const cross = (ax, ay, bx, by, cx, cy) => (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+  const na = a.length / 2, nb = b.length / 2;
+  for (let i = 0; i < na; i++) {
+    const p1x = a[2 * i], p1y = a[2 * i + 1], p2x = a[(2 * i + 2) % a.length], p2y = a[(2 * i + 3) % a.length];
+    for (let j = 0; j < nb; j++) {
+      const q1x = b[2 * j], q1y = b[2 * j + 1], q2x = b[(2 * j + 2) % b.length], q2y = b[(2 * j + 3) % b.length];
+      const d1 = cross(q1x, q1y, q2x, q2y, p1x, p1y), d2 = cross(q1x, q1y, q2x, q2y, p2x, p2y);
+      const d3 = cross(p1x, p1y, p2x, p2y, q1x, q1y), d4 = cross(p1x, p1y, p2x, p2y, q2x, q2y);
+      if (((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0))) return true;
+    }
+  }
+  return false;
+}
+
+// A landmark's mask: its footprint outline when known, and its circle.
+export const masks = (mask, ring) => mask.find((c) => touchesCircle(ring, c) || (c.poly && touchesPolygon(ring, c.poly)));
+
 // Keep the outline of a masked building so orient.js can read its heading. Points
 // become true metres east and north of the landmark. Edges that run along the tile
 // edge are cut by the tile, not by the building, so they are left out.
@@ -203,11 +232,12 @@ export function buildBuildings(layer, g, mb, maxTris = BUILDING_TRIS, opt = {}) 
         rings.push(m);
       }
       if (!rings.length) continue;
-      const hit = opt.mask && opt.mask.find((c) => touchesCircle(rings[0], c));
+      // Under a landmark: recorded for orient.js, and built but flagged, so the
+      // shader hides it unless the mask is switched off (key 4) for checking.
+      const hit = opt.mask && masks(opt.mask, rings[0]);
       if (hit) {
         stats.masked = (stats.masked || 0) + 1;
         recordOutline(stats, hit, rings[0], g);
-        continue;
       }
       let area = Math.abs(signedArea(rings[0]));
       for (let k = 1; k < rings.length; k++) area -= Math.abs(signedArea(rings[k]));
@@ -228,7 +258,8 @@ export function buildBuildings(layer, g, mb, maxTris = BUILDING_TRIS, opt = {}) 
         for (let i = 0; i < r0.length; i += 2) { sx += r0[i]; sy += r0[i + 1]; }
         type = typeAt(areas, sx / (r0.length / 2), sy / (r0.length / 2), E);
       }
-      cand.push({ rings, height, minh, area, hash, tier, sunk, colour, type, tris: 3 * nv, rank: (height + 3) * Math.sqrt(Math.max(area, 1)) });
+      cand.push({ rings, height, minh, area, hash, tier: hit ? 0 : tier, sunk, colour, type, masked: !!hit,
+        tris: 3 * nv, rank: (height + 3) * Math.sqrt(Math.max(area, 1)) });
     }
   }
 
@@ -240,6 +271,7 @@ export function buildBuildings(layer, g, mb, maxTris = BUILDING_TRIS, opt = {}) 
     if (used + b.tris > maxTris) { stats.dropped++; continue; }
     used += b.tris;
     emit(b, mb, hAt);
+    if (b.masked) { stats.ends[2] = mb.idx.length; continue; }   // hidden normally; last, after every tier
     stats.kept++;
     stats.types[b.type]++;
     stats.sizes[sizeGroup(b)]++;
@@ -270,7 +302,7 @@ function emit(b, mb, hAt) {
   const base = PALETTE[b.hash % PALETTE.length];
   const c0 = b.colour ? rgba(b.colour[0], b.colour[1], b.colour[2]) : null;
   const wallTop = c0 || shade(base, 1), wallBot = c0 || shade(base, 0.78), roof = c0 || shade(base, 0.7);
-  const fl = INFO_BUILDING | (b.colour ? INFO_REAL : 0), num = b.hash & 255;
+  const fl = INFO_BUILDING | (b.colour ? INFO_REAL : 0) | (b.masked ? INFO_MASKED : 0), num = b.hash & 255;
   const tg = b.type | (sizeGroup(b) << 4);
   const iTop = info(tg, num, 255, fl), iBot = info(tg, num, 199, fl), iRoof = info(tg, num, 255, fl | INFO_ROOF);
 

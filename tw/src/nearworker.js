@@ -11,14 +11,15 @@ import { tileSizeMerc, tileToMerc, tileCentreMerc, mercYToLat } from './geo.js';
 import { decodeTerrarium, meshNodes, pxMetersFor, PX } from './heightgrid.js';
 import { buildRoads } from './roads.js';
 import { buildBuildings } from './buildings.js';
-import { loadList } from './landmark_list.js';
+import { loadList, loadFootprint, turnFootprint } from './landmark_list.js';
 import { lonToMercX, latToMercY, wrapMercDx } from './geo.js';
 import { signedArea } from './earclip.js';
 import { POLYGON } from './mvt.js';
 import { MeshBuilder } from './meshbuilder.js';
 import { cachedFetch } from './cache.js';
 
-const SKY_SUNK = 6;   // far terrain is coarse, so skyline walls start deeper
+const SKY_SUNK = 6;
+const FOOTPRINT_REACH = 600;   // metres: landmarks closer than this to a tile may reach into it   // far terrain is coarse, so skyline walls start deeper
 // Which elevation zoom to drape on comes with each job (spec.ez): the finest
 // terrain level for the near field, zoom 12 for the distant skyline.
 const EZ_DEFAULT = 12;
@@ -118,14 +119,26 @@ export async function buildNearTile(spec) {
   const counts = {};
   const rEnds = skyline ? [0, 0, 0] : buildRoads(layers.transportation, g, mb, layers.aeroway, counts);
   const bb = new MeshBuilder();
-  // Landmark sites in this tile's local units, so the plain building outline under
-  // a landmark is left out. Only sites that can reach into this tile are passed.
+  // Landmark masks in this tile's local units: the landmark's own footprint,
+  // turned to its facing, and its circle (maskR). Any map building touching
+  // either is the landmark's stand-in on the map, so it is hidden. Only
+  // landmarks that can reach into this tile are passed.
   const half = g.size14 / 2;
   const mask = [];
   for (const L of sites) {
     const r = L.maskR / g.cosLat;
     const mx = wrapMercDx(lonToMercX(L.lon) - c.x), my = c.y - latToMercY(L.lat);
-    if (Math.abs(mx) < half + r && Math.abs(my) < half + r) mask.push({ id: L.id, x: mx, y: my, r });
+    const reach = Math.max(r, FOOTPRINT_REACH / g.cosLat);
+    if (Math.abs(mx) >= half + reach || Math.abs(my) >= half + reach) continue;
+    let poly = null;
+    const fp = await loadFootprint(L.id).catch(() => null);
+    if (fp && fp.length >= 3) {
+      poly = new Float64Array(fp.length * 2);
+      turnFootprint(fp, L.yawDeg || 0).forEach(([e, n], i) => {     // metres east/north -> tile units (y is south)
+        poly[2 * i] = mx + e / g.cosLat; poly[2 * i + 1] = my - n / g.cosLat;
+      });
+    }
+    mask.push({ id: L.id, x: mx, y: my, r, poly });
   }
   const stats = buildBuildings(layers.building, g, bb, undefined,
     { ...(skyline ? { minHeight: skyMin, sunk: SKY_SUNK } : {}), mask, landuse: layers.landuse });

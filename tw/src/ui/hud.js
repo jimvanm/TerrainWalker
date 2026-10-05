@@ -60,7 +60,7 @@ export class Hud {
       [`${view.alt.toFixed(0)} m` + (agl === null ? '' : ` (${agl.toFixed(0)} agl)`)],
       [`${controls.speed < 1 ? '0' : controls.speed.toFixed(0)} m/s`],
       [flyText + (settings.fog ? ' +fog' : '') + (settings.debug ? ' +dbg' + settings.debug : '') +
-        (settings.frozen ? ' FROZEN' : '')],
+        (settings.frozen ? ' FROZEN' : '') + (settings.showMasked ? ' +unmasked' : '')],
       [`${terrain.visible.length}/${terrain.loaded} tiles`, loader.queued === 0 && terrain.holes === 0 && terrain.loaded > 0],
       [`L${view.minLevel}-${view.drawLevels - 1}`],
       [`holes ${terrain.holes}/${this.holePeak}`, terrain.holes === 0],

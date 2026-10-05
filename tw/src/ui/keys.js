@@ -48,6 +48,7 @@ export const KEYS = [
   { line: 7, label: '1', help: 'grid', code: 'Digit1', act: 'debugGrid' },
   { line: 7, label: '2', help: 'freeze', code: 'Digit2', act: 'freeze' },
   { line: 7, label: '3', help: 'flat', code: 'Digit3', act: 'debugFlat' },
+  { line: 7, label: '4', help: 'show buildings under landmarks', code: 'Digit4', act: 'toggleMask' },
 ];
 
 const esc = (s) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);

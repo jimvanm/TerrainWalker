@@ -42,8 +42,8 @@ export const rgba = (r, g, b) => ((255 << 24) | (b << 16) | (g << 8) | r) >>> 0;
 //   g  per-building number 0..255 (picks a colour from the set)
 //   b  wall shade, 255 = full colour
 //   a  flags: 1 = building (the shader picks its colour), 2 = has a map colour,
-//      4 = roof
+//      4 = roof, 8 = under a landmark (hidden unless the mask is off)
 // All zero means "use the vertex colour as it is" (roads, rails, airports).
-export const INFO_BUILDING = 1, INFO_REAL = 2, INFO_ROOF = 4;
+export const INFO_BUILDING = 1, INFO_REAL = 2, INFO_ROOF = 4, INFO_MASKED = 8;
 export const info = (type, num, shade, flags) =>
   ((flags << 24) | (shade << 16) | (num << 8) | type) >>> 0;

@@ -125,6 +125,7 @@ const actions = {
   debugGrid: () => { settings.debug = settings.debug === 1 ? 0 : 1; },
   debugFlat: () => { settings.debug = settings.debug === 2 ? 0 : 2; },
   freeze: () => { settings.frozen = !settings.frozen; },
+  toggleMask: () => { settings.showMasked = !settings.showMasked; },
   grab: () => controls.grab(),
   faster: () => controls.bump(1.5),
   slower: () => controls.bump(1 / 1.5),

@@ -8,6 +8,7 @@ export const settings = {
   fog: false,
   debug: 0,          // 0 normal, 1 tile grid + level tint, 2 flat (no textures)
   frozen: false,     // stop all tile updates; anything that survives is not loading-related
+  showMasked: false, // draw the map buildings a landmark hides (key 4), to check the mask
   levels: 9,         // view slider: how many terrain levels may be drawn
 };
 

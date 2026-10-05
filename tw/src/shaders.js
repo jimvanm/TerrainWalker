@@ -179,7 +179,7 @@ uniform vec3  uType[8];  // colour per building type
 uniform vec3  uRoof[8];  // roof colours
 uniform vec3  uAutoWall[32];   // auto set: 8 walls per size group
 uniform vec3  uAutoRoof[32];   // auto set: 8 roofs per size group
-uniform int   uLook;     // 1 real colours, 2 by type, 4 warmer, 8 auto set
+uniform int   uLook;     // 1 real colours, 2 by type, 4 warmer, 8 auto set, 16 show buildings under landmarks
 out vec3 vPos;
 out vec3 vCol;
 vec3 buildingColour() {
@@ -211,6 +211,9 @@ void main() {
   vPos = vec3(x, y, z);
   vCol = aInfo.a > 0.0 ? buildingColour() : aCol.rgb;
   gl_Position = toClip(vPos);
+  // A map building under a landmark: put every corner outside the view, so
+  // the whole triangle is dropped, unless the mask is switched off (key 4).
+  if ((int(aInfo.a * 255.0 + 0.5) & 8) != 0 && (uLook & 16) == 0) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
 }`;
 
 export const MESH_FS = `#version 300 es
