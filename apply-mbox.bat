@@ -1,6 +1,6 @@
 @echo off
 rem Apply changes sent as .mbox files: drag one or more onto this file.
-rem They are applied in the order given and committed, ready to push.
+rem They are applied in the order given and committed. Pushing is up to you.
 rem If one does not apply, nothing from it is kept and it stops there.
 rem (No labels or goto on purpose: cmd misreads those in a file saved with
 rem Unix line endings, which is how git may write this one.)
@@ -46,10 +46,4 @@ if defined FAILED (
   exit /b 1
 )
 echo All applied.
-choice /c YN /m "Push to GitHub now"
-if errorlevel 2 (
-  echo Not pushed. Push later with: git push
-) else (
-  git push
-)
-pause
+timeout /t 3 >nul
