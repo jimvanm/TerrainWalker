@@ -10,7 +10,7 @@ for (const m of MODES) {
   const codes = acts.filter((k) => inMode(k, m.id)).map((k) => k.code);
   assert.equal(new Set(codes).size, codes.length, 'no key code runs two actions in ' + m.name);
 }
-for (const k of acts) assert.match(k.code, /^(Key[A-Z]|Digit\d|Comma|Period|Delete|Tab)$/, 'action key has a real key code: ' + k.label);
+for (const k of acts) assert.match(k.code, /^(Key[A-Z]|Digit\d|Comma|Period|Delete|Tab|Enter|Backspace|Escape)$/, 'action key has a real key code: ' + k.label);
 
 for (const m of MODES) {
   const html = helpHtml(m.id);
@@ -42,7 +42,7 @@ for (const m of MODES) {
   assert.deepEqual(ran, mine.map((k) => k.act), m.name + ': every key runs its own action');
 }
 mode = 'nav'; ran.length = 0;
-press('KeyM'); press('Delete');
+press('KeyM'); press('Delete'); press('KeyN');
 assert.equal(ran.length, 0, 'Tools keys do nothing in Navigation');
 mode = 'tools'; press('KeyV'); press('Digit1');
 assert.equal(ran.length, 0, 'and Navigation-only keys do nothing in Tools');

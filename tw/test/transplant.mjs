@@ -1,0 +1,119 @@
+// N: picking up a piece of ground and laying it down elsewhere.
+import assert from 'node:assert/strict';
+
+const geo = await import('../src/geo.js');
+const T = await import('../src/transplant.js');
+const { screenDir, aimPoint } = await import('../src/dropper.js');
+const { Landmarks } = await import('../src/landmarks.js');
+
+// ---- geometry ----
+{
+  const sq = [[-10, -10], [10, -10], [10, 10], [-10, 10]];
+  assert.ok(T.inside(sq, 0, 0) && !T.inside(sq, 11, 0), 'inside / outside a square');
+  assert.equal(T.area(sq), 400);
+  assert.equal(T.median([3, null, 1, 2]), 2);
+  const [e, n] = T.turnEN(0, 100, 90);
+  assert.ok(Math.abs(e - 100) < 1e-9 && Math.abs(n) < 1e-9, 'a quarter turn clockwise takes north to east');
+  console.log('ok  outline geometry');
+}
+
+// ---- the piece ----
+{
+  // A cone 3,000 m above a plain at 1,000 m, outlined by a 10 km square.
+  const cone = (e, n) => 1000 + Math.max(0, 3000 - Math.hypot(e, n) * 0.6);
+  const sq = [[-5000, -5000], [5000, -5000], [5000, 5000], [-5000, 5000]];
+  const rise = T.buildPiece(cone, sq, 'rise');
+  assert.equal(rise.edge, 1000, 'the edge height is the plain');
+  assert.ok(Math.abs(rise.rise - 3000) < 60, `rise mode: the cone rises about 3,000 m above its edge (${rise.rise.toFixed(0)})`);
+  const sea = T.buildPiece(cone, sq, 'sea');
+  assert.ok(Math.abs(sea.rise - 4000) < 60, `sea mode: the top stands about 4,000 m above sea level (${sea.rise.toFixed(0)})`);
+  let walls = 0, below = 0;
+  for (let i = 1; i < rise.pos.length; i += 3) { if (rise.pos[i] < -1) walls++; if (rise.pos[i] < 0 && rise.pos[i] > -1) below++; }
+  assert.ok(walls > 0 && below === 0, 'only the edge wall goes below the base; the ground never does');
+  assert.ok(rise.idx.length / 3 > 200000 && rise.idx.length / 3 < 300000, 'about 360 x 360 cells: ' + rise.idx.length / 3 + ' triangles');
+  for (const i of rise.idx) if (i >= rise.pos.length / 3) throw new Error('index out of range');
+  // A triangle outline takes about half the square's cells.
+  const tri = T.buildPiece(cone, [[-5000, -5000], [5000, -5000], [-5000, 5000]], 'rise');
+  assert.ok(tri.idx.length < rise.idx.length * 0.62, 'cells outside the outline are left out');
+  console.log('ok  a piece rises above its edge (or stands above sea level), with a wall around it');
+}
+
+// ---- reading the source ----
+{
+  assert.equal(T.chooseZoom(15000, 28), 12, 'a 15 km piece near Everest reads zoom 12');
+  assert.ok(T.chooseZoom(4000, 43.6) >= 13, 'a 4 km piece of Toronto reads zoom 13 or finer');
+  assert.ok(T.chooseZoom(200000, 45) <= 9, 'a 200 km piece stays within the tile budget');
+  // One tile whose height is its pixel column: the sampler interpolates.
+  const z = 10, h = new Float32Array(256 * 256);
+  for (let y = 0; y < 256; y++) for (let x = 0; x < 256; x++) h[y * 256 + x] = x;
+  const at = T.sampler(new Map([['300/400', h]]), z);
+  const s = geo.tileSizeMerc(z);
+  const mx = -geo.HALF + (300 + 100.5 / 256) * s, my = geo.HALF - (400 + 50.5 / 256) * s;
+  assert.ok(Math.abs(at(mx, my) - 100) < 1e-6, 'the sampler reads the right pixel');
+  assert.equal(at(mx + s * 5, my), null, 'and nothing where no tile was fetched');
+  console.log('ok  the source zoom and the height sampler');
+}
+
+// ---- the overlay: toScreen is screenDir backwards ----
+{
+  const cam = { mercX: geo.lonToMercX(-79.38), mercY: geo.latToMercY(43.64), alt: 600, yaw: 0.7, pitch: -0.3 };
+  const flat = () => 80;
+  for (const [px, py] of [[400, 300], [100, 500], [700, 420]]) {
+    const hit = aimPoint(cam, flat, screenDir(cam, px, py, 800, 600, 68));
+    const p = T.toScreen(cam, hit.mx, hit.my, 80, 800, 600, 68);
+    assert.ok(Math.abs(p.x - px) < 0.5 && Math.abs(p.y - py) < 0.5, `ground point under (${px}, ${py}) draws back at (${p.x.toFixed(1)}, ${p.y.toFixed(1)})`);
+  }
+  console.log('ok  outline corners are drawn where they were clicked');
+}
+
+// ---- the tool, start to finish ----
+{
+  const mesh = { buffers: () => ({ vao: {}, count: 0 }), freeBuffers() {} };
+  const L = new Landmarks(null, mesh, []);
+  await L.ready;
+  // Source: the cone, around a point near Everest; destination: flat ground at 75 m.
+  const src = { lat: 27.99, lon: 86.92 };
+  const sx = geo.lonToMercX(src.lon), sy = geo.latToMercY(src.lat), sk = geo.mercScale(src.lat);
+  const coneM = (mx, my) => 1000 + Math.max(0, 3000 - Math.hypot((mx - sx) * sk, (my - sy) * sk) * 0.6);
+  const fetchTile = async (z, x, y) => {
+    const s = geo.tileSizeMerc(z), h = new Float32Array(256 * 256);
+    for (let j = 0; j < 256; j++) for (let i = 0; i < 256; i++) {
+      h[j * 256 + i] = coneM(-geo.HALF + (x + (i + 0.5) / 256) * s, geo.HALF - (y + (j + 0.5) / 256) * s);
+    }
+    return h;
+  };
+  const tp = new T.Transplant(L, fetchTile);
+  const ground = (mx, my) => (Math.abs(mx) < 1e9 ? 75 : null);
+  tp.toggle();
+  assert.equal(tp.state, 'drawing');
+  for (const [de, dn] of [[-5000, -5000], [5000, -5000], [5000, 5000], [-5000, 5000]]) {
+    tp.aim = { mx: sx + de / sk, my: sy + dn / sk };
+    tp.click(() => 1000);
+  }
+  tp.undo(); assert.equal(tp.corners.length, 3, 'Backspace takes back a corner');
+  tp.aim = { mx: sx - 5000 / sk, my: sy + 5000 / sk }; tp.click(() => 1000);
+  await tp.close();
+  assert.equal(tp.state, 'carrying', 'Enter picks it up');
+  assert.ok(Math.abs(tp.piece.rise - 3000) < 80, 'the piece rises about 3,000 m: ' + tp.piece.rise.toFixed(0));
+  // Destination: Lake Ontario, looking down at it.
+  const cam = { mercX: geo.lonToMercX(-77.7), mercY: geo.latToMercY(43.6), alt: 20000, yaw: 0, pitch: -Math.PI / 3 };
+  tp.update(cam, ground, null);
+  const p = tp.preview;
+  assert.ok(!p.hidden && p.base === 75, 'it stands on the destination\'s ground at its edge: base ' + p.base);
+  tp.turn(1); assert.equal(p.yawDeg, 15, ', and . turn it');
+  tp.toggleHeight(); tp.update(cam, ground, null);
+  assert.ok(tp.preview.base === 0 && Math.abs(tp.piece.rise - 4000) < 80, 'U: height above sea level instead');
+  tp.toggleHeight(); tp.update(cam, ground, null);
+  tp.click(ground);
+  const laid = L.items.filter((it) => it.piece);
+  assert.equal(laid.length, 1, 'click lays it down');
+  assert.ok(laid[0].base === 75 && laid[0].yawDeg === 15, 'where and how it stood');
+  L.update({ mercX: cam.mercX, mercY: cam.mercY, k: geo.mercScale(43.6), agl: 20000 }, () => 500);
+  assert.equal(laid[0].base, 75, 'and the ground under its middle does not move it');
+  assert.equal(tp.state, 'carrying', 'still in hand, for another');
+  assert.ok(tp.removeAt(tp.aim) === laid[0] && !L.items.includes(laid[0]), 'Delete removes the laid piece pointed at');
+  tp.toggle();
+  assert.ok(tp.state === 'off' && !L.items.some((it) => it.preview), 'N again puts it away');
+  console.log('ok  draw, take back, pick up, carry, turn, change height, lay down, remove, put away');
+}
+console.log('transplant ok');

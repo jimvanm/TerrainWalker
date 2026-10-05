@@ -104,6 +104,12 @@ export class Landmarks {
     it.buf = null; it.vao = null; it.count = 0;
   }
 
+  // A shape made in the app rather than read from a folder (a transplanted
+  // piece of ground, transplant.js). Kept until a reload.
+  addModel(id, model) {
+    this.models.set(id, { state: 'ready', model, footprint: [], keep: true });
+  }
+
   _ready(it) { const m = this.models.get(it.model); return !!m && m.state === 'ready'; }
 
   _load(id) {
@@ -128,7 +134,7 @@ export class Landmarks {
     const { vertices, indices } = buildVertices(m.model, it.yawDeg);
     it.buf = this.mesh.buffers(vertices, indices, null);
     it.vao = it.buf.vao; it.count = indices.length;
-    if (!m.footprint.length) m.footprint = footprintOf(m.model);   // [east, north] metres, before any turn
+    if (!m.footprint.length && !m.keep) m.footprint = footprintOf(m.model);   // [east, north] metres, before any turn
     return true;
   }
 
@@ -149,12 +155,12 @@ export class Landmarks {
       // finer terrain tile arrives (from far away only coarse tiles cover it).
       const g = heightAt(it.mx, it.my);
       const gz = g === null || g === undefined ? null : typeof g === 'number' ? { h: g, z: 99 } : g;
-      if (gz && (it.base === null || gz.z > it.baseZ)) { it.base = gz.h - SINK; it.baseZ = gz.z; }
+      if (gz && !it.fixedBase && (it.base === null || gz.z > it.baseZ)) { it.base = gz.h - SINK; it.baseZ = gz.z; }
       this._buffers(it);
     }
     // Free shapes nobody is near any more, with their placements' buffers.
     for (const [id, m] of this.models) {
-      if ((used.get(id) ?? Infinity) <= UNLOAD) continue;
+      if (m.keep || (used.get(id) ?? Infinity) <= UNLOAD) continue;
       for (const it of this.items) if (it.model === id) this._free(it);
       this.models.delete(id);
     }

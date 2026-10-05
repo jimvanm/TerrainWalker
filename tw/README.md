@@ -69,6 +69,7 @@ tiles are built on your own computer and are not in the repo (see
 | `9` | building colours: warmer light on/off |
 | `P` | pin this place to the saved places list |
 | `M` | (Tools) drop a landmark where the crosshair meets the ground: press again for the next one, and after the last, off. It stands where you point; click to drop it; `,` / `.` turn it; `Delete` removes a dropped one you point at. A reload clears them all. |
+| `N` | (Tools) move a piece of ground: click corners of an outline on the ground (`Backspace` takes one back), `Enter` picks the ground inside it up, fly anywhere, click to lay it down (again for another). `U` switches how high it stands: its rise above the outline's edge (default) or its height above sea level. `,` / `.` turn it, `Delete` removes a laid piece you point at, `N` again or `Esc` puts it away. A reload clears them. |
 | `K` | copy a building-height report to the clipboard |
 | `L` | copy the performance log to the clipboard |
 | `H` | hide the key menus and performance graph |

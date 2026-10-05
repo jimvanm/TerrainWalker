@@ -206,17 +206,16 @@ holes wherever tiles have not loaded.
       web page (CORS) and it is fast enough. Otherwise: host the built tiles
       publicly, or keep them in git (Niagara is about 15 MB).
 
-- [ ] **Tools mode, next steps.** Tab swaps Navigation and Tools, each with
-      its own key menu; in Tools the mouse is free (pointer aims, right-drag
-      looks; full screen and the keyboard lock stay). Next, agreed:
-      (3) a transplant tool: draw an outline (corners clicked on the ground,
-      Enter closes), pick it up, fly anywhere, turn it, click to lay it down.
-      Two ways to lay it: replace the ground (mountains; default height is its
-      rise above the outline's edge, never below the water there) or drape
-      (cities: the destination's ground, the source's buildings and roads).
-      Test cases: Everest in Lake Ontario, downtown Toronto (Bloor to the
-      Island, Bathurst to Church) on Saba and in front of Mount St Helens.
-      The mode may be renamed Workshop (one word in `src/ui/keys.js`).
+- [ ] **Moving ground, next steps.** Tools mode, `N` (src/transplant.js):
+      outline, pick up, carry, turn, lay down; rise above its edge or height
+      above sea level (`U`). Drawn as a solid model with a wall around its
+      edge; the ground under it is not changed. Next, agreed: part 2, cities:
+      move the buildings and roads inside the outline too, draped on the
+      destination's ground (downtown Toronto on Saba, in front of Mount St
+      Helens). Open: in rise mode a valley below the outline's edge comes out
+      flat (nothing goes below the base); whether to hide the destination's
+      ground under a piece; pieces carry no water or map colours, only a
+      height colour (green, brown, rock, snow).
 
 - [ ] **Dropping landmarks, next steps.** `M` drops one at the crosshair
       (src/dropper.js). Still to do: a search to pick from many landmarks

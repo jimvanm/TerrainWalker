@@ -20,7 +20,10 @@ import { MeshProgram } from './meshprogram.js';
 import { Landmarks } from './landmarks.js';
 import { Detail } from './detail.js';
 import { loadPlaceTiles } from './placetiles.js';
-import { Dropper, screenDir } from './dropper.js';
+import { Dropper, screenDir, aimPoint } from './dropper.js';
+import { Transplant, toScreen } from './transplant.js';
+import { cachedFetch } from './cache.js';
+import { elevationUrl } from './placetiles.js';
 import { LOOK, SETS } from './look.js';
 import { settings, LAYERS, layerOn, toggleLayer } from './settings.js';
 import { helpHtml, bindKeys, MODES, modeName } from './ui/keys.js';
@@ -87,6 +90,20 @@ const farField = new SkylineLayer(gl, mesh, vectorTemplate);
 const handover = new Handover(nearField, farField);
 const landmarks = new Landmarks(gl, mesh);
 const dropper = new Dropper(landmarks);
+// The usual elevation tile as heights, for picking up a piece of ground.
+async function fetchHeights(z, x, y) {
+  const r = await cachedFetch(elevationUrl(z, x, y), { mode: 'cors' });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const bmp = await createImageBitmap(await r.blob());
+  const cv = new OffscreenCanvas(256, 256), cx = cv.getContext('2d', { willReadFrequently: true });
+  cx.drawImage(bmp, 0, 0, 256, 256); bmp.close();
+  const d = cx.getImageData(0, 0, 256, 256).data, h = new Float32Array(256 * 256);
+  for (let i = 0; i < h.length; i++) h[i] = d[i * 4] * 256 + d[i * 4 + 1] + d[i * 4 + 2] / 256 - 32768;
+  return h;
+}
+const transplant = new Transplant(landmarks, fetchHeights);
+const groundH = (x, y) => terrain.heightAt(x, y);
+let aimDir = null;     // the pointer's direction in Tools mode, this frame
 const detail = new Detail();
 
 // Resolve the vector tile template from the service's TileJSON. Terrain still
@@ -136,10 +153,18 @@ const actions = {
   faster: () => controls.bump(1.5),
   slower: () => controls.bump(1 / 1.5),
   pin: () => favourites.pinHere(),
-  dropCycle: () => dropper.cycle(),
-  dropLeft: () => dropper.turn(-1),
-  dropRight: () => dropper.turn(1),
-  dropRemove: () => dropper.removeAimed(cam, (x, y) => terrain.heightAt(x, y)),
+  // Tools mode. One thing in hand at a time: a landmark (M) or ground (N).
+  dropCycle: () => { transplant.cancel(); dropper.cycle(); },
+  outline: () => { dropper.off(); transplant.toggle(); },
+  outlineUndo: () => transplant.undo(),
+  outlineClose: () => transplant.close(),
+  pieceHeight: () => transplant.toggleHeight(),
+  toolLeft: () => (transplant.active ? transplant.turn(-1) : dropper.turn(-1)),
+  toolRight: () => (transplant.active ? transplant.turn(1) : dropper.turn(1)),
+  toolRemove: () => {
+    if (!transplant.removeAt(aimPoint(cam, groundH, aimDir || undefined))) dropper.removeAimed(cam, groundH);
+  },
+  toolCancel: () => { transplant.cancel(); dropper.off(); },
   strainLog: () => perf.copyLog(),
   heightReport: () => heightReport(cam, nearField, farField, landmarks, terrain),
   toggleHelp: () => {
@@ -149,7 +174,7 @@ const actions = {
   // Tab: Navigation <-> Tools. Leaving Tools puts away whatever tool was armed.
   switchMode: () => {
     settings.mode = settings.mode === 'nav' ? 'tools' : 'nav';
-    if (settings.mode !== 'tools') dropper.off();
+    if (settings.mode !== 'tools') { dropper.off(); transplant.cancel(); }
     controls.setFreeMouse(settings.mode === 'tools');
     document.body.classList.toggle('tools', settings.mode === 'tools');
     showMode();
@@ -167,7 +192,11 @@ const actions = {
 bindKeys(actions, window, () => settings.mode);
 // In Tools mode a click (the mouse is free there) drops the armed landmark
 // where the pointer is. In Navigation a click captures the mouse (controls.js).
-canvas.addEventListener('click', () => { if (settings.mode === 'tools') dropper.drop(); });
+canvas.addEventListener('click', () => {
+  if (settings.mode !== 'tools') return;
+  if (transplant.active) transplant.click(groundH); else dropper.drop();
+});
+const overlayEl = document.getElementById('overlay');
 const dropEl = document.getElementById('drop');
 // The key menus, one per mode, stacked: the current mode's in front, the
 // other tucked behind it, its title peeking out below. Clicking the one behind
@@ -223,6 +252,26 @@ const startTime = last;
 let hashTime = 0;
 let prev = { nearR: detail.nearR, minLevel: detail.minLevel, drawLevels: detail.drawLevels };
 
+// The outline being drawn (N), over the view: corners joined, and a dashed
+// line on to where the pointer is.
+let lastOutline = '';
+function drawOutline(o, w, h) {
+  let svg = '';
+  if (o) {
+    const pts = o.corners.map((c) => toScreen(cam, c.mx, c.my, (c.h ?? 0) + 3, w, h, FOV));
+    const xy = (p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`;
+    const shown = pts.filter(Boolean);
+    if (shown.length > 1) svg += `<polyline points="${shown.map(xy).join(' ')}" />`;
+    for (const p of shown) svg += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4" />`;
+    if (o.next && pts.length && pts[pts.length - 1]) {
+      const n = toScreen(cam, o.next.mx, o.next.my, (groundH(o.next.mx, o.next.my) ?? 0) + 3, w, h, FOV);
+      if (n) svg += `<line class="next" x1="${pts[pts.length - 1].x.toFixed(1)}" y1="${pts[pts.length - 1].y.toFixed(1)}" x2="${n.x.toFixed(1)}" y2="${n.y.toFixed(1)}" />`;
+      if (n && pts.length > 2 && pts[0]) svg += `<line class="next" x1="${n.x.toFixed(1)}" y1="${n.y.toFixed(1)}" x2="${pts[0].x.toFixed(1)}" y2="${pts[0].y.toFixed(1)}" />`;
+    }
+  }
+  if (svg !== lastOutline) { overlayEl.innerHTML = svg; lastOutline = svg; }
+}
+
 function frame(now) {
   const t0 = performance.now();
   const rawMs = now - last;
@@ -250,10 +299,15 @@ function frame(now) {
   }
   // In Tools mode you aim with the pointer; otherwise with the crosshair.
   const pt = settings.mode === 'tools' && controls.pointer;
-  const aimDir = pt ? screenDir(cam, pt.x, pt.y, canvas.clientWidth || innerWidth, canvas.clientHeight || innerHeight, FOV) : null;
-  dropper.update(cam, (x, y) => terrain.heightAt(x, y), aimDir);   // before landmarks: it moves the preview
+  const vw = canvas.clientWidth || innerWidth, vh = canvas.clientHeight || innerHeight;
+  aimDir = pt ? screenDir(cam, pt.x, pt.y, vw, vh, FOV) : null;
+  // Before landmarks.update(): these move what is in hand.
+  dropper.update(cam, groundH, aimDir);
+  transplant.update(cam, groundH, aimDir);
+  drawOutline(transplant.outline(), vw, vh);
   landmarks.update(v, (x, y) => terrain.groundAt(x, y));
-  if (dropEl.textContent !== dropper.message) { dropEl.textContent = dropper.message; dropEl.classList.toggle('hide', !dropper.message); }
+  const msg = transplant.message || dropper.message;
+  if (dropEl.textContent !== msg) { dropEl.textContent = msg; dropEl.classList.toggle('hide', !msg); }
 
   const roadsOn = layerOn('roads'), bldOn = layerOn('built'), landOn = layerOn('land');
   const shading = {

@@ -22,7 +22,7 @@ export const MODES = [
 ];
 export const modeName = (id) => MODES.find((m) => m.id === id).name;
 
-export const GROUPS = ['Mode', 'Mouse', 'Moving', 'Flying', 'Show / hide', 'Colours', 'Landmarks', 'Places', 'Reports', 'Checking'];
+export const GROUPS = ['Mode', 'Mouse', 'Moving', 'Flying', 'Show / hide', 'Colours', 'Landmarks', 'Move ground', 'In hand', 'Places', 'Reports', 'Checking'];
 
 export const KEYS = [
   { group: 'Mode', label: 'Tab', help: 'switch to Tools', code: 'Tab', act: 'switchMode', mode: 'nav' },
@@ -56,11 +56,18 @@ export const KEYS = [
   { group: 'Colours', label: '8', help: 'colour set', code: 'Digit8', act: 'lookSet', mode: 'nav' },
   { group: 'Colours', label: '9', help: 'warm', code: 'Digit9', act: 'lookWarm', mode: 'nav' },
 
-  { group: 'Landmarks', label: 'M', help: 'drop a landmark (again: next, then off)', code: 'KeyM', act: 'dropCycle', mode: 'tools' },
-  { group: 'Landmarks', label: 'click', help: 'drop it', mode: 'tools' },
-  { group: 'Landmarks', label: ',', help: 'or', code: 'Comma', act: 'dropLeft', mode: 'tools' },
-  { group: 'Landmarks', label: '.', help: 'turn it', code: 'Period', act: 'dropRight', mode: 'tools' },
-  { group: 'Landmarks', label: 'Delete', help: 'remove the dropped one pointed at', code: 'Delete', act: 'dropRemove', mode: 'tools' },
+  { group: 'Landmarks', label: 'M', help: 'pick up a landmark (again: next, then off)', code: 'KeyM', act: 'dropCycle', mode: 'tools' },
+
+  { group: 'Move ground', label: 'N', help: 'draw an outline (again: put it away)', code: 'KeyN', act: 'outline', mode: 'tools' },
+  { group: 'Move ground', label: 'Backspace', help: 'take back a corner', code: 'Backspace', act: 'outlineUndo', mode: 'tools' },
+  { group: 'Move ground', label: 'Enter', help: 'pick up the ground inside', code: 'Enter', act: 'outlineClose', mode: 'tools' },
+  { group: 'Move ground', label: 'U', help: 'rise above its edge / above sea level', code: 'KeyU', act: 'pieceHeight', mode: 'tools' },
+
+  { group: 'In hand', label: 'click', help: 'drop it, or add a corner', mode: 'tools' },
+  { group: 'In hand', label: ',', help: 'or', code: 'Comma', act: 'toolLeft', mode: 'tools' },
+  { group: 'In hand', label: '.', help: 'turn it', code: 'Period', act: 'toolRight', mode: 'tools' },
+  { group: 'In hand', label: 'Delete', help: 'remove the dropped one pointed at', code: 'Delete', act: 'toolRemove', mode: 'tools' },
+  { group: 'In hand', label: 'Esc', help: 'put it away', code: 'Escape', act: 'toolCancel', mode: 'tools' },
 
   { group: 'Places', label: 'P', help: 'pin this place', code: 'KeyP', act: 'pin', mode: 'nav' },
 
@@ -106,7 +113,7 @@ export function bindKeys(actions, target = window, getMode = () => 'nav') {
     if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
     const k = acts.find((q) => q.code === e.code && inMode(q, getMode()));
     if (!k) return;
-    if (e.code === 'Tab' && e.preventDefault) e.preventDefault();
+    if (['Tab', 'Backspace', 'Enter'].includes(e.code) && e.preventDefault) e.preventDefault();
     const [head, arg] = k.act.split(':');
     const fn = actions[head];
     if (fn) fn(arg, e);

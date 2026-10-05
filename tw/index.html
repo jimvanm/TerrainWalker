@@ -13,6 +13,10 @@
   /* :has() means the cursor can only hide while a lock is actually held. */
   body.locked #c { cursor: none; }
   body.tools #c { cursor: crosshair; }
+  #overlay { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; }
+  #overlay polyline, #overlay line { fill: none; stroke: #ffd479; stroke-width: 2; }
+  #overlay line.next { stroke-dasharray: 6 5; opacity: .8; }
+  #overlay circle { fill: #ffd479; }
   html:not(:has(#c)) , body:not(.locked) #c { cursor: pointer; }
   .panel {
     position: fixed; background: rgba(12,16,22,.72); padding: 6px 10px;
@@ -130,6 +134,8 @@
 <body>
 <canvas id="c"></canvas>
 <div id="cross"></div>
+<!-- The outline being drawn in Tools mode (N). -->
+<svg id="overlay" xmlns="http://www.w3.org/2000/svg"></svg>
 <div id="loading" class="panel">loading terrain&hellip;</div>
 
 <!-- Built from the key table in src/ui/keys.js. -->
