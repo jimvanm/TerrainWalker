@@ -23,6 +23,7 @@ import { loadPlaceTiles } from './placetiles.js';
 import { Dropper, screenDir, aimPoint } from './dropper.js';
 import { Transplant, toScreen } from './transplant.js';
 import { initPieces } from './pieces.js';
+import { searchMountains, traceMountain } from './mountains.js';
 import { cachedFetch } from './cache.js';
 import { elevationUrl } from './placetiles.js';
 import { LOOK, SETS } from './look.js';
@@ -109,6 +110,17 @@ const pieceList = initPieces({
   root: document.getElementById('pieces'),
   take: (p) => { dropper.off(); transplant.take(p); },
   draw: () => { dropper.off(); if (!transplant.active) transplant.toggle(); },
+  search: (text) => searchMountains(text, (u) => fetch(u, { mode: 'cors' }).then((r) => r.json())),
+  // A mountain from the search: trace its outline from the height tiles, save
+  // it under its name, and put it in hand.
+  find: async (m, km) => {
+    const t = await traceMountain(m.lat, m.lon, km * 1000, fetchHeights);
+    if (!t) return 'Could not find its outline.';
+    const entry = pieceList.added({ name: m.name, corners: t.corners, mode: 'rise' });
+    dropper.off();
+    await transplant.take(entry);
+    return `${m.name}: rises ${t.prominence} m above its col` + (t.cut ? ` (cut at ${km} km; the col is further)` : '') + '. In hand.';
+  },
 });
 transplant.onPicked = (v) => pieceList.picked(v);
 const groundH = (x, y) => terrain.heightAt(x, y);

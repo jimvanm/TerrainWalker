@@ -26,19 +26,22 @@ export function savePieces(list) {
 }
 
 // A new entry for an outline just picked up; returns it (with its name).
-export function addPiece(list, { corners, mode }) {
+export function addPiece(list, { corners, mode, name }) {
   let n = list.length + 1;
   while (list.some((p) => p.name === 'Piece ' + n)) n++;
-  const p = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: 'Piece ' + n, corners, mode };
+  const p = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: name || 'Piece ' + n, corners, mode };
   list.unshift(p);
   return p;
 }
 
 // The panel. take(piece) puts it in hand; draw() starts a new outline (N).
-export function initPieces({ root, take, draw }) {
+// search(text): Promise of mountains by that name (mountains.js); find(m, km)
+// traces one within km of its summit and puts it in hand.
+export function initPieces({ root, take, draw, search, find }) {
   let pieces = loadPieces();
   let open = true;
   let editing = null, armed = null, armTimer = 0;
+  let query = '', results = [], status = '', reachKm = 15;
   const el = (tag, cls, text) => {
     const n = document.createElement(tag);
     if (cls) n.className = cls;
@@ -59,6 +62,46 @@ export function initPieces({ root, take, draw }) {
     head.append(title, add);
     root.append(head);
     if (!open) return;
+
+    // Find a mountain by name.
+    if (search) {
+      const row = el('div', 'frow');
+      const inp = el('input', 'fname');
+      inp.placeholder = 'Find a mountain...'; inp.value = query; inp.spellcheck = false; inp.maxLength = 60;
+      inp.onkeydown = (e) => {
+        if (e.key === 'Escape') { inp.blur(); return; }
+        if (e.key !== 'Enter' || !inp.value.trim()) return;
+        query = inp.value.trim(); status = 'Looking up ' + query + '...'; results = []; render();
+        search(query).then((r) => {
+          results = r; status = r.length ? '' : 'Nothing by that name with a summit position.'; render();
+        }).catch(() => { status = 'Could not reach Wikidata.'; render(); });
+      };
+      const reach = el('select', 'freach');
+      for (const km of [5, 10, 15, 25, 50]) {
+        const o = el('option', '', km + ' km'); o.value = String(km); if (km === reachKm) o.selected = true; reach.append(o);
+      }
+      reach.title = 'how far from the summit the outline may reach';
+      reach.onchange = () => { reachKm = +reach.value; };
+      row.append(inp, reach);
+      root.append(row);
+      if (status) root.append(el('div', 'fempty', status));
+      if (results.length) {
+        const rl = el('div', 'flist');
+        for (const m of results) {
+          const b = el('button', 'fgo', m.name + (m.height ? '  ' + m.height + ' m' : ''));
+          b.title = m.about || '';
+          const about = el('div', 'fabout', m.about);
+          b.onclick = () => {
+            status = 'Tracing ' + m.name + ' (up to ' + reachKm + ' km)...'; results = []; render();
+            find(m, reachKm).then((msg) => { status = msg || ''; render(); }).catch(() => { status = 'Could not trace it.'; render(); });
+          };
+          const wrap = el('div', 'fres'); wrap.append(b, about);
+          rl.append(wrap);
+        }
+        root.append(rl);
+      }
+    }
+
     const list = el('div', 'flist');
     if (!pieces.length) list.append(el('div', 'fempty', 'None yet. Press N, click corners, Enter.'));
     for (const p of pieces) {
@@ -100,5 +143,7 @@ export function initPieces({ root, take, draw }) {
   render();
   // Called when a new outline is picked up: saved, and its name given back.
   const picked = (v) => { const p = addPiece(pieces, v); commit(); render(); return p.name; };
-  return { render, picked };
+  // A found mountain: saved under its name; returns the entry, to take in hand.
+  const added = (v) => { const p = addPiece(pieces, v); commit(); render(); return p; };
+  return { render, picked, added };
 }
