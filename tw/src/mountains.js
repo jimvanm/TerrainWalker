@@ -89,7 +89,7 @@ const claim = (e, p) => {
 //   6. Arms narrower than `neck` metres are cut off: the shape is shrunk by
 //      half that, grown back by the same, and only what still reaches the
 //      summit is kept. 0: no cutting.
-export const RULES = { reach: 15, bump: 60, join: 0.6, joinKm: 5, trim: 0.25, slice: 0.1, neck: 0 };
+export const RULES = { reach: 15, bump: 60, join: 0.55, joinKm: 7, trim: 0, slice: 0.5, neck: 600 };
 
 // heights: Float32Array N*N (row 0 north), cells `cell` metres; the summit is
 // near cell (si, sj). rules: as RULES. Returns { inside, col, top, ti, tj,

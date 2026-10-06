@@ -5,6 +5,12 @@ const M = await import('../src/mountains.js');
 const T = await import('../src/transplant.js');
 const geo = await import('../src/geo.js');
 
+// The shapes below are made up, so each test sets the rules it is about;
+// the rest are pinned here rather than following the defaults (RULES).
+const PIN = { slice: 0.1, neck: 0 };
+const traceGrid = (h, N, i, j, c, r) => M.traceGrid(h, N, i, j, c, { ...PIN, ...r });
+const traceMountain = (la, lo, r, f) => M.traceMountain(la, lo, { ...PIN, ...r }, f);
+
 // ---- tracing on a grid ----
 {
   // On a plain at 1,000 m: ours (3,000 m) at (40, 50); a higher peak (4,000 m)
@@ -18,7 +24,7 @@ const geo = await import('../src/geo.js');
     h[j * N + i] = Math.max(1000, a, b, c, ridge);
   }
   const STRICT = { reach: 100, join: 2, trim: 0 };          // each peak alone, no trimming
-  const t = M.traceGrid(h, N, 41, 51, 100, STRICT);
+  const t = traceGrid(h, N, 41, 51, 100, STRICT);
   assert.ok(t.ti === 40 && t.tj === 50 && t.top === 3000, 'the summit is found near the given point');
   assert.ok(t.inside[50 * N + 40] && t.inside[50 * N + 50], 'our peak is in');
   assert.ok(!t.inside[50 * N + 70] && !t.inside[50 * N + 64], 'the higher peak is left out: you would climb to reach it');
@@ -27,7 +33,7 @@ const geo = await import('../src/geo.js');
   // One peak alone, wider than the reach: sliced at the low ground round the circle.
   const one = new Float32Array(N * N);
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) one[j * N + i] = 3000 - 20 * Math.hypot(i - 50, j - 50);
-  const u = M.traceGrid(one, N, 50, 50, 100, STRICT);
+  const u = traceGrid(one, N, 50, 50, 100, STRICT);
   assert.ok(u.cut && u.col < 3000 - 20 * 46 && u.col > 3000 - 20 * 50, 'alone and wide, sliced at the reach: ' + u.col.toFixed(0));
   // A giant with a high ridge running out past the reach: sliced at the
   // valley floors, not where the ridge crosses the reach.
@@ -37,12 +43,12 @@ const geo = await import('../src/geo.js');
     const ridge = Math.abs(j - 50) < 3 && i > 50 ? 7000 - 10 * (i - 50) : 0;
     g[j * N + i] = Math.max(3000, cone, ridge);
   }
-  const v = M.traceGrid(g, N, 50, 50, 100, STRICT);
+  const v = traceGrid(g, N, 50, 50, 100, STRICT);
   assert.ok(v.cut && v.col === 3000, 'a giant is sliced at the valley floor, not up its ridge: ' + v.col);
   // Small bumps on the way down do not stop it.
   const bumpy = new Float32Array(N * N);
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) bumpy[j * N + i] = Math.max(1000, 3000 - 50 * Math.hypot(i - 50, j - 50)) + ((i * 7 + j * 13) % 5) * 10;
-  const w = M.traceGrid(bumpy, N, 50, 50, 100, STRICT);
+  const w = traceGrid(bumpy, N, 50, 50, 100, STRICT);
   assert.ok(w.inside[50 * N + 85] && w.inside[20 * N + 50], 'bumps of 40 m on the way down do not cut it short');
   console.log('ok  the mountain is the ground whose way up leads to its summit, sliced at the valleys round it');
 
@@ -56,11 +62,11 @@ const geo = await import('../src/geo.js');
     const low = Math.abs(i - 50) < 2 && j > 50 && j < 88 ? 5500 : 0;
     E[j * N + i] = Math.max(5000, ev, lh, far, col, low);
   }
-  const alone = M.traceGrid(E, N, 50, 50, 100, { reach: 100, join: 2, trim: 0 });
-  const both = M.traceGrid(E, N, 50, 50, 100, { reach: 100, join: 0.6, joinKm: 5, trim: 0 });
+  const alone = traceGrid(E, N, 50, 50, 100, { reach: 100, join: 2, trim: 0 });
+  const both = traceGrid(E, N, 50, 50, 100, { reach: 100, join: 0.6, joinKm: 5, trim: 0 });
   assert.ok(!alone.inside[50 * N + 58] && both.inside[50 * N + 58], 'a close peak behind a high saddle joins (Lhotse)');
   assert.ok(!both.inside[88 * N + 50] && both.joined.length === 1, 'a far one behind a low saddle does not');
-  const nearOnly = M.traceGrid(E, N, 50, 50, 100, { reach: 100, join: 0.6, joinKm: 0.5, trim: 0 });
+  const nearOnly = traceGrid(E, N, 50, 50, 100, { reach: 100, join: 0.6, joinKm: 0.5, trim: 0 });
   assert.ok(!nearOnly.inside[50 * N + 58], 'nor a high-saddle one further than joinKm');
   // Trimming: low ground far out goes, the summit's own slopes stay.
   const spur = new Float32Array(N * N);
@@ -69,8 +75,8 @@ const geo = await import('../src/geo.js');
     const arm = Math.abs(j - 50) < 2 && i > 50 ? 1600 - 5 * (i - 50) : 0;      // a long low spur east
     spur[j * N + i] = Math.max(1000, cone, arm);
   }
-  const untrimmed = M.traceGrid(spur, N, 50, 50, 100, { reach: 100, join: 2, trim: 0 });
-  const trimmed = M.traceGrid(spur, N, 50, 50, 100, { reach: 100, join: 2, trim: 0.25 });
+  const untrimmed = traceGrid(spur, N, 50, 50, 100, { reach: 100, join: 2, trim: 0 });
+  const trimmed = traceGrid(spur, N, 50, 50, 100, { reach: 100, join: 2, trim: 0.25 });
   assert.ok(untrimmed.inside[50 * N + 90] && !trimmed.inside[50 * N + 90], 'trimming takes the far end of a low spur');
   assert.ok(trimmed.inside[50 * N + 60] && trimmed.inside[50 * N + 40], 'and keeps the mountain itself');
   console.log('ok  neighbours join by saddle height and distance; low spurs far out are trimmed');
@@ -81,8 +87,8 @@ const geo = await import('../src/geo.js');
     const ridge = Math.abs(j - 50) <= 1 && i > 50 ? 3500 - 10 * (i - 50) : 0;
     arm[j * N + i] = Math.max(1000, cone, ridge);
   }
-  const fat = M.traceGrid(arm, N, 50, 50, 100, { reach: 100, join: 2, trim: 0 });
-  const slim = M.traceGrid(arm, N, 50, 50, 100, { reach: 100, join: 2, trim: 0, neck: 600 });
+  const fat = traceGrid(arm, N, 50, 50, 100, { reach: 100, join: 2, trim: 0 });
+  const slim = traceGrid(arm, N, 50, 50, 100, { reach: 100, join: 2, trim: 0, neck: 600 });
   assert.ok(fat.inside[50 * N + 85] && !slim.inside[50 * N + 85], 'an arm 300 m wide goes when narrower than 600 m is cut');
   assert.ok(slim.inside[50 * N + 60] && slim.inside[50 * N + 40] && slim.inside[40 * N + 50], 'the cone itself stays');
   assert.ok(slim.area > fat.area * 0.8, 'and keeps most of its size: ' + slim.area.toFixed(1) + ' of ' + fat.area.toFixed(1));
@@ -153,13 +159,13 @@ const geo = await import('../src/geo.js');
     for (let j = 0; j < 256; j++) for (let i = 0; i < 256; i++) h[j * 256 + i] = ground(-geo.HALF + (x + (i + 0.5) / 256) * s, geo.HALF - (y + (j + 0.5) / 256) * s);
     return h;
   };
-  const t = await M.traceMountain(lat + 0.002, lon, { reach: 15, trim: 0 }, fetchTile);     // a slightly wrong summit position
+  const t = await traceMountain(lat + 0.002, lon, { reach: 15, trim: 0 }, fetchTile);     // a slightly wrong summit position
   assert.ok(Math.abs(t.top - 2500) < 80, 'summit about 2,500 m (a sharp top, sampled every ~90 m): ' + t.top);
   assert.ok(Math.abs(t.col - 500) < 30, 'sliced at the plain round it, 500 m: ' + t.col);
   assert.ok(Math.abs(t.prominence - 2000) < 90, 'rises about 2,000 m above it: ' + t.prominence);
   const far = Math.max(...t.corners.map(([la, lo]) => Math.hypot((geo.lonToMercX(lo) - sx) * k, (geo.latToMercY(la) - sy) * k)));
   assert.ok(far > 2000 && far < 9000, 'the outline is the cone above the saddle, not the hill beyond: ' + far.toFixed(0) + ' m out');
-  const cut = await M.traceMountain(lat, lon, { reach: 1.5, trim: 0 }, fetchTile);
+  const cut = await traceMountain(lat, lon, { reach: 1.5, trim: 0 }, fetchTile);
   assert.ok(cut.cut && cut.prominence < 1100, 'a short reach cuts it: rises ' + cut.prominence);
   console.log('ok  a summit gives its outline and prominence from the height tiles');
 }

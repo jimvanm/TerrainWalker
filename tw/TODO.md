@@ -211,9 +211,6 @@ holes wherever tiles have not loaded.
       ignore pieces, so you fall through it to the ground beneath. The ground
       height should take the highest laid piece under you into account.
 
-- [ ] **Where a mountain ends.** The rules for tracing one (src/mountains.js
-      `RULES`: reach, bump, join, joinKm, trim, slice, neck) are being tuned by eye
-      in mountainlab.html. Once settled, make them the defaults.
 
 - [ ] **Dropping landmarks, next steps.** `M` drops one at the crosshair
       (src/dropper.js). Still to do: a search to pick from many landmarks
