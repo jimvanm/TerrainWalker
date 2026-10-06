@@ -28,6 +28,10 @@
   .panel .head { display: flex; justify-content: space-between; align-items: baseline; }
   .panel .name { color: #ffd479; font-weight: 600; }
   .panel canvas { width: 100%; image-rendering: auto; display: block; margin: 6px 0; background: #000; }
+  .panel canvas.gl { cursor: grab; touch-action: none; }
+  .panel canvas.gl:active { cursor: grabbing; }
+  .panel .head button { margin-left: 6px; }
+  #exag { width: 120px; vertical-align: middle; }
   .panel .stats { color: #93a1b2; min-height: 3em; }
   .key { color: #6d7d90; padding: 0 16px 16px; }
   .key span { display: inline-block; width: 10px; height: 10px; vertical-align: middle; margin: 0 4px 0 12px; }
@@ -49,6 +53,7 @@
   <button id="go">Find</button>
   <span id="found"></span>
   <span id="status"></span>
+  <span style="margin-left:auto">3D heights ×<b id="exagv"></b> <input id="exag" type="range" min="1" max="4" step="0.25"></span>
 </div>
 
 <div id="panels"></div>
@@ -118,9 +123,21 @@ const holder = document.getElementById('panels');
 function addPanel(m) {
   const p = { m, grid: null, el: document.createElement('div') };
   p.el.className = 'panel';
-  p.el.innerHTML = `<div class="head"><span class="name"></span><button title="remove">×</button></div><canvas width="${N}" height="${N}"></canvas><div class="stats">loading...</div>`;
+  p.el.innerHTML = `<div class="head"><span class="name"></span><span><button class="view"></button><button class="del" title="remove">×</button></span></div><canvas class="map" width="${N}" height="${N}"></canvas><canvas class="gl" width="${2 * N}" height="${2 * N}"></canvas><div class="stats">loading...</div>`;
   p.el.querySelector('.name').textContent = m.name + (m.height ? '  ' + m.height + ' m' : '');
-  p.el.querySelector('button').onclick = () => { panels.splice(panels.indexOf(p), 1); p.el.remove(); saveList(); };
+  p.el.querySelector('.del').onclick = () => { panels.splice(panels.indexOf(p), 1); p.el.remove(); saveList(); };
+  const vb = p.el.querySelector('.view');
+  const setView = () => {
+    const in3d = p.m.view === '3d';
+    vb.textContent = in3d ? 'Map' : '3D';
+    vb.title = in3d ? 'flat map' : 'turn it in 3D: drag to turn, wheel to zoom';
+    p.el.querySelector('.map').style.display = in3d ? 'none' : '';
+    p.el.querySelector('.gl').style.display = in3d ? '' : 'none';
+    if (in3d && p.t) show3d(p);
+  };
+  vb.onclick = () => { p.m.view = p.m.view === '3d' ? 'map' : '3d'; setView(); saveList(); };
+  setView();
+  orbit(p);
   holder.append(p.el);
   panels.push(p);
   load(p);
@@ -144,7 +161,9 @@ function draw(p) {
   const t0 = performance.now();
   const t = traceGrid(g.heights, N, mid, mid, g.cell, { ...rules, reach: rules.reach });
   const ms = performance.now() - t0;
-  const cv = p.el.querySelector('canvas'), cx = cv.getContext('2d');
+  p.t = t;
+  if (p.m.view === '3d') show3d(p);
+  const cv = p.el.querySelector('.map'), cx = cv.getContext('2d');
   const img = cx.createImageData(N, N), d = img.data, H = g.heights;
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
     const k = j * N + i, h = H[k];
@@ -170,6 +189,205 @@ function draw(p) {
     `rises ${Math.round(t.top - t.col)} m above ${Math.round(t.col)} m · ${t.area.toFixed(0)} km²` +
     ` · ${t.joined.length} peak${t.joined.length === 1 ? '' : 's'} joined${t.cut ? ' · reaches the reach' : ''}` +
     `\n${(rules.reach * 2).toFixed(0)} km square, ${Math.round(g.cell)} m cells, ${ms.toFixed(0)} ms`;
+}
+
+// ---- 3D: the height grid as a solid you can turn ----
+// One WebGL context per panel, made the first time it is shown in 3D. The
+// shape (heights and slopes) is built when the grid loads; only the colours
+// change when a rule moves. Heights can be stretched (the slider by Find),
+// which is a view setting, not a rule.
+let exag = 1;
+try { exag = +(localStorage.getItem('tw.mountainlab.exag') || 1) || 1; } catch (e) { /* fine */ }
+const exIn = document.getElementById('exag'), exOut = document.getElementById('exagv');
+exIn.value = exag; exOut.textContent = exag;
+exIn.oninput = () => {
+  exag = +exIn.value; exOut.textContent = exag;
+  try { localStorage.setItem('tw.mountainlab.exag', String(exag)); } catch (e) { /* fine */ }
+  panels.forEach((p) => p.m.view === '3d' && p.t && show3d(p));
+};
+
+const VS = `#version 300 es
+in vec3 pos; in vec2 grad; in vec3 col;
+uniform mat4 mvp; uniform float ex, base;
+out vec3 vcol; out vec3 vn;
+void main() {
+  vcol = col;
+  vn = normalize(vec3(-grad.x * ex, 1.0, grad.y * ex));
+  gl_Position = mvp * vec4(pos.x, (pos.y - base) / 1000.0 * ex, pos.z, 1.0);
+}`;
+const FS = `#version 300 es
+precision highp float;
+in vec3 vcol; in vec3 vn; out vec4 o;
+void main() {
+  float l = 0.3 + 0.75 * max(dot(normalize(vn), normalize(vec3(-0.6, 0.8, -0.6))), 0.0);
+  o = vec4(vcol * l, 1.0);
+}`;
+const PVS = `#version 300 es
+in vec3 pos; in vec3 col; uniform mat4 mvp; uniform float ex, base; out vec3 vcol;
+void main() { vcol = col; gl_PointSize = 9.0; gl_Position = mvp * vec4(pos.x, (pos.y - base) / 1000.0 * ex, pos.z, 1.0); }`;
+const PFS = `#version 300 es
+precision highp float; in vec3 vcol; out vec4 o;
+void main() { if (length(gl_PointCoord - 0.5) > 0.5) discard; o = vec4(vcol, 1.0); }`;
+
+function program(gl, vs, fs) {
+  const pr = gl.createProgram();
+  for (const [type, src] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src); gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh));
+    gl.attachShader(pr, sh);
+  }
+  gl.bindAttribLocation(pr, 0, 'pos'); gl.bindAttribLocation(pr, 1, 'grad'); gl.bindAttribLocation(pr, 2, 'col');
+  gl.linkProgram(pr);
+  if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(pr));
+  return pr;
+}
+
+function setup3d(p) {
+  const cv = p.el.querySelector('.gl');
+  const gl = cv.getContext('webgl2', { antialias: true });
+  if (!gl) return null;
+  const s = { gl, prog: program(gl, VS, FS), pts: program(gl, PVS, PFS), grid: null };
+  s.vao = gl.createVertexArray(); gl.bindVertexArray(s.vao);
+  s.posBuf = gl.createBuffer(); s.gradBuf = gl.createBuffer(); s.colBuf = gl.createBuffer(); s.idx = gl.createBuffer();
+  const attr = (loc, buf, n, type = gl.FLOAT, norm = false) => {
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, n, type, norm, 0, 0);
+  };
+  attr(0, s.posBuf, 3); attr(1, s.gradBuf, 2); attr(2, s.colBuf, 3, gl.UNSIGNED_BYTE, true);
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, s.idx);
+  const idx = new Uint32Array((N - 1) * (N - 1) * 6);
+  let n = 0;
+  for (let j = 0; j < N - 1; j++) for (let i = 0; i < N - 1; i++) {
+    const a = j * N + i, b = a + 1, c = a + N, d = c + 1;
+    idx.set([a, c, b, b, c, d], n); n += 6;
+  }
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
+  s.count = idx.length;
+  s.pvao = gl.createVertexArray(); gl.bindVertexArray(s.pvao);
+  s.pPos = gl.createBuffer(); s.pCol = gl.createBuffer();
+  attr(0, s.pPos, 3); attr(2, s.pCol, 3, gl.UNSIGNED_BYTE, true);
+  gl.bindVertexArray(null);
+  return s;
+}
+
+// The shape: x east and z south in km from the grid centre, y the height in metres.
+function shape(s, g) {
+  const { gl } = s, H = g.heights, mid = (N / 2) | 0;
+  let lo = Infinity;
+  for (const h of H) if (h > -1e8 && h < lo) lo = h;
+  const at = (i, j) => { const h = H[j * N + i]; return h > -1e8 ? h : lo; };
+  const pos = new Float32Array(N * N * 3), grad = new Float32Array(N * N * 2);
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const k = j * N + i;
+    pos[k * 3] = (i - mid) * g.cell / 1000; pos[k * 3 + 1] = at(i, j); pos[k * 3 + 2] = (j - mid) * g.cell / 1000;
+    grad[k * 2] = (at(Math.min(N - 1, i + 1), j) - at(Math.max(0, i - 1), j)) / (2 * g.cell);
+    grad[k * 2 + 1] = (at(i, Math.max(0, j - 1)) - at(i, Math.min(N - 1, j + 1))) / (2 * g.cell);
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, s.posBuf); gl.bufferData(gl.ARRAY_BUFFER, pos, gl.STATIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER, s.gradBuf); gl.bufferData(gl.ARRAY_BUFFER, grad, gl.STATIC_DRAW);
+  s.grid = g;
+}
+
+// The colours: kept ground orange, its edge white, the rest grey; dots for the summit and the joined peaks.
+function paint(s, g, t) {
+  const { gl } = s, col = new Uint8Array(N * N * 3), I = t.inside;
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const k = j * N + i;
+    let c = [150, 150, 150];
+    if (I[k]) {
+      const edge = (i > 0 && !I[k - 1]) || (i < N - 1 && !I[k + 1]) || (j > 0 && !I[k - N]) || (j < N - 1 && !I[k + N]);
+      c = edge ? [255, 255, 255] : [224, 150, 70];
+    }
+    col.set(c, k * 3);
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, s.colBuf); gl.bufferData(gl.ARRAY_BUFFER, col, gl.DYNAMIC_DRAW);
+  const mid = (N / 2) | 0, dots = [[t.tj * N + t.ti, [255, 64, 64]], ...t.joined.map((k) => [k, [64, 160, 255]])];
+  const pp = new Float32Array(dots.length * 3), pc = new Uint8Array(dots.length * 3);
+  dots.forEach(([k, c], n) => {
+    pp.set([(k % N - mid) * g.cell / 1000, g.heights[k] + 30, (((k / N) | 0) - mid) * g.cell / 1000], n * 3);
+    pc.set(c, n * 3);
+  });
+  gl.bindBuffer(gl.ARRAY_BUFFER, s.pPos); gl.bufferData(gl.ARRAY_BUFFER, pp, gl.DYNAMIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER, s.pCol); gl.bufferData(gl.ARRAY_BUFFER, pc, gl.DYNAMIC_DRAW);
+  s.dots = dots.length;
+}
+
+function show3d(p) {
+  if (!p.gl) { try { p.gl = setup3d(p); } catch (e) { console.error(e); p.gl = null; } }
+  if (!p.gl || !p.grid || !p.t) return;
+  if (p.gl.grid !== p.grid) shape(p.gl, p.grid);
+  paint(p.gl, p.grid, p.t);
+  render3d(p);
+}
+
+// Turning it: drag to turn, wheel to zoom. The view is kept per panel.
+function orbit(p) {
+  p.cam = { yaw: 0.6, pitch: 0.5, zoom: 1 };
+  const cv = p.el.querySelector('.gl');
+  let last = null;
+  cv.onpointerdown = (e) => { last = [e.clientX, e.clientY]; cv.setPointerCapture(e.pointerId); };
+  cv.onpointerup = cv.onpointercancel = () => { last = null; };
+  cv.onpointermove = (e) => {
+    if (!last) return;
+    p.cam.yaw -= (e.clientX - last[0]) * 0.008;
+    p.cam.pitch = Math.max(0.05, Math.min(1.55, p.cam.pitch + (e.clientY - last[1]) * 0.008));
+    last = [e.clientX, e.clientY];
+    render3d(p);
+  };
+  cv.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    p.cam.zoom = Math.max(0.1, Math.min(4, p.cam.zoom * Math.exp(e.deltaY * 0.001)));
+    render3d(p);
+  }, { passive: false });
+}
+
+function render3d(p) {
+  const s = p.gl, g = p.grid, t = p.t;
+  if (!s || !g || !t || p.m.view !== '3d') return;
+  const { gl } = s, mid = (N / 2) | 0;
+  const base = t.col;
+  // Look at the summit, part way up.
+  const tx = (t.ti - mid) * g.cell / 1000, tz = (t.tj - mid) * g.cell / 1000;
+  const ty = (t.top - base) / 1000 * exag * 0.4;
+  const dist = rules.reach * 2.4 * p.cam.zoom;
+  const cp = Math.cos(p.cam.pitch);
+  const eye = [tx + dist * cp * Math.sin(p.cam.yaw), ty + dist * Math.sin(p.cam.pitch), tz + dist * cp * Math.cos(p.cam.yaw)];
+  const mvp = mul(perspective(0.8, 1, dist / 100, dist * 10), lookAt(eye, [tx, ty, tz]));
+  gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+  gl.clearColor(0.04, 0.05, 0.07, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.enable(gl.DEPTH_TEST);
+  for (const pr of [s.prog, s.pts]) {
+    gl.useProgram(pr);
+    gl.uniformMatrix4fv(gl.getUniformLocation(pr, 'mvp'), false, mvp);
+    gl.uniform1f(gl.getUniformLocation(pr, 'ex'), exag);
+    gl.uniform1f(gl.getUniformLocation(pr, 'base'), base);
+    if (pr === s.prog) { gl.bindVertexArray(s.vao); gl.drawElements(gl.TRIANGLES, s.count, gl.UNSIGNED_INT, 0); }
+    else { gl.disable(gl.DEPTH_TEST); gl.bindVertexArray(s.pvao); gl.drawArrays(gl.POINTS, 0, s.dots); }
+  }
+  gl.bindVertexArray(null);
+}
+
+// Column-major 4x4 matrices, as WebGL wants them.
+function perspective(fov, aspect, near, far) {
+  const f = 1 / Math.tan(fov / 2), nf = 1 / (near - far);
+  return new Float32Array([f / aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) * nf, -1, 0, 0, 2 * far * near * nf, 0]);
+}
+function lookAt(e, c) {
+  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const norm = (a) => { const l = Math.hypot(...a); return a.map((v) => v / l); };
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const z = norm(sub(e, c)), x = norm(cross([0, 1, 0], z)), y = cross(z, x);
+  return new Float32Array([x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0, -dot(x, e), -dot(y, e), -dot(z, e), 1]);
+}
+function mul(a, b) {
+  const o = new Float32Array(16);
+  for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
+    let v = 0;
+    for (let k = 0; k < 4; k++) v += a[k * 4 + j] * b[i * 4 + k];
+    o[i * 4 + j] = v;
+  }
+  return o;
 }
 
 function updateSettings() {

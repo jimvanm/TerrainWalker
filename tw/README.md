@@ -44,7 +44,8 @@ published facts, and names the source of the data at each.
 To tune where a traced mountain ends, open
 <http://localhost:8080/mountainlab.html>. It shows several mountains side by
 side; the sliders change the rules, and the settings line at the bottom is
-what the app would use.
+what the app would use. Each mountain's 3D button shows it as a solid you can
+turn: drag to turn, wheel to zoom.
 
 To publish, push the repo and turn on GitHub Pages from the root; the app is
 then at `.../TerrainWalker/tw/`. Places of interest are the exception: their
