@@ -85,15 +85,17 @@ function colour(h, steep) {
 
 // The model for a piece. heightAt(e, n): the source height at [east, north]
 // metres from the outline's middle. poly: the outline in the same metres.
-// mode 'rise' or 'sea' (see the top). Returns { pos, col, idx, rise, edge }:
-// pos x east, y up, z south (true metres), as landmark models are.
-export function buildPiece(heightAt, poly, mode = 'rise') {
+// mode 'rise' or 'sea' (see the top). cut: in rise mode, the height it is cut
+// at (a traced mountain's valleys round it); without one, the middle height
+// along its edge. Returns { pos, col, idx, rise, edge }: pos x east, y up,
+// z south (true metres), as landmark models are.
+export function buildPiece(heightAt, poly, mode = 'rise', cut = null) {
   let e0 = Infinity, e1 = -Infinity, n0 = Infinity, n1 = -Infinity;
   for (const [e, n] of poly) { e0 = Math.min(e0, e); e1 = Math.max(e1, e); n0 = Math.min(n0, n); n1 = Math.max(n1, n); }
   const step = Math.max(e1 - e0, n1 - n0) / MAX_CELLS;
   const W = Math.ceil((e1 - e0) / step) + 1, H = Math.ceil((n1 - n0) / step) + 1;
   const edge = median(alongEdge(poly, step).map(([e, n]) => heightAt(e, n)));
-  const base = mode === 'sea' ? 0 : (edge ?? 0);
+  const base = mode === 'sea' ? 0 : (cut ?? edge ?? 0);
   // Heights on the grid's corners (nodes); row j runs east, from the north.
   const hs = new Float32Array(W * H);
   for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
@@ -272,14 +274,15 @@ export class Transplant {
     if (!fromList && this.onPicked) {
       name = this.onPicked({ corners: cs.map((c) => [+mercYToLat(c.my).toFixed(6), +mercXToLon(c.mx).toFixed(6)]), mode: this.mode }) || name;
     }
-    this.piece = { poly, heightAt: (e, nn) => at(cx + e / k, cy + nn / k), name, z };
+    const cut = fromList && Number.isFinite(fromList.cut) ? fromList.cut : null;
+    this.piece = { poly, heightAt: (e, nn) => at(cx + e / k, cy + nn / k), name, z, cut };
     this.yawDeg = 0;
     this.state = 'carrying';
     this._model();
   }
 
   _model() {
-    const built = buildPiece(this.piece.heightAt, this.piece.poly, this.mode);
+    const built = buildPiece(this.piece.heightAt, this.piece.poly, this.mode, this.piece.cut);
     Object.assign(this.piece, built);
     const id = 'piece-model:' + (count++);
     this.L.addModel(id, built);
@@ -334,7 +337,7 @@ export class Transplant {
     const it = this._resolve(aim);
     if (!it) return false;
     const mode = it.piece.mode === 'rise' ? 'sea' : 'rise';
-    const built = buildPiece(it.piece.heightAt, it.piece.poly, mode);
+    const built = buildPiece(it.piece.heightAt, it.piece.poly, mode, it.piece.cut);
     const id = 'piece-model:' + (count++);
     this.L.addModel(id, built);
     const base = this._base(it.piece.poly, mode, it.mx, it.my, it.yawDeg, groundAt);

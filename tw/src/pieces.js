@@ -26,10 +26,12 @@ export function savePieces(list) {
 }
 
 // A new entry for an outline just picked up; returns it (with its name).
-export function addPiece(list, { corners, mode, name }) {
+// cut: for a traced mountain, the height it is cut at.
+export function addPiece(list, { corners, mode, name, cut }) {
   let n = list.length + 1;
   while (list.some((p) => p.name === 'Piece ' + n)) n++;
   const p = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: name || 'Piece ' + n, corners, mode };
+  if (Number.isFinite(cut)) p.cut = cut;
   list.unshift(p);
   return p;
 }

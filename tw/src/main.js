@@ -116,7 +116,7 @@ const pieceList = initPieces({
   find: async (m, km) => {
     const t = await traceMountain(m.lat, m.lon, { reach: km }, fetchHeights);
     if (!t) return 'Could not find its outline.';
-    const entry = pieceList.added({ name: m.name, corners: t.corners, mode: 'rise' });
+    const entry = pieceList.added({ name: m.name, corners: t.corners, mode: 'rise', cut: t.col });
     dropper.off();
     await transplant.take(entry);
     return `${m.name}: rises ${t.prominence} m above the valleys round it (${t.col} m)` + (t.cut ? `, out to your ${km} km reach` : '') + '. In hand.';

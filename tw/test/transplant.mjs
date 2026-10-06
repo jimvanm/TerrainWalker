@@ -35,6 +35,11 @@ const { Landmarks } = await import('../src/landmarks.js');
   // A triangle outline takes about half the square's cells.
   const tri = T.buildPiece(cone, [[-5000, -5000], [5000, -5000], [-5000, 5000]], 'rise');
   assert.ok(tri.idx.length < rise.idx.length * 0.62, 'cells outside the outline are left out');
+  // A traced mountain is cut at its valleys, wherever its outline runs.
+  const high = [[-2000, -2000], [2000, -2000], [2000, 2000], [-2000, 2000]];     // edge well up the cone
+  const atEdge = T.buildPiece(cone, high, 'rise'), atCut = T.buildPiece(cone, high, 'rise', 1000);
+  assert.ok(atEdge.base > 2000 && atCut.base === 1000, 'cut at the given height, not the edge: ' + atEdge.base.toFixed(0));
+  assert.ok(Math.abs(atCut.rise - 3000) < 60, 'and rises from there: ' + atCut.rise.toFixed(0));
   console.log('ok  a piece rises above its edge (or stands above sea level), with a wall around it');
 }
 
