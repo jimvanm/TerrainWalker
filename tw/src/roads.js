@@ -163,6 +163,10 @@ function ribbon(pts, strips, lift, hAt, mb, drapeG = null) {
 }
 
 // g = { size14, size12, bx, by, cosLat, nodes }
+//   Optional, for a ground that is not a terrain tile (a moved piece, city.js):
+//   g.hAt(e, s) gives the ground height at local metres, and g.cell is the
+//   ground grid's cell size in the same metres (with bx, by placing the grid
+//   as before). Without them the terrain tile's own grid is used.
 //   bx, by : offset from the near tile centre to the elevation tile NW corner,
 //            in mercator metres, so local (east, south) maps to tile (u, v).
 // aero : the tile's aeroway layer (optional).
@@ -170,9 +174,9 @@ function ribbon(pts, strips, lift, hAt, mb, drapeG = null) {
 // g.cx, g.cy (optional): the tile centre in mercator metres, for runway dashes.
 export function buildRoads(layer, g, mb, aero = null, counts = null) {
   if (!layer && !aero) return [0, 0, 0];
-  const step = g.size12 / GRID / 3;       // a third of a terrain cell
-  const hAt = (e, s) =>
-    nodeHeightAt(g.nodes, (e + g.bx) / g.size12, (g.by + s) / g.size12);
+  const step = (g.cell || g.size12 / GRID) / 3;       // a third of a terrain cell
+  const hAt = g.hAt || ((e, s) =>
+    nodeHeightAt(g.nodes, (e + g.bx) / g.size12, (g.by + s) / g.size12));
   const cnt = counts || {};
   cnt.rail = 0; cnt.aeroAreas = 0; cnt.aeroLines = 0;
 

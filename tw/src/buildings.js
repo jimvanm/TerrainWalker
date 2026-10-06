@@ -206,7 +206,8 @@ function recordOutline(stats, c, ring, g) {
   (stats.outlines || (stats.outlines = [])).push({ id: c.id, area: Math.round(Math.abs(area) / 2), edges });
 }
 
-// g = { size14, size12, bx, by, cosLat, nodes }, same as roads.
+// g = { size14, size12, bx, by, cosLat, nodes }, same as roads (including the
+// optional g.hAt and g.cell for a ground of its own).
 // opt.minHeight : skip anything not KNOWN to be at least this tall (skyline mode)
 // opt.mask      : circles { x, y, r } (tile-local) where no building is drawn: landmark sites
 // opt.sunk      : how far walls start below the ground, for coarse far terrain
@@ -222,7 +223,7 @@ export function buildBuildings(layer, g, mb, maxTris = BUILDING_TRIS, opt = {}) 
   if (!layer) return stats;
   const areas = landuseAreas(opt.landuse);
   const E = layer.extent;
-  const hAt = (e, s) => nodeHeightAt(g.nodes, (e + g.bx) / g.size12, (g.by + s) / g.size12);
+  const hAt = g.hAt || ((e, s) => nodeHeightAt(g.nodes, (e + g.bx) / g.size12, (g.by + s) / g.size12));
   const cand = [];
 
   for (const f of layer.features) {

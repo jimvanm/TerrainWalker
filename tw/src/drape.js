@@ -27,7 +27,7 @@ export function clipHalf(pts, f) {
 // lines and cell diagonals, so every piece lies on one terrain triangle and
 // neither floats nor sinks on a slope. Points are in local metres.
 export function drapeTri(t, g, hAt, lift, colour, mb) {
-  const cell = g.size12 / GRID;
+  const cell = g.cell || g.size12 / GRID;      // g.cell: a ground with its own grid (a moved piece)
   // Grid units: whole numbers are terrain grid lines (see nodeHeightAt).
   const U = (e) => (e + g.bx) / cell, V = (s) => (g.by + s) / cell;
   const us = [U(t[0]), U(t[2]), U(t[4])], vs = [V(t[1]), V(t[3]), V(t[5])];
