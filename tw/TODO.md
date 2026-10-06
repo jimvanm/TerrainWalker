@@ -78,9 +78,6 @@ always with everything loaded.
 - [ ] **Rogers Centre mask, small pieces.** The footprint mask hid the main
       map building; the smaller pieces around the rim were the open question.
       Confirm with key 4 (on and off) that nothing pokes through.
-- [ ] **Version number.** The status bar still says v0.12.10 (`BUILD` in
-      `src/config.js`); it has not changed for many changes. Bump it with each
-      change, or remove it.
 - [ ] **No buildings from airliner height.** At 9.4 km over Toronto,
       downtown 10 km away shows no buildings at all, only the landmarks.
       Cause: the near field and the skyline both switch off above

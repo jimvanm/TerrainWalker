@@ -1,6 +1,8 @@
 // All tunables live here.
 
-export const BUILD = '0.12.10';
+// The version in the status bar. Goes up by one with every change sent, so
+// what you are running can be told apart at a glance.
+export const BUILD = '0.13.0';
 
 // Resolved at runtime to a {z}/{x}/{y} template. Never hardcode the tile URL:
 // the style points at a TileJSON, and that indirection is how the service is
