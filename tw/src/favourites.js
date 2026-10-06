@@ -6,7 +6,7 @@
 
 import { loadPlaces, savePlaces, makePlace, setStart } from './places.js';
 
-const isField = (t) => t && t.tagName === 'INPUT';
+const isField = (t) => t && (t.tagName === 'INPUT' || t.tagName === 'SELECT');
 
 export function initFavourites({ root, getView, jump }) {
   let places = loadPlaces();
@@ -15,10 +15,13 @@ export function initFavourites({ root, getView, jump }) {
   let armed = null;          // id waiting for a second click to delete
   let armTimer = 0;
 
-  // Keystrokes aimed at a text box stop here, before the camera controls and
-  // the layer toggles ever see them.
+  // Keystrokes aimed at a text box (here or in the PIECES panel) stop at the
+  // document, on their way up: the box itself gets them first (Enter, Esc),
+  // and the camera controls and the keys, which listen on the window above,
+  // never do. (Stopping them on the way down, as this once did, kept them
+  // from the box too: Enter did nothing.)
   for (const type of ['keydown', 'keyup']) {
-    window.addEventListener(type, (e) => { if (isField(e.target)) e.stopImmediatePropagation(); }, true);
+    document.addEventListener(type, (e) => { if (isField(e.target)) e.stopPropagation(); });
   }
 
   const el = (tag, cls, text) => {

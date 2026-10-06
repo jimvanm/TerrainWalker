@@ -3,7 +3,9 @@ globalThis.localStorage = { getItem: (k) => mem.has(k) ? mem.get(k) : null, setI
 const listeners = {};
 globalThis.window = globalThis;
 globalThis.addEventListener = (t, f) => { (listeners[t] ||= []).push(f); };
+const docListeners = {};
 globalThis.document = { pointerLockElement: null, exitPointerLock() { this.exited = true; },
+  addEventListener: (t, f, capture) => { (docListeners[t] ||= []).push({ f, capture }); },
   createElement: (tag) => ({ tag, children: [], className: '', textContent: '', append(...c) { this.children.push(...c); },
     focus() {}, select() {} }) };
 const root = document.createElement('div');
@@ -13,6 +15,15 @@ let jumped = null;
 const ui = initFavourites({ root, jump: (p) => { jumped = p; },
   getView: () => ({ lat: 1.23456, lon: 2.34567, alt: 500, agl: 120, yaw: 10, pitch: -5, fly: 1 }) });
 const ok = (c, m) => { if (!c) { console.error('FAIL', m); process.exit(1); } console.log('ok  ' + m); };
+// Keys typed in a text box: let through to the box, stopped before the window.
+{
+  const g = (docListeners.keydown || [])[0];
+  let stopped = 0;
+  g.f({ target: { tagName: 'INPUT' }, stopPropagation() { stopped++; }, stopImmediatePropagation() { stopped += 100; } });
+  ok(!g.capture && stopped === 1, 'keys in a text box reach the box (stopped on the way up, at the document)');
+  g.f({ target: { tagName: 'CANVAS' }, stopPropagation() { stopped++; } });
+  ok(stopped === 1, 'keys elsewhere go on to the camera and the key table');
+}
 const find = (n, cls) => { const out = []; (function w(x) { if (x.className && x.className.split(' ').includes(cls)) out.push(x); (x.children || []).forEach(w); })(n); return out; };
 
 find(root, 'ftitle')[0].onclick();
