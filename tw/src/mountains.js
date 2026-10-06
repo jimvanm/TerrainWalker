@@ -86,7 +86,10 @@ const claim = (e, p) => {
 //      low spurs reaching out go.)
 //   4. It is sliced at the low ground along its edge: the lowest `slice` of it.
 //   5. Nothing beyond `reach` (a circle round the summit).
-export const RULES = { reach: 15, bump: 60, join: 0.6, joinKm: 5, trim: 0.25, slice: 0.1 };
+//   6. Arms narrower than `neck` metres are cut off: the shape is shrunk by
+//      half that, grown back by the same, and only what still reaches the
+//      summit is kept. 0: no cutting.
+export const RULES = { reach: 15, bump: 60, join: 0.6, joinKm: 5, trim: 0.25, slice: 0.1, neck: 0 };
 
 // heights: Float32Array N*N (row 0 north), cells `cell` metres; the summit is
 // near cell (si, sj). rules: as RULES. Returns { inside, col, top, ti, tj,
@@ -194,7 +197,59 @@ export function traceGrid(heights, N, si, sj, cell, rules = RULES) {
       if (!inside[q] && keep(q)) { inside[q] = 1; stack.push(q); area++; }
     }
   }
+  // 6. Thin arms off.
+  if (r.neck > 0) {
+    const thin = openUp(inside, N, r.neck / 2 / cell);
+    if (thin[s0]) {
+      inside.fill(0); inside[s0] = 1; area = 1;
+      const st = [s0];
+      while (st.length) {
+        const k = st.pop(), i = k % N, j = (k / N) | 0;
+        for (const [a, b] of nbrs(i, j)) {
+          if (a < 0 || b < 0 || a >= N || b >= N) continue;
+          const q = b * N + a;
+          if (!inside[q] && thin[q]) { inside[q] = 1; st.push(q); area++; }
+        }
+      }
+    }
+  }
   return { inside, col, top, ti, tj, cut, joined, area: area * cell * cell / 1e6 };
+}
+
+// How far each cell is from the nearest cell where `on` is false (or true,
+// with `to`), in cells: two sweeps, steps of 1 and 1.414.
+function distance(on, N, to = 0) {
+  const d = new Float32Array(N * N);
+  for (let k = 0; k < N * N; k++) d[k] = (on[k] ? 1 : 0) === to ? 0 : 1e9;
+  const D = Math.SQRT2;
+  const step = (k, i, j, a, b, w) => {
+    if (a < 0 || b < 0 || a >= N || b >= N) { if (!to && d[k] > w) d[k] = w; return; }
+    const v = d[b * N + a] + w;
+    if (v < d[k]) d[k] = v;
+  };
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const k = j * N + i;
+    if (!d[k]) continue;
+    step(k, i, j, i - 1, j, 1); step(k, i, j, i - 1, j - 1, D); step(k, i, j, i, j - 1, 1); step(k, i, j, i + 1, j - 1, D);
+  }
+  for (let j = N - 1; j >= 0; j--) for (let i = N - 1; i >= 0; i--) {
+    const k = j * N + i;
+    if (!d[k]) continue;
+    step(k, i, j, i + 1, j, 1); step(k, i, j, i + 1, j + 1, D); step(k, i, j, i, j + 1, 1); step(k, i, j, i - 1, j + 1, D);
+  }
+  return d;
+}
+
+// The cells of `inside` that a disc of radius `rad` cells fits round:
+// shrink by rad, grow back by rad. Anything thinner than 2 rad goes.
+export function openUp(inside, N, rad) {
+  const toEdge = distance(inside, N, 0);
+  const core = new Uint8Array(N * N);
+  for (let k = 0; k < N * N; k++) core[k] = toEdge[k] > rad ? 1 : 0;
+  const toCore = distance(core, N, 1);
+  const out = new Uint8Array(N * N);
+  for (let k = 0; k < N * N; k++) out[k] = inside[k] && toCore[k] <= rad ? 1 : 0;
+  return out;
 }
 
 // The outer edge of the cells marked inside, as a closed list of cell

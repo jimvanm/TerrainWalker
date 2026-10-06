@@ -74,6 +74,19 @@ const geo = await import('../src/geo.js');
   assert.ok(untrimmed.inside[50 * N + 90] && !trimmed.inside[50 * N + 90], 'trimming takes the far end of a low spur');
   assert.ok(trimmed.inside[50 * N + 60] && trimmed.inside[50 * N + 40], 'and keeps the mountain itself');
   console.log('ok  neighbours join by saddle height and distance; low spurs far out are trimmed');
+  // Thin arms: a ridge 3 cells wide off a broad cone goes; the cone stays.
+  const arm = new Float32Array(N * N);
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const cone = 4000 - 150 * Math.hypot(i - 50, j - 50);
+    const ridge = Math.abs(j - 50) <= 1 && i > 50 ? 3500 - 10 * (i - 50) : 0;
+    arm[j * N + i] = Math.max(1000, cone, ridge);
+  }
+  const fat = M.traceGrid(arm, N, 50, 50, 100, { reach: 100, join: 2, trim: 0 });
+  const slim = M.traceGrid(arm, N, 50, 50, 100, { reach: 100, join: 2, trim: 0, neck: 600 });
+  assert.ok(fat.inside[50 * N + 85] && !slim.inside[50 * N + 85], 'an arm 300 m wide goes when narrower than 600 m is cut');
+  assert.ok(slim.inside[50 * N + 60] && slim.inside[50 * N + 40] && slim.inside[40 * N + 50], 'the cone itself stays');
+  assert.ok(slim.area > fat.area * 0.8, 'and keeps most of its size: ' + slim.area.toFixed(1) + ' of ' + fat.area.toFixed(1));
+  console.log('ok  arms narrower than the neck setting are cut off');
 }
 
 // ---- the outline of the cells ----

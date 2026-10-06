@@ -79,6 +79,7 @@ const SLIDERS = [
   ['join', 'Join a neighbour if its saddle is', 0, 1, 0.05, (v) => Math.round(v * 100) + '% up', 'of the way from the base to our top (Lhotse: about 75%)'],
   ['joinKm', '...and its top is within', 0, 30, 0.5, (v) => v + ' km', 'of our summit'],
   ['trim', 'Trim: at the reach keep only ground', 0, 0.9, 0.05, (v) => Math.round(v * 100) + '% up', 'less nearer in, nothing at the summit: takes the far, low spurs'],
+  ['neck', 'Cut arms narrower than', 0, 1500, 50, (v) => v ? v + ' m' : 'off', 'thin tails and strips joined to the mountain by a narrow neck'],
   ['slice', 'Slice at the lowest', 0, 0.5, 0.05, (v) => Math.round(v * 100) + '% of its edge', 'the height it is cut at: the valley floors round it'],
 ];
 const rules = { ...RULES };
