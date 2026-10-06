@@ -2,15 +2,9 @@
 //
 // 1. The name is looked up in Wikidata (the free database behind Wikipedia),
 //    live, for its summit's position. Nothing else is needed from it.
-// 2. The outline comes from the same height tiles the app streams. From the
-//    summit, the ground is taken in, highest first, until the next piece is
-//    higher than the summit: the lowest point crossed on the way is the col,
-//    the lowest point you must cross to reach higher ground. Everything above
-//    the col and attached to the summit is the mountain; the rest is left.
-//    Its rise above the col is its prominence.
-// 3. A mountain whose col is further than `reach` from the summit (Everest's
-//    is most of Asia) is cut by a circle of that radius, at the valley floors
-//    round it (the lowest tenth of the ground on the circle).
+// 2. The outline comes from the same height tiles the app streams: the ground
+//    you can reach from the summit without climbing (see traceGrid), sliced
+//    at the valley floors round it, within `reach` of the summit.
 
 import { mercScale, mercYToLat, lonToMercX, latToMercY, mercXToLon, tileSizeMerc, HALF } from './geo.js';
 import { chooseZoom, sampler } from './transplant.js';
@@ -77,10 +71,20 @@ const claim = (e, p) => {
 
 // ---- the outline -------------------------------------------------------------------
 
-// heights: Float32Array GRID*GRID (row 0 north), cell size `cell` metres,
-// summit near cell (si, sj). Returns { inside: Uint8Array, col, top, ti, tj,
-// cut } (cut: the square's edge, not higher ground, set the col).
-export function traceGrid(heights, N, si, sj, near = 3) {
+// heights: Float32Array N*N (row 0 north); the summit is near cell (si, sj).
+//
+// Which mountain does a spot belong to? Walk uphill from it, always the
+// steepest way: the peak you end on. The mountain is every spot whose way up
+// ends on our summit; where the way up leads to another peak, that ground is
+// the other mountain's, even if it lies low (the foot of a neighbour). Bumps
+// that rise less than `climb` metres above where they meet a bigger peak
+// (noise in the data, a boulder field) are not peaks of their own. The reach
+// is a circle round the summit. The mountain is then sliced at the low ground
+// along its edge (the lowest tenth): the valley floors round it.
+//
+// Returns { inside: Uint8Array, col, top, ti, tj, cut }: col is the slice
+// height, cut says the mountain reached the circle.
+export function traceGrid(heights, N, si, sj, near = 3, climb = 60) {
   // The summit's position from a gazetteer is rarely exact: take the highest
   // cell close to it.
   let ti = si, tj = sj, top = -Infinity;
@@ -89,65 +93,68 @@ export function traceGrid(heights, N, si, sj, near = 3) {
       if (heights[j * N + i] > top) { top = heights[j * N + i]; ti = i; tj = j; }
     }
   }
-  // Highest first: a heap of the cells around what is taken so far.
-  const seen = new Uint8Array(N * N), heap = [];
-  const push = (k) => {
-    if (seen[k]) return;
-    seen[k] = 1; heap.push(k);
-    let i = heap.length - 1;
-    while (i > 0) { const p = (i - 1) >> 1; if (heights[heap[p]] >= heights[heap[i]]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; }
-  };
-  const pop = () => {
-    const top = heap[0], last = heap.pop();
-    if (heap.length) {
-      heap[0] = last;
-      let i = 0;
-      for (;;) {
-        const l = 2 * i + 1, r = l + 1;
-        let m = i;
-        if (l < heap.length && heights[heap[l]] > heights[heap[m]]) m = l;
-        if (r < heap.length && heights[heap[r]] > heights[heap[m]]) m = r;
-        if (m === i) break;
-        [heap[m], heap[i]] = [heap[i], heap[m]]; i = m;
-      }
-    }
-    return top;
-  };
-  // The reach: a circle round the summit, as large as the square allows.
   const R = Math.min(ti, tj, N - 1 - ti, N - 1 - tj) - 1;
-  const out = (i, j) => (i - ti) * (i - ti) + (j - tj) * (j - tj) >= R * R;
-  push(tj * N + ti);
-  let col = top, cut = false;
-  while (heap.length) {
-    const k = pop(), h = heights[k], i = k % N, j = (k / N) | 0;
-    if (h > top) break;                                   // higher ground: col found
-    if (h < -1e8 || out(i, j)) { cut = true; break; }     // reached the reach (or the edge of the data)
-    col = Math.min(col, h);
-    push(k - 1); push(k + 1); push(k - N); push(k + N);
-  }
-  // A giant whose col is beyond the reach: the first ground to reach the
-  // circle is the highest ridge, and cutting there leaves a high, spidery
-  // cap. Cut at the valley floors round the circle instead: the lowest tenth
-  // of the ground on it.
-  if (cut) {
-    const rim = [];
-    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
-      const d2 = (i - ti) * (i - ti) + (j - tj) * (j - tj);
-      if (d2 >= (R - 1) * (R - 1) && d2 < R * R && heights[j * N + i] > -1e8) rim.push(heights[j * N + i]);
+  const inCircle = (i, j) => (i - ti) * (i - ti) + (j - tj) * (j - tj) < R * R;
+
+  // Highest first, each spot joins the peak its highest neighbour already
+  // belongs to (the steepest way up), or starts a peak of its own. Where two
+  // peaks meet, the lesser one joins the greater if it rises less than
+  // `climb` above the meeting point.
+  const order = [];
+  for (let k = 0; k < N * N; k++) if (heights[k] > -1e8 && inCircle(k % N, (k / N) | 0)) order.push(k);
+  order.sort((a, b) => heights[b] - heights[a]);
+  const label = new Int32Array(N * N).fill(-1), parent = [], peak = [];
+  const root = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+  for (const k of order) {
+    const i = k % N, j = (k / N) | 0, h = heights[k];
+    let best = -1, bestH = -Infinity;
+    const roots = [];
+    for (const [a, b] of [[i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]]) {
+      if (a < 0 || b < 0 || a >= N || b >= N) continue;
+      const q = b * N + a;
+      if (label[q] < 0) continue;
+      const r = root(label[q]);
+      if (!roots.includes(r)) roots.push(r);
+      if (heights[q] > bestH) { bestH = heights[q]; best = r; }
     }
-    rim.sort((a, b) => a - b);
-    if (rim.length) col = Math.min(col, rim[Math.floor(rim.length * 0.1)]);
+    if (best < 0) { parent.push(parent.length); peak.push(h); label[k] = parent.length - 1; continue; }
+    label[k] = best;
+    for (const r of roots) {
+      const a = root(r), b = root(best);
+      if (a === b) continue;
+      const [lo, hi] = peak[a] < peak[b] ? [a, b] : [b, a];
+      if (peak[lo] - h < climb) parent[lo] = hi;
+    }
   }
-  // The mountain: above the col, inside the reach, attached to the summit.
-  const inside = new Uint8Array(N * N), stack = [tj * N + ti];
-  inside[tj * N + ti] = 1;
+  const s0 = tj * N + ti, ours = root(label[s0]);
+  const region = new Uint8Array(N * N);
+  let cut = false;
+  for (const k of order) {
+    if (root(label[k]) !== ours) continue;
+    region[k] = 1;
+    const i = k % N, j = (k / N) | 0;
+    if (!cut && [[i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]].some(([a, b]) => !inCircle(a, b))) cut = true;
+  }
+
+  // The slice: the lowest tenth of the ground along the region's edge.
+  const edge = [];
+  for (let k = 0; k < N * N; k++) {
+    if (!region[k]) continue;
+    const i = k % N, j = (k / N) | 0;
+    if ([[i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]].some(([a, b]) => a < 0 || b < 0 || a >= N || b >= N || !region[b * N + a])) edge.push(heights[k]);
+  }
+  edge.sort((a, b) => a - b);
+  const col = edge.length ? edge[Math.floor(edge.length * 0.1)] : top;
+
+  // The mountain: in the region, above the slice, attached to the summit.
+  const inside = new Uint8Array(N * N), stack = [s0];
+  inside[s0] = 1;
   while (stack.length) {
     const k = stack.pop(), i = k % N, j = (k / N) | 0;
-    for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-      const a = i + di, b = j + dj;
-      if (a < 0 || b < 0 || a >= N || b >= N || out(a, b)) continue;
+    for (const [a, b] of [[i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]]) {
+      if (a < 0 || b < 0 || a >= N || b >= N) continue;
       const q = b * N + a;
-      if (!inside[q] && heights[q] > col) { inside[q] = 1; stack.push(q); }
+      if (!inside[q] && region[q] && heights[q] > col) { inside[q] = 1; stack.push(q); }
     }
   }
   return { inside, col, top, ti, tj, cut };

@@ -119,7 +119,7 @@ const pieceList = initPieces({
     const entry = pieceList.added({ name: m.name, corners: t.corners, mode: 'rise' });
     dropper.off();
     await transplant.take(entry);
-    return `${m.name}: rises ${t.prominence} m above its col` + (t.cut ? ` (its col is further than ${km} km: cut at ${km} km, at the valley floors, ${t.col} m)` : '') + '. In hand.';
+    return `${m.name}: rises ${t.prominence} m above the valleys round it (${t.col} m)` + (t.cut ? `, out to your ${km} km reach` : '') + '. In hand.';
   },
 });
 transplant.onPicked = (v) => pieceList.picked(v);
