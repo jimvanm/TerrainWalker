@@ -25,7 +25,19 @@ const geo = await import('../src/geo.js');
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) one[j * N + i] = 3000 - 20 * Math.hypot(i - 50, j - 50);
   const u = M.traceGrid(one, N, 50, 50);
   assert.ok(u.col < 3000 - 20 * 45 && u.col > 3000 - 20 * 52, 'alone, the col is where the ground first reaches the edge: ' + u.col.toFixed(0));
-  console.log('ok  the col is the lowest point crossed to reach higher ground (or the reach)');
+  // A giant with a high ridge running out past the reach: cut at the valley
+  // floors round the circle, not where the ridge first crosses it.
+  const g = new Float32Array(N * N);
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const cone = 8000 - 120 * Math.hypot(i - 50, j - 50);
+    const ridge = Math.abs(j - 50) < 3 && i > 50 ? 7000 - 10 * (i - 50) : 0;
+    g[j * N + i] = Math.max(3000, cone, ridge);
+  }
+  const v = M.traceGrid(g, N, 50, 50);
+  assert.ok(v.cut && v.col === 3000, 'a giant is cut at the valley floor round the reach, not up its ridge: ' + v.col);
+  let n = 0; for (const x of v.inside) n += x;
+  assert.ok(n <= Math.PI * 49 * 49, 'and kept within the circle (' + n + ' cells)');
+  console.log('ok  the col is the lowest point crossed to reach higher ground (or the valley floors at the reach)');
 }
 
 // ---- the outline of the cells ----
@@ -46,15 +58,18 @@ const geo = await import('../src/geo.js');
   const asked = [];
   const fetchJson = async (u) => {
     asked.push(u);
-    if (u.includes('list=search')) return { query: { search: [{ title: 'Q1' }, { title: 'Q2' }] } };
+    if (u.includes('list=search')) return { query: { search: [{ title: 'Q1' }, { title: 'Q2' }, { title: 'Q4' }] } };
     return { entities: {
       Q1: { labels: { en: { value: 'Mount Robson' } }, descriptions: { en: { value: 'highest mountain in the Canadian Rockies' } },
         claims: { P625: [{ mainsnak: { datavalue: { value: { latitude: 53.11, longitude: -119.156 } } } }], P2044: [{ mainsnak: { datavalue: { value: { amount: '+3954' } } } }] } },
       Q2: { labels: { en: { value: 'Robson (band)' } }, claims: {} },
+      Q4: { labels: { mul: { value: 'Denali' } }, descriptions: { en: { value: 'highest mountain in North America' } },
+        claims: { P625: [{ mainsnak: { datavalue: { value: { latitude: 63.069, longitude: -151.007 } } } }] } },
     } };
   };
   const r = await M.searchMountains('Robson', fetchJson);
-  assert.equal(r.length, 1, 'only things with a summit position');
+  assert.equal(r.length, 2, 'only things with a summit position');
+  assert.equal(r[1].name, 'Denali', 'a name kept only for all languages is used (not Q4)');
   assert.ok(r[0].name === 'Mount Robson' && r[0].height === 3954 && r[0].lat === 53.11, 'with name, height and position');
   assert.ok(asked.every((u) => u.includes('origin=*')), 'asked so a web page may read the answer');
   assert.ok(decodeURIComponent(asked[0].replace(/\+/g, ' ')).includes('haswbstatement:P2660|P31=Q8502'), 'only mountains are asked for');

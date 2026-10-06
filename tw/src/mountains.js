@@ -9,8 +9,8 @@
 //    the col and attached to the summit is the mountain; the rest is left.
 //    Its rise above the col is its prominence.
 // 3. A mountain whose col is further than `reach` from the summit (Everest's
-//    is most of Asia) is cut at the reach instead: the col is then the lowest
-//    point crossed before the ground reached that far.
+//    is most of Asia) is cut by a circle of that radius, at the valley floors
+//    round it (the lowest tenth of the ground on the circle).
 
 import { mercScale, mercYToLat, lonToMercX, latToMercY, mercXToLon, tileSizeMerc, HALF } from './geo.js';
 import { chooseZoom, sampler } from './transplant.js';
@@ -42,7 +42,7 @@ export async function searchMountains(text, fetchJson, lang = 'en') {
     byWords = true;
   }
   if (!ids.length) return [];
-  const got = await fetchJson(q({ action: 'wbgetentities', ids: ids.join('|'), props: 'claims|labels|descriptions', languages: lang }));
+  const got = await fetchJson(q({ action: 'wbgetentities', ids: ids.join('|'), props: 'claims|labels|descriptions', languages: lang + '|mul' }));
   const out = [];
   for (const id of ids) {
     const e = (got.entities || {})[id];
@@ -53,7 +53,7 @@ export async function searchMountains(text, fetchJson, lang = 'en') {
     const about = (e.descriptions && e.descriptions[lang] && e.descriptions[lang].value) || '';
     if (byWords && !/mountain|peak|volcano|summit|mount\b|massif|hill/i.test(about)) continue;
     out.push({
-      id, name: (e.labels && e.labels[lang] && e.labels[lang].value) || id,
+      id, name: labelOf(e, lang) || id,
       about: (e.descriptions && e.descriptions[lang] && e.descriptions[lang].value) || '',
       lat: c.latitude, lon: c.longitude,
       height: h && Number.isFinite(+h.amount) ? Math.round(+h.amount) : null,
@@ -61,6 +61,14 @@ export async function searchMountains(text, fetchJson, lang = 'en') {
   }
   return out;
 }
+
+// The name in the language asked for, else the one for all languages ('mul',
+// which Wikidata now uses for many places: Denali's English name is there),
+// else any.
+const labelOf = (e, lang) => {
+  const L = e.labels || {};
+  return (L[lang] || L.mul || Object.values(L)[0] || {}).value;
+};
 
 const claim = (e, p) => {
   const c = e.claims && e.claims[p] && e.claims[p][0];
@@ -105,24 +113,39 @@ export function traceGrid(heights, N, si, sj, near = 3) {
     }
     return top;
   };
+  // The reach: a circle round the summit, as large as the square allows.
+  const R = Math.min(ti, tj, N - 1 - ti, N - 1 - tj) - 1;
+  const out = (i, j) => (i - ti) * (i - ti) + (j - tj) * (j - tj) >= R * R;
   push(tj * N + ti);
   let col = top, cut = false;
   while (heap.length) {
     const k = pop(), h = heights[k], i = k % N, j = (k / N) | 0;
     if (h > top) break;                                   // higher ground: col found
-    if (h < -1e8) { cut = true; break; }                  // no height data there: stop as at the reach
+    if (h < -1e8 || out(i, j)) { cut = true; break; }     // reached the reach (or the edge of the data)
     col = Math.min(col, h);
-    if (i === 0 || j === 0 || i === N - 1 || j === N - 1) { cut = true; break; }   // reached the reach: cut here
     push(k - 1); push(k + 1); push(k - N); push(k + N);
   }
-  // The mountain: above the col and attached to the summit.
+  // A giant whose col is beyond the reach: the first ground to reach the
+  // circle is the highest ridge, and cutting there leaves a high, spidery
+  // cap. Cut at the valley floors round the circle instead: the lowest tenth
+  // of the ground on it.
+  if (cut) {
+    const rim = [];
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      const d2 = (i - ti) * (i - ti) + (j - tj) * (j - tj);
+      if (d2 >= (R - 1) * (R - 1) && d2 < R * R && heights[j * N + i] > -1e8) rim.push(heights[j * N + i]);
+    }
+    rim.sort((a, b) => a - b);
+    if (rim.length) col = Math.min(col, rim[Math.floor(rim.length * 0.1)]);
+  }
+  // The mountain: above the col, inside the reach, attached to the summit.
   const inside = new Uint8Array(N * N), stack = [tj * N + ti];
   inside[tj * N + ti] = 1;
   while (stack.length) {
     const k = stack.pop(), i = k % N, j = (k / N) | 0;
     for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const a = i + di, b = j + dj;
-      if (a < 0 || b < 0 || a >= N || b >= N) continue;
+      if (a < 0 || b < 0 || a >= N || b >= N || out(a, b)) continue;
       const q = b * N + a;
       if (!inside[q] && heights[q] > col) { inside[q] = 1; stack.push(q); }
     }
