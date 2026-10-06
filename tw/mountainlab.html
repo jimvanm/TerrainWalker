@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mountain lab</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #11161d; color: #dbe3ec; font: 13px/1.5 ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace; }
+  header { padding: 12px 16px; border-bottom: 1px solid #2a3340; }
+  h1 { font-size: 15px; margin: 0 0 4px; color: #ffd479; }
+  header p { margin: 0; color: #93a1b2; max-width: 980px; }
+  #controls { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px 24px; padding: 12px 16px; border-bottom: 1px solid #2a3340; }
+  .ctl label { display: flex; justify-content: space-between; gap: 8px; }
+  .ctl label b { color: #ffd479; font-weight: 600; }
+  .ctl input[type=range] { width: 100%; }
+  .ctl small { color: #6d7d90; display: block; }
+  #bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 16px; border-bottom: 1px solid #2a3340; }
+  input[type=text] { font: inherit; color: #dbe3ec; background: #1d2530; border: 1px solid #3a4552; border-radius: 3px; padding: 4px 8px; width: 240px; }
+  button { font: inherit; color: #dbe3ec; background: #1d2530; border: 1px solid #3a4552; border-radius: 3px; padding: 4px 10px; cursor: pointer; }
+  button:hover { border-color: #6d7d90; }
+  #found { display: flex; flex-wrap: wrap; gap: 6px; }
+  #found button { color: #ffd479; }
+  #status { color: #93a1b2; }
+  #panels { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 16px; padding: 16px; }
+  .panel { background: #1a212b; border: 1px solid #2a3340; border-radius: 4px; padding: 8px; }
+  .panel .head { display: flex; justify-content: space-between; align-items: baseline; }
+  .panel .name { color: #ffd479; font-weight: 600; }
+  .panel canvas { width: 100%; image-rendering: auto; display: block; margin: 6px 0; background: #000; }
+  .panel .stats { color: #93a1b2; min-height: 3em; }
+  .key { color: #6d7d90; padding: 0 16px 16px; }
+  .key span { display: inline-block; width: 10px; height: 10px; vertical-align: middle; margin: 0 4px 0 12px; }
+  #settings { width: 100%; max-width: 760px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Mountain lab</h1>
+  <p>Where does a mountain end? Load a few side by side and move the sliders until the shapes look right:
+     the part that would be on the postcard, without the long low spurs. The settings line at the bottom
+     is what the app would use; copy it and send it over.</p>
+</header>
+
+<div id="controls"></div>
+
+<div id="bar">
+  <input id="q" type="text" placeholder="Add a mountain by name..." spellcheck="false">
+  <button id="go">Find</button>
+  <span id="found"></span>
+  <span id="status"></span>
+</div>
+
+<div id="panels"></div>
+<div class="key">
+  <span style="background:#e0a050"></span>kept
+  <span style="background:#ffffff"></span>outline
+  <span style="background:#ff4040"></span>summit
+  <span style="background:#40a0ff"></span>peaks that joined
+  <span style="border:1px dashed #6d7d90"></span>reach
+  <br><br>
+  Settings: <input id="settings" type="text" readonly>
+</div>
+
+<script type="module">
+import { RULES, traceGrid, heightGrid, searchMountains } from './src/mountains.js';
+import { TILE_URL } from './src/config.js';
+
+const N = 360;
+// The sliders: [key, label, min, max, step, shown as, what it does]
+const SLIDERS = [
+  ['reach', 'Reach', 5, 60, 1, (v) => v + ' km', 'nothing further than this from the summit'],
+  ['bump', 'Bumps under', 0, 400, 10, (v) => v + ' m', 'a top rising less than this above where it meets a bigger one is not a peak of its own'],
+  ['join', 'Join a neighbour if its saddle is', 0, 1, 0.05, (v) => Math.round(v * 100) + '% up', 'of the way from the base to our top (Lhotse: about 75%)'],
+  ['joinKm', '...and its top is within', 0, 30, 0.5, (v) => v + ' km', 'of our summit'],
+  ['trim', 'Trim: at the reach keep only ground', 0, 0.9, 0.05, (v) => Math.round(v * 100) + '% up', 'less nearer in, nothing at the summit: takes the far, low spurs'],
+  ['slice', 'Slice at the lowest', 0, 0.5, 0.05, (v) => Math.round(v * 100) + '% of its edge', 'the height it is cut at: the valley floors round it'],
+];
+const rules = { ...RULES };
+try { Object.assign(rules, JSON.parse(localStorage.getItem('tw.mountainlab') || '{}')); } catch (e) { /* defaults */ }
+
+const controls = document.getElementById('controls');
+for (const [key, label, min, max, step, show, help] of SLIDERS) {
+  const d = document.createElement('div');
+  d.className = 'ctl';
+  d.innerHTML = `<label><span>${label}</span><b></b></label><input type="range" min="${min}" max="${max}" step="${step}"><small>${help}</small>`;
+  const inp = d.querySelector('input'), out = d.querySelector('b');
+  inp.value = rules[key]; out.textContent = show(rules[key]);
+  inp.oninput = () => {
+    rules[key] = +inp.value; out.textContent = show(rules[key]);
+    try { localStorage.setItem('tw.mountainlab', JSON.stringify(rules)); } catch (e) { /* fine */ }
+    if (key === 'reach') regrid(); else retrace();
+  };
+  controls.append(d);
+}
+
+// Height tiles, as heights.
+const cache = new Map();
+function fetchTile(z, x, y) {
+  const key = z + '/' + x + '/' + y;
+  if (!cache.has(key)) {
+    cache.set(key, (async () => {
+      const r = await fetch(TILE_URL.replace('{z}', z).replace('{x}', x).replace('{y}', y), { mode: 'cors' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const bmp = await createImageBitmap(await r.blob());
+      const cv = new OffscreenCanvas(256, 256), cx = cv.getContext('2d', { willReadFrequently: true });
+      cx.drawImage(bmp, 0, 0);
+      const d = cx.getImageData(0, 0, 256, 256).data, h = new Float32Array(65536);
+      for (let i = 0; i < h.length; i++) h[i] = d[i * 4] * 256 + d[i * 4 + 1] + d[i * 4 + 2] / 256 - 32768;
+      return h;
+    })());
+  }
+  return cache.get(key);
+}
+
+const panels = [];
+const holder = document.getElementById('panels');
+function addPanel(m) {
+  const p = { m, grid: null, el: document.createElement('div') };
+  p.el.className = 'panel';
+  p.el.innerHTML = `<div class="head"><span class="name"></span><button title="remove">×</button></div><canvas width="${N}" height="${N}"></canvas><div class="stats">loading...</div>`;
+  p.el.querySelector('.name').textContent = m.name + (m.height ? '  ' + m.height + ' m' : '');
+  p.el.querySelector('button').onclick = () => { panels.splice(panels.indexOf(p), 1); p.el.remove(); saveList(); };
+  holder.append(p.el);
+  panels.push(p);
+  load(p);
+  saveList();
+}
+async function load(p) {
+  const want = rules.reach;
+  p.el.querySelector('.stats').textContent = 'loading...';
+  const g = await heightGrid(p.m.lat, p.m.lon, want * 1000, fetchTile, N);
+  if (want !== rules.reach) return;            // the reach moved on while loading
+  p.grid = g;
+  draw(p);
+}
+let regridTimer = 0;
+function regrid() { clearTimeout(regridTimer); regridTimer = setTimeout(() => panels.forEach(load), 350); }
+let raf = 0;
+function retrace() { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => panels.forEach((p) => p.grid && draw(p))); updateSettings(); }
+
+function draw(p) {
+  const g = p.grid, mid = (N / 2) | 0;
+  const t0 = performance.now();
+  const t = traceGrid(g.heights, N, mid, mid, g.cell, { ...rules, reach: rules.reach });
+  const ms = performance.now() - t0;
+  const cv = p.el.querySelector('canvas'), cx = cv.getContext('2d');
+  const img = cx.createImageData(N, N), d = img.data, H = g.heights;
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const k = j * N + i, h = H[k];
+    const hx = (H[j * N + Math.min(N - 1, i + 1)] - H[j * N + Math.max(0, i - 1)]) / (2 * g.cell);
+    const hy = (H[Math.max(0, j - 1) * N + i] - H[Math.min(N - 1, j + 1) * N + i]) / (2 * g.cell);
+    let lit = (-hx * -0.6 + -hy * 0.6 + 1) / Math.sqrt(hx * hx + hy * hy + 1) / Math.sqrt(1.72);
+    lit = Math.max(0, Math.min(1, lit));
+    let r = 40 + 190 * lit, gg = r, b = r;
+    if (h < -1e8) { r = gg = b = 0; }
+    if (t.inside[k]) { r = r * 0.55 + 224 * 0.45; gg = gg * 0.55 + 160 * 0.45; b = b * 0.55 + 80 * 0.45; }
+    const edge = t.inside[k] && ((i > 0 && !t.inside[k - 1]) || (i < N - 1 && !t.inside[k + 1]) || (j > 0 && !t.inside[k - N]) || (j < N - 1 && !t.inside[k + N]));
+    if (edge) { r = gg = b = 255; }
+    d[k * 4] = r; d[k * 4 + 1] = gg; d[k * 4 + 2] = b; d[k * 4 + 3] = 255;
+  }
+  cx.putImageData(img, 0, 0);
+  // The reach, the summit, the peaks that joined.
+  const R = Math.min(rules.reach * 1000 / g.cell, mid - 1);
+  cx.setLineDash([4, 4]); cx.strokeStyle = '#6d7d90'; cx.beginPath(); cx.arc(t.ti + 0.5, t.tj + 0.5, R, 0, Math.PI * 2); cx.stroke(); cx.setLineDash([]);
+  const dot = (k, c) => { cx.fillStyle = c; cx.beginPath(); cx.arc(k % N + 0.5, ((k / N) | 0) + 0.5, 4, 0, Math.PI * 2); cx.fill(); };
+  for (const k of t.joined) dot(k, '#40a0ff');
+  dot(t.tj * N + t.ti, '#ff4040');
+  p.el.querySelector('.stats').textContent =
+    `rises ${Math.round(t.top - t.col)} m above ${Math.round(t.col)} m · ${t.area.toFixed(0)} km²` +
+    ` · ${t.joined.length} peak${t.joined.length === 1 ? '' : 's'} joined${t.cut ? ' · reaches the reach' : ''}` +
+    `\n${(rules.reach * 2).toFixed(0)} km square, ${Math.round(g.cell)} m cells, ${ms.toFixed(0)} ms`;
+}
+
+function updateSettings() {
+  const r = {};
+  for (const [k] of SLIDERS) r[k] = +(+rules[k]).toFixed(2);
+  document.getElementById('settings').value = JSON.stringify(r);
+}
+
+// Which mountains are shown, kept between visits.
+const DEFAULT = [
+  { name: 'Mount Everest', lat: 27.98806, lon: 86.92528, height: 8849 },
+  { name: 'Denali', lat: 63.0692, lon: -151.0070, height: 6190 },
+  { name: 'Mount Logan', lat: 60.5672, lon: -140.4053, height: 5959 },
+];
+function saveList() { try { localStorage.setItem('tw.mountainlab.list', JSON.stringify(panels.map((p) => p.m))); } catch (e) { /* fine */ } }
+let list = DEFAULT;
+try { const v = JSON.parse(localStorage.getItem('tw.mountainlab.list') || 'null'); if (Array.isArray(v) && v.length) list = v; } catch (e) { /* defaults */ }
+list.forEach(addPanel);
+updateSettings();
+
+// Adding by name.
+const q = document.getElementById('q'), found = document.getElementById('found'), status = document.getElementById('status');
+async function find() {
+  if (!q.value.trim()) return;
+  status.textContent = 'looking...'; found.textContent = '';
+  try {
+    const r = await searchMountains(q.value.trim(), (u) => fetch(u).then((x) => x.json()));
+    status.textContent = r.length ? '' : 'nothing by that name';
+    for (const m of r.slice(0, 8)) {
+      const b = document.createElement('button');
+      b.textContent = m.name + (m.height ? ' ' + m.height + ' m' : '');
+      b.title = m.about;
+      b.onclick = () => { addPanel(m); found.textContent = ''; };
+      found.append(b);
+    }
+  } catch (e) { status.textContent = 'could not reach Wikidata'; }
+}
+document.getElementById('go').onclick = find;
+q.onkeydown = (e) => { if (e.key === 'Enter') find(); };
+</script>
+</body>
+</html>

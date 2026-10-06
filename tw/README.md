@@ -41,6 +41,11 @@ To see how good the height data is at a given place, open
 famously difficult places (Niagara Falls, Yosemite, Thor Peak and others) with
 published facts, and names the source of the data at each.
 
+To tune where a traced mountain ends, open
+<http://localhost:8080/mountainlab.html>. It shows several mountains side by
+side; the sliders change the rules, and the settings line at the bottom is
+what the app would use.
+
 To publish, push the repo and turn on GitHub Pages from the root; the app is
 then at `.../TerrainWalker/tw/`. Places of interest are the exception: their
 tiles are built on your own computer and are not in the repo (see
@@ -69,7 +74,7 @@ tiles are built on your own computer and are not in the repo (see
 | `9` | building colours: warmer light on/off |
 | `P` | pin this place to the saved places list |
 | `M` | (Tools) drop a landmark where the crosshair meets the ground: press again for the next one, and after the last, off. It stands where you point; click to drop it; `,` / `.` turn it; `Delete` removes a dropped one you point at. A reload clears them all. |
-| `N` | (Tools) move a piece of ground: click corners of an outline on the ground (`Backspace` takes one back), `Enter` picks the ground inside it up, fly anywhere, click to lay it down (again for another). `U` switches how high it stands: its rise above the outline's edge (default) or its height above sea level; pointed at a laid piece with nothing in hand, it changes that one where it lies. `,` / `.` turn it, `Delete` removes a laid piece you point at, `N` again or `Esc` puts it away. With nothing in hand, clicking a laid piece or dropped landmark picks it up again. Whatever is in hand waits, hidden, while you are in Navigation. Every outline you pick up is saved in the PIECES list (where PLACES is, in Tools mode): click one to take it in hand again from anywhere, double-click to rename. Laid-down copies clear on a reload; the list stays. The list's search box finds a mountain by name (Wikidata, live) and traces its outline from the height tiles: everything above its col (the lowest point you must cross to reach higher ground) and attached to the summit, within the chosen reach. |
+| `N` | (Tools) move a piece of ground: click corners of an outline on the ground (`Backspace` takes one back), `Enter` picks the ground inside it up, fly anywhere, click to lay it down (again for another). `U` switches how high it stands: its rise above the outline's edge (default) or its height above sea level; pointed at a laid piece with nothing in hand, it changes that one where it lies. `,` / `.` turn it, `Delete` removes a laid piece you point at, `N` again or `Esc` puts it away. With nothing in hand, clicking a laid piece or dropped landmark picks it up again. Whatever is in hand waits, hidden, while you are in Navigation. Every outline you pick up is saved in the PIECES list (where PLACES is, in Tools mode): click one to take it in hand again from anywhere, double-click to rename. Laid-down copies clear on a reload; the list stays. The list's search box finds a mountain by name (Wikidata, live) and traces its outline from the height tiles: the ground above the valleys round it, plus close neighbours joined by a high saddle (Lhotse with Everest), minus low spurs far out, within the chosen reach. |
 | `K` | copy a building-height report to the clipboard |
 | `L` | copy the performance log to the clipboard |
 | `H` | hide the key menus and performance graph |

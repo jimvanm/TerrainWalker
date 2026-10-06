@@ -114,7 +114,7 @@ const pieceList = initPieces({
   // A mountain from the search: trace its outline from the height tiles, save
   // it under its name, and put it in hand.
   find: async (m, km) => {
-    const t = await traceMountain(m.lat, m.lon, km * 1000, fetchHeights);
+    const t = await traceMountain(m.lat, m.lon, { reach: km }, fetchHeights);
     if (!t) return 'Could not find its outline.';
     const entry = pieceList.added({ name: m.name, corners: t.corners, mode: 'rise' });
     dropper.off();

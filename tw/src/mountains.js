@@ -2,9 +2,8 @@
 //
 // 1. The name is looked up in Wikidata (the free database behind Wikipedia),
 //    live, for its summit's position. Nothing else is needed from it.
-// 2. The outline comes from the same height tiles the app streams: the ground
-//    you can reach from the summit without climbing (see traceGrid), sliced
-//    at the valley floors round it, within `reach` of the summit.
+// 2. The outline comes from the same height tiles the app streams, by the
+//    rules at RULES below (tuned in mountainlab.html).
 
 import { mercScale, mercYToLat, lonToMercX, latToMercY, mercXToLon, tileSizeMerc, HALF } from './geo.js';
 import { chooseZoom, sampler } from './transplant.js';
@@ -71,93 +70,131 @@ const claim = (e, p) => {
 
 // ---- the outline -------------------------------------------------------------------
 
-// heights: Float32Array N*N (row 0 north); the summit is near cell (si, sj).
+// Where a mountain ends has no single right answer (see "Do mountains
+// exist?", Smith and Mark 2003, and "Where is Helvellyn?", Fisher, Wood and
+// Cheng 2004). These rules, and their settings, were tuned by eye in
+// mountainlab.html:
 //
-// Which mountain does a spot belong to? Walk uphill from it, always the
-// steepest way: the peak you end on. The mountain is every spot whose way up
-// ends on our summit; where the way up leads to another peak, that ground is
-// the other mountain's, even if it lies low (the foot of a neighbour). Bumps
-// that rise less than `climb` metres above where they meet a bigger peak
-// (noise in the data, a boulder field) are not peaks of their own. The reach
-// is a circle round the summit. The mountain is then sliced at the low ground
-// along its edge (the lowest tenth): the valley floors round it.
-//
-// Returns { inside: Uint8Array, col, top, ti, tj, cut }: col is the slice
-// height, cut says the mountain reached the circle.
-export function traceGrid(heights, N, si, sj, near = 3, climb = 60) {
+//   1. Every spot belongs to the peak that walking steepest uphill from it
+//      ends on. Bumps rising less than `bump` metres above where they meet a
+//      bigger peak are not peaks of their own.
+//   2. A neighbouring peak joins ours if the saddle between them is at least
+//      `join` of the way up our mountain (from its base to its top), and its
+//      top is within `joinKm` of our summit. (Lhotse joins Everest.)
+//   3. Near the summit everything is kept; further out, only ground at least
+//      `trim` of the way up the mountain at the reach, less nearer in. (The
+//      low spurs reaching out go.)
+//   4. It is sliced at the low ground along its edge: the lowest `slice` of it.
+//   5. Nothing beyond `reach` (a circle round the summit).
+export const RULES = { reach: 15, bump: 60, join: 0.6, joinKm: 5, trim: 0.25, slice: 0.1 };
+
+// heights: Float32Array N*N (row 0 north), cells `cell` metres; the summit is
+// near cell (si, sj). rules: as RULES. Returns { inside, col, top, ti, tj,
+// cut, joined: [cell, ...] (the tops of the peaks that joined), area }.
+export function traceGrid(heights, N, si, sj, cell, rules = RULES) {
+  const r = { ...RULES, ...rules };
   // The summit's position from a gazetteer is rarely exact: take the highest
-  // cell close to it.
+  // cell within 300 m of it.
+  const near = Math.max(2, Math.round(300 / cell));
   let ti = si, tj = sj, top = -Infinity;
   for (let j = Math.max(0, sj - near); j <= Math.min(N - 1, sj + near); j++) {
     for (let i = Math.max(0, si - near); i <= Math.min(N - 1, si + near); i++) {
       if (heights[j * N + i] > top) { top = heights[j * N + i]; ti = i; tj = j; }
     }
   }
-  const R = Math.min(ti, tj, N - 1 - ti, N - 1 - tj) - 1;
-  const inCircle = (i, j) => (i - ti) * (i - ti) + (j - tj) * (j - tj) < R * R;
+  const R = Math.min(Math.min(ti, tj, N - 1 - ti, N - 1 - tj) - 1, r.reach * 1000 / cell);
+  const d2 = (i, j) => (i - ti) * (i - ti) + (j - tj) * (j - tj);
+  const inCircle = (i, j) => d2(i, j) < R * R;
+  const nbrs = (i, j) => [[i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]];
 
-  // Highest first, each spot joins the peak its highest neighbour already
-  // belongs to (the steepest way up), or starts a peak of its own. Where two
-  // peaks meet, the lesser one joins the greater if it rises less than
-  // `climb` above the meeting point.
+  // 1. Highest first, each spot joins the peak its highest neighbour already
+  // belongs to, or starts a peak of its own. Where two peaks meet, the lesser
+  // joins the greater if it rises less than `bump` above the meeting point;
+  // otherwise the meeting point is a saddle between them, remembered.
   const order = [];
   for (let k = 0; k < N * N; k++) if (heights[k] > -1e8 && inCircle(k % N, (k / N) | 0)) order.push(k);
   order.sort((a, b) => heights[b] - heights[a]);
-  const label = new Int32Array(N * N).fill(-1), parent = [], peak = [];
+  const label = new Int32Array(N * N).fill(-1), parent = [], peak = [], peakCell = [];
   const root = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+  const saddles = [];                                   // [a, b, height], highest first
   for (const k of order) {
     const i = k % N, j = (k / N) | 0, h = heights[k];
     let best = -1, bestH = -Infinity;
     const roots = [];
-    for (const [a, b] of [[i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]]) {
+    for (const [a, b] of nbrs(i, j)) {
       if (a < 0 || b < 0 || a >= N || b >= N) continue;
       const q = b * N + a;
       if (label[q] < 0) continue;
-      const r = root(label[q]);
-      if (!roots.includes(r)) roots.push(r);
-      if (heights[q] > bestH) { bestH = heights[q]; best = r; }
+      const rt = root(label[q]);
+      if (!roots.includes(rt)) roots.push(rt);
+      if (heights[q] > bestH) { bestH = heights[q]; best = rt; }
     }
-    if (best < 0) { parent.push(parent.length); peak.push(h); label[k] = parent.length - 1; continue; }
+    if (best < 0) { parent.push(parent.length); peak.push(h); peakCell.push(k); label[k] = parent.length - 1; continue; }
     label[k] = best;
-    for (const r of roots) {
-      const a = root(r), b = root(best);
+    for (const rt of roots) {
+      const a = root(rt), b = root(best);
       if (a === b) continue;
       const [lo, hi] = peak[a] < peak[b] ? [a, b] : [b, a];
-      if (peak[lo] - h < climb) parent[lo] = hi;
+      if (peak[lo] - h < r.bump) parent[lo] = hi;
+      else saddles.push([a, b, h]);
     }
   }
   const s0 = tj * N + ti, ours = root(label[s0]);
-  const region = new Uint8Array(N * N);
-  let cut = false;
-  for (const k of order) {
-    if (root(label[k]) !== ours) continue;
-    region[k] = 1;
-    const i = k % N, j = (k / N) | 0;
-    if (!cut && [[i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]].some(([a, b]) => !inCircle(a, b))) cut = true;
-  }
+  const basin = (set) => {
+    const reg = new Uint8Array(N * N);
+    for (const k of order) if (set.has(root(label[k]))) reg[k] = 1;
+    return reg;
+  };
+  const sliceOf = (reg) => {
+    const edge = [];
+    for (const k of order) {
+      if (!reg[k]) continue;
+      const i = k % N, j = (k / N) | 0;
+      if (nbrs(i, j).some(([a, b]) => !inCircle(a, b) || !reg[b * N + a])) edge.push(heights[k]);
+    }
+    edge.sort((a, b) => a - b);
+    return edge.length ? edge[Math.min(edge.length - 1, Math.floor(edge.length * r.slice))] : top;
+  };
 
-  // The slice: the lowest tenth of the ground along the region's edge.
-  const edge = [];
-  for (let k = 0; k < N * N; k++) {
-    if (!region[k]) continue;
-    const i = k % N, j = (k / N) | 0;
-    if ([[i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]].some(([a, b]) => a < 0 || b < 0 || a >= N || b >= N || !region[b * N + a])) edge.push(heights[k]);
-  }
-  edge.sort((a, b) => a - b);
-  const col = edge.length ? edge[Math.floor(edge.length * 0.1)] : top;
-
-  // The mountain: in the region, above the slice, attached to the summit.
-  const inside = new Uint8Array(N * N), stack = [s0];
-  inside[s0] = 1;
-  while (stack.length) {
-    const k = stack.pop(), i = k % N, j = (k / N) | 0;
-    for (const [a, b] of [[i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]]) {
-      if (a < 0 || b < 0 || a >= N || b >= N) continue;
-      const q = b * N + a;
-      if (!inside[q] && region[q] && heights[q] > col) { inside[q] = 1; stack.push(q); }
+  // 2. Neighbours that join: a high saddle, and close.
+  const set = new Set([ours]);
+  const base0 = sliceOf(basin(set));
+  const joined = [];
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const [a0, b0, h] of saddles) {
+      const a = root(a0), b = root(b0);
+      const inA = set.has(a), inB = set.has(b);
+      if (inA === inB) continue;
+      const other = inA ? b : a;
+      const up = (h - base0) / Math.max(1, top - base0);
+      const pc = peakCell[other];
+      const km = Math.sqrt(d2(pc % N, (pc / N) | 0)) * cell / 1000;
+      if (up >= r.join && km <= r.joinKm) { set.add(other); joined.push(pc); changed = true; }
     }
   }
-  return { inside, col, top, ti, tj, cut };
+  const region = basin(set);
+  const col = sliceOf(region);
+
+  // 3 and 4: above the slice, high enough for how far out it is, attached.
+  const need = (i, j) => r.trim * Math.sqrt(d2(i, j)) / R;     // fraction of the way up
+  const keep = (k) => {
+    const i = k % N, j = (k / N) | 0;
+    return region[k] && heights[k] > col && (heights[k] - col) / Math.max(1, top - col) >= need(i, j);
+  };
+  const inside = new Uint8Array(N * N), stack = [s0];
+  inside[s0] = 1;
+  let area = 1, cut = false;
+  while (stack.length) {
+    const k = stack.pop(), i = k % N, j = (k / N) | 0;
+    for (const [a, b] of nbrs(i, j)) {
+      if (a < 0 || b < 0 || a >= N || b >= N) continue;
+      if (!inCircle(a, b)) { cut = true; continue; }
+      const q = b * N + a;
+      if (!inside[q] && keep(q)) { inside[q] = 1; stack.push(q); area++; }
+    }
+  }
+  return { inside, col, top, ti, tj, cut, joined, area: area * cell * cell / 1e6 };
 }
 
 // The outer edge of the cells marked inside, as a closed list of cell
@@ -210,16 +247,15 @@ export function simplify(pts, tol) {
   return pts.filter((_, i) => keep[i]);
 }
 
-// The whole thing: summit (lat, lon), reach in metres, fetchTile(z, x, y) for
-// height tiles. Returns { corners: [[lat, lon], ...], prominence, col, top,
-// cut } where cut says the reach, not higher ground, set the edge.
-export async function traceMountain(lat, lon, reach, fetchTile) {
+// The height grid round a summit: { heights, N, cell, reach, k, cx, cy },
+// cells `cell` metres, N across, `reach` metres each way.
+export async function heightGrid(lat, lon, reach, fetchTile, N = GRID) {
   const z = chooseZoom(2 * reach, lat);
   const k = mercScale(lat), cx = lonToMercX(lon), cy = latToMercY(lat);
-  const s = tileSizeMerc(z), n = 2 ** z, r = reach / k;
+  const s = tileSizeMerc(z), n = 2 ** z, rr = reach / k;
   const tiles = new Map(), jobs = [];
-  for (let ty = Math.floor((HALF - cy - r) / s) - 1; ty <= Math.floor((HALF - cy + r) / s) + 1; ty++) {
-    for (let tx = Math.floor((cx - r + HALF) / s) - 1; tx <= Math.floor((cx + r + HALF) / s) + 1; tx++) {
+  for (let ty = Math.floor((HALF - cy - rr) / s) - 1; ty <= Math.floor((HALF - cy + rr) / s) + 1; ty++) {
+    for (let tx = Math.floor((cx - rr + HALF) / s) - 1; tx <= Math.floor((cx + rr + HALF) / s) + 1; tx++) {
       if (ty < 0 || ty >= n) continue;
       const x = ((tx % n) + n) % n;
       jobs.push(fetchTile(z, x, ty).then((h) => tiles.set(x + '/' + ty, h)).catch(() => {}));
@@ -227,20 +263,35 @@ export async function traceMountain(lat, lon, reach, fetchTile) {
   }
   await Promise.all(jobs);
   const at = sampler(tiles, z);
-  const N = GRID, cell = 2 * reach / N;
+  const cell = 2 * reach / N;
   const heights = new Float32Array(N * N);
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
     const e = -reach + (i + 0.5) * cell, nn = reach - (j + 0.5) * cell;
     const h = at(cx + e / k, cy + nn / k);
     heights[j * N + i] = h === null || h === undefined ? -1e9 : h;
   }
-  const mid = (N / 2) | 0;
-  const t = traceGrid(heights, N, mid, mid, Math.max(2, Math.round(300 / cell)));
-  let pts = simplify(outlineOf(t.inside, N), 0.75);
+  return { heights, N, cell, reach, k, cx, cy };
+}
+
+// A traced grid's outline as [[lat, lon], ...], or null.
+export function cornersOf(g, t) {
+  const pts = simplify(outlineOf(t.inside, g.N), 0.75);
   if (pts.length < 3) return null;
-  const corners = pts.map(([i, j]) => {
-    const e = -reach + i * cell, nn = reach - j * cell;
-    return [+mercYToLat(cy + nn / k).toFixed(6), +mercXToLon(cx + e / k).toFixed(6)];
+  return pts.map(([i, j]) => {
+    const e = -g.reach + i * g.cell, nn = g.reach - j * g.cell;
+    return [+mercYToLat(g.cy + nn / g.k).toFixed(6), +mercXToLon(g.cx + e / g.k).toFixed(6)];
   });
+}
+
+// The whole thing: summit (lat, lon), rules (RULES, reach in km), and
+// fetchTile(z, x, y) for height tiles. Returns { corners: [[lat, lon], ...],
+// prominence (its rise above the slice), col (the slice), top, cut }.
+export async function traceMountain(lat, lon, rules, fetchTile) {
+  const r = { ...RULES, ...rules };
+  const g = await heightGrid(lat, lon, r.reach * 1000, fetchTile);
+  const mid = (g.N / 2) | 0;
+  const t = traceGrid(g.heights, g.N, mid, mid, g.cell, r);
+  const corners = cornersOf(g, t);
+  if (!corners) return null;
   return { corners, prominence: Math.round(t.top - t.col), col: Math.round(t.col), top: Math.round(t.top), cut: t.cut };
 }

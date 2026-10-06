@@ -206,6 +206,15 @@ holes wherever tiles have not loaded.
       ground under a piece; pieces carry no water or map colours, only a
       height colour (green, brown, rock, snow).
 
+- [ ] **You can't stand on a moved mountain.** A laid piece has no ground
+      under your feet: walking and the ground height (`groundAt`/`heightAt`)
+      ignore pieces, so you fall through it to the ground beneath. The ground
+      height should take the highest laid piece under you into account.
+
+- [ ] **Where a mountain ends.** The rules for tracing one (src/mountains.js
+      `RULES`: reach, bump, join, joinKm, trim, slice) are being tuned by eye
+      in mountainlab.html. Once settled, make them the defaults.
+
 - [ ] **Dropping landmarks, next steps.** `M` drops one at the crosshair
       (src/dropper.js). Still to do: a search to pick from many landmarks
       rather than pressing `M` through them all, and masking: a dropped
