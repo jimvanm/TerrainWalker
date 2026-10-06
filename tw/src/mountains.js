@@ -17,6 +17,9 @@ import { chooseZoom, sampler } from './transplant.js';
 
 const API = 'https://www.wikidata.org/w/api.php';
 const GRID = 320;              // cells across the traced square
+// Wikidata: has a prominence (P2660), or is (P31) a mountain, summit, volcano
+// or stratovolcano.
+const MOUNTAIN = 'P2660|P31=Q8502|P31=Q207326|P31=Q8072|P31=Q169358';
 
 // ---- the name ------------------------------------------------------------------
 
@@ -24,8 +27,20 @@ const GRID = 320;              // cells across the traced square
 // [{ name, about, lat, lon, height }]. fetchJson(url): Promise of parsed JSON.
 export async function searchMountains(text, fetchJson, lang = 'en') {
   const q = (p) => API + '?' + new URLSearchParams({ format: 'json', origin: '*', ...p });
-  const found = await fetchJson(q({ action: 'wbsearchentities', search: text, language: lang, uselang: lang, type: 'item', limit: '12' }));
-  const ids = (found.search || []).map((s) => s.id);
+  // Only mountains: things recorded as a mountain, summit, volcano or
+  // stratovolcano, or that have a prominence. (A plain name search also
+  // finds every town, county and airport called Logan.)
+  const found = await fetchJson(q({ action: 'query', list: 'search', srnamespace: '0', srlimit: '12',
+    srsearch: `${text} haswbstatement:${MOUNTAIN}` }));
+  let ids = ((found.query && found.query.search) || []).map((s) => s.title).filter((t) => /^Q\d+$/.test(t));
+  // If that finds nothing, a plain name search, kept to things described as
+  // mountains (below).
+  let byWords = false;
+  if (!ids.length) {
+    const plain = await fetchJson(q({ action: 'wbsearchentities', search: text, language: lang, uselang: lang, type: 'item', limit: '20' }));
+    ids = (plain.search || []).map((s) => s.id);
+    byWords = true;
+  }
   if (!ids.length) return [];
   const got = await fetchJson(q({ action: 'wbgetentities', ids: ids.join('|'), props: 'claims|labels|descriptions', languages: lang }));
   const out = [];
@@ -35,6 +50,8 @@ export async function searchMountains(text, fetchJson, lang = 'en') {
     const c = claim(e, 'P625');
     if (!c || !Number.isFinite(c.latitude) || !Number.isFinite(c.longitude)) continue;   // no summit position
     const h = claim(e, 'P2044');
+    const about = (e.descriptions && e.descriptions[lang] && e.descriptions[lang].value) || '';
+    if (byWords && !/mountain|peak|volcano|summit|mount\b|massif|hill/i.test(about)) continue;
     out.push({
       id, name: (e.labels && e.labels[lang] && e.labels[lang].value) || id,
       about: (e.descriptions && e.descriptions[lang] && e.descriptions[lang].value) || '',

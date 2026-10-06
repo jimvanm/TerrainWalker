@@ -46,7 +46,7 @@ const geo = await import('../src/geo.js');
   const asked = [];
   const fetchJson = async (u) => {
     asked.push(u);
-    if (u.includes('wbsearchentities')) return { search: [{ id: 'Q1' }, { id: 'Q2' }] };
+    if (u.includes('list=search')) return { query: { search: [{ title: 'Q1' }, { title: 'Q2' }] } };
     return { entities: {
       Q1: { labels: { en: { value: 'Mount Robson' } }, descriptions: { en: { value: 'highest mountain in the Canadian Rockies' } },
         claims: { P625: [{ mainsnak: { datavalue: { value: { latitude: 53.11, longitude: -119.156 } } } }], P2044: [{ mainsnak: { datavalue: { value: { amount: '+3954' } } } }] } },
@@ -57,7 +57,19 @@ const geo = await import('../src/geo.js');
   assert.equal(r.length, 1, 'only things with a summit position');
   assert.ok(r[0].name === 'Mount Robson' && r[0].height === 3954 && r[0].lat === 53.11, 'with name, height and position');
   assert.ok(asked.every((u) => u.includes('origin=*')), 'asked so a web page may read the answer');
-  console.log('ok  a name gives summits from Wikidata');
+  assert.ok(decodeURIComponent(asked[0].replace(/\+/g, ' ')).includes('haswbstatement:P2660|P31=Q8502'), 'only mountains are asked for');
+  // When the mountain-only search finds nothing: a plain name search, kept to mountains by description.
+  const fallback = async (u) => {
+    if (u.includes('list=search')) return { query: { search: [] } };
+    if (u.includes('wbsearchentities')) return { search: [{ id: 'Q1' }, { id: 'Q3' }] };
+    return { entities: {
+      Q1: { labels: { en: { value: 'Mount Logan' } }, descriptions: { en: { value: 'highest mountain in Canada' } }, claims: { P625: [{ mainsnak: { datavalue: { value: { latitude: 60.567, longitude: -140.405 } } } }] } },
+      Q3: { labels: { en: { value: 'Logan' } }, descriptions: { en: { value: 'city in Utah' } }, claims: { P625: [{ mainsnak: { datavalue: { value: { latitude: 41.7, longitude: -111.8 } } } }] } },
+    } };
+  };
+  const f = await M.searchMountains('Logan', fallback);
+  assert.ok(f.length === 1 && f[0].name === 'Mount Logan', 'the fallback keeps the mountain, not the city');
+  console.log('ok  a name gives summits from Wikidata, mountains only');
 }
 
 // ---- the whole trace, from tiles ----
