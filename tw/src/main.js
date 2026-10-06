@@ -22,6 +22,7 @@ import { Detail } from './detail.js';
 import { loadPlaceTiles } from './placetiles.js';
 import { Dropper, screenDir, aimPoint } from './dropper.js';
 import { Transplant, toScreen } from './transplant.js';
+import { workerRunner } from './city.js';
 import { initPieces } from './pieces.js';
 import { searchMountains, traceMountain } from './mountains.js';
 import { cachedFetch } from './cache.js';
@@ -104,6 +105,10 @@ async function fetchHeights(z, x, y) {
   return h;
 }
 const transplant = new Transplant(landmarks, fetchHeights);
+// A picked-up piece carries its city: the map tiles under it are fetched and built by helpers.
+transplant.mapUrl = (z, x, y) => (loader.vectorTemplate
+  ? loader.vectorTemplate.replace('{z}', z).replace('{x}', x).replace('{y}', y) : null);
+transplant.runCity = workerRunner();
 // The saved pieces of ground (Tools mode): new ones are added as they are
 // picked up; clicking one takes it in hand again.
 const pieceList = initPieces({
@@ -353,11 +358,12 @@ function frame(now) {
   } else { dropper.park(); transplant.park(); }
   drawOutline(settings.mode === 'tools' ? transplant.outline() : null, vw, vh);
   setCursor();
+  const roadsOn = layerOn('roads'), bldOn = layerOn('built'), landOn = layerOn('land');
+  landmarks.setLayers({ water: layerOn('water'), roads: roadsOn, built: bldOn, cover: layerOn('cover'), land: landOn });
   landmarks.update(v, (x, y) => terrain.groundAt(x, y));
   const msg = transplant.message || dropper.message;
   if (dropEl.textContent !== msg) { dropEl.textContent = msg; dropEl.classList.toggle('hide', !msg); }
 
-  const roadsOn = layerOn('roads'), bldOn = layerOn('built'), landOn = layerOn('land');
   const shading = {
     fogColor: FOG,
     fogDensity: settings.fog ? 2.4 / v.viewDist : 0,
@@ -370,7 +376,7 @@ function frame(now) {
     terrain.draw(pass, shading);
     mesh.use(pass);
     handover.draw(pass, roadsOn, bldOn);
-    if (landOn) landmarks.draw(pass);   // last: it changes uScale and uCamAlt
+    landmarks.draw(pass);   // last: it changes uScale and uCamAlt. Moved ground is always drawn; the rest follows the buttons (setLayers)
   };
 
   gl.viewport(0, 0, canvas.width, canvas.height);

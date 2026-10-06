@@ -24,9 +24,20 @@
 // wall around its edge down into the ground, so it meets the ground there
 // whatever that ground does. The ground under it is not changed. Pieces last
 // until a reload.
+//
+// A city comes along: the map's water, built-up areas and cover painted on the
+// piece, its roads, railways, airports and buildings standing on it (city.js,
+// citykit.js), and the landmarks inside the outline, standing where they
+// stood, turned with it. While you carry it only the shape is drawn; the map
+// is fetched in the background and shows once the piece is laid.
 
 import { mercScale, mercYToLat, mercXToLon, lonToMercX, latToMercY, wrapMercDx, HALF, tileSizeMerc, R_MEAN } from './geo.js';
 import { aimPoint, forward } from './dropper.js';
+import { pieceGrid, slabHeightFn, inside, alongEdge, median } from './piecegrid.js';
+import { City } from './city.js';
+import { SINK } from './landmarks.js';
+
+export { inside, alongEdge, median };
 
 const TURN = 15;
 const MAX_CELLS = 360;         // grid cells across the piece's longer side
@@ -37,36 +48,10 @@ let count = 0;
 
 // ---- plain geometry (exported for the tests) ----------------------------------
 
-// Point in polygon, even-odd. poly: [[x, y], ...]
-export function inside(poly, x, y) {
-  let c = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const [xi, yi] = poly[i], [xj, yj] = poly[j];
-    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c;
-  }
-  return c;
-}
-
 export function area(poly) {
   let a = 0;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) a += (poly[j][0] + poly[i][0]) * (poly[j][1] - poly[i][1]);
   return Math.abs(a / 2);
-}
-
-// Points along the outline, about every `step` metres.
-export function alongEdge(poly, step) {
-  const out = [];
-  for (let i = 0; i < poly.length; i++) {
-    const [ax, ay] = poly[i], [bx, by] = poly[(i + 1) % poly.length];
-    const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / step));
-    for (let k = 0; k < n; k++) out.push([ax + (bx - ax) * k / n, ay + (by - ay) * k / n]);
-  }
-  return out;
-}
-
-export function median(v) {
-  const s = v.filter((x) => x !== null && x !== undefined && Number.isFinite(x)).sort((a, b) => a - b);
-  return s.length ? s[s.length >> 1] : null;
 }
 
 // A turn of `yawDeg` clockwise seen from above, applied to [east, north].
@@ -90,22 +75,8 @@ function colour(h, steep) {
 // along its edge. Returns { pos, col, idx, rise, edge }: pos x east, y up,
 // z south (true metres), as landmark models are.
 export function buildPiece(heightAt, poly, mode = 'rise', cut = null) {
-  let e0 = Infinity, e1 = -Infinity, n0 = Infinity, n1 = -Infinity;
-  for (const [e, n] of poly) { e0 = Math.min(e0, e); e1 = Math.max(e1, e); n0 = Math.min(n0, n); n1 = Math.max(n1, n); }
-  const step = Math.max(e1 - e0, n1 - n0) / MAX_CELLS;
-  const W = Math.ceil((e1 - e0) / step) + 1, H = Math.ceil((n1 - n0) / step) + 1;
-  const edge = median(alongEdge(poly, step).map(([e, n]) => heightAt(e, n)));
-  const base = mode === 'sea' ? 0 : (cut ?? edge ?? 0);
-  // Heights on the grid's corners (nodes); row j runs east, from the north.
-  const hs = new Float32Array(W * H);
-  for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
-    const h = heightAt(e0 + i * step, n1 - j * step);
-    hs[j * W + i] = h === null || h === undefined ? base : h;
-  }
-  const cellIn = new Uint8Array((W - 1) * (H - 1));
-  for (let j = 0; j < H - 1; j++) for (let i = 0; i < W - 1; i++) {
-    cellIn[j * (W - 1) + i] = inside(poly, e0 + (i + 0.5) * step, n1 - (j + 0.5) * step) ? 1 : 0;
-  }
+  const grid = pieceGrid(heightAt, poly, mode, cut);
+  const { e0, n1, step, W, H, hs, cellIn, edge, base } = grid;
   const isIn = (i, j) => i >= 0 && j >= 0 && i < W - 1 && j < H - 1 && cellIn[j * (W - 1) + i] === 1;
 
   const pos = [], col = [], idx = [];
@@ -140,7 +111,8 @@ export function buildPiece(heightAt, poly, mode = 'rise', cut = null) {
     if (!isIn(i - 1, j)) wall(a, c);
     if (!isIn(i + 1, j)) wall(b, d);
   }
-  return { pos: new Float32Array(pos), col: new Uint8Array(col), idx: new Uint32Array(idx), rise, edge, base };
+  // grid: the ground as numbers (piecegrid.js); nodeVert: the vertex of each grid node, -1 for none.
+  return { pos: new Float32Array(pos), col: new Uint8Array(col), idx: new Uint32Array(idx), rise, edge, base, grid, nodeVert: node };
 }
 
 // The source zoom: as fine as the piece's grid needs, and no more tiles than MAX_TILES.
@@ -186,6 +158,8 @@ export class Transplant {
     this.mode = 'rise';
     this.aim = null;
     this.message = '';
+    this.mapUrl = null;        // (z, x, y) -> a map tile's address, or null before it is known (set by the page)
+    this.runCity = null;       // (spec) -> Promise of a map tile built by a helper (city.js)
   }
 
   get active() { return this.state !== 'off'; }
@@ -197,7 +171,10 @@ export class Transplant {
   }
 
   cancel() {
-    if (this.preview) { this.L.remove(this.preview); this.preview = null; }
+    if (this.preview) {
+      if (this.piece && this.piece.layers && !this._used(this.preview.model)) this.piece.layers.cancel();
+      this.L.remove(this.preview); this.preview = null;
+    }
     this.state = 'off'; this.corners = []; this.piece = null;
   }
 
@@ -210,9 +187,45 @@ export class Transplant {
       const it = this.L.add({ model: p.model, name: p.name, lat: p.lat, lon: p.lon, height: p.height, yawDeg: p.yawDeg,
         maskR: 0, id: 'piece:' + (count++), dropped: true, piece: { ...this.piece, mode: this.mode, modelId: p.model } });
       it.fixedBase = true; it.base = p.base;
+      this._layCarried(it);
       this._say('Laid down. Click again for another; N to put it away.');
     }
   }
+
+  // The landmarks inside an outline (listed, dropped or carried ones, but not
+  // pieces), as they stand relative to its middle: they come along as copies.
+  _gather(poly, cx, cy, k) {
+    const out = [];
+    for (const it of this.L.items) {
+      if (it.piece || it.preview || it.carriedBy) continue;
+      const e = wrapMercDx(it.mx - cx) * k, n = (it.my - cy) * k;
+      if (!inside(poly, e, n)) continue;
+      out.push({ model: it.model, name: it.name, height: it.height, yawDeg: it.yawDeg || 0, fold: it.fold || 0, oval: !!it.oval, e, n });
+    }
+    return out;
+  }
+
+  // Stand a laid piece's landmarks on it, turned with it, each on the piece's
+  // ground where it stood. They go when the piece does (Landmarks.remove).
+  _layCarried(it) {
+    it.carried = [];
+    const carry = it.piece.carry || [];
+    if (!carry.length || !it.piece.grid) return;
+    const slabH = slabHeightFn(it.piece.grid), kk = mercScale(mercYToLat(it.my));
+    for (const c of carry) {
+      const [te, tn] = turnEN(c.e, c.n, it.yawDeg);
+      const mx = it.mx + te / kk, my = it.my + tn / kk;
+      const lm = this.L.add({ model: c.model, name: c.name, lat: mercYToLat(my), lon: mercXToLon(mx), height: c.height,
+        yawDeg: ((c.yawDeg + it.yawDeg) % 360 + 360) % 360, fold: c.fold, oval: c.oval, maskR: 0,
+        id: 'carried:' + (count++), dropped: true });
+      lm.carriedBy = it; lm.fixedBase = true;
+      lm.base = it.base + slabH(c.e, -c.n) - SINK;
+      it.carried.push(lm);
+    }
+  }
+
+  // Is a model still stood somewhere (a laid piece), so its layers must keep loading?
+  _used(modelId) { return this.L.items.some((it) => it.piece && it.piece.modelId === modelId); }
 
   // A short note in the message line, for a few seconds.
   _say(text) { this.note = text; this.noteUntil = Date.now() + 3000; }
@@ -275,7 +288,11 @@ export class Transplant {
       name = this.onPicked({ corners: cs.map((c) => [+mercYToLat(c.my).toFixed(6), +mercXToLon(c.mx).toFixed(6)]), mode: this.mode }) || name;
     }
     const cut = fromList && Number.isFinite(fromList.cut) ? fromList.cut : null;
-    this.piece = { poly, heightAt: (e, nn) => at(cx + e / k, cy + nn / k), name, z, cut };
+    this.piece = { poly, heightAt: (e, nn) => at(cx + e / k, cy + nn / k), name, z, cut, cx, cy, k };
+    this.piece.carry = this._gather(poly, cx, cy, k);
+    this.piece.city = this.runCity && this.mapUrl
+      ? new City({ poly, cx, cy, k, run: this.runCity, mapUrl: this.mapUrl, maskModels: [...new Set(this.piece.carry.map((c) => c.model))] })
+      : null;
     this.yawDeg = 0;
     this.state = 'carrying';
     this._model();
@@ -283,12 +300,16 @@ export class Transplant {
 
   _model() {
     const built = buildPiece(this.piece.heightAt, this.piece.poly, this.mode, this.piece.cut);
+    const prev = this.preview ? { model: this.preview.model, layers: this.piece.layers } : null;
     Object.assign(this.piece, built);
+    // What stands on this ground (it depends on the mode), filling up as the map arrives.
+    built.layers = this.piece.layers = this.piece.city ? this.piece.city.attach(built) : null;
     const id = 'piece-model:' + (count++);
     this.L.addModel(id, built);
+    if (prev && prev.layers && !this._used(prev.model)) prev.layers.cancel();
     if (this.preview) this.L.remove(this.preview);
     this.preview = this.L.add({ model: id, name: this.piece.name, lat: 0, lon: 0, height: Math.max(built.rise, 50),
-      yawDeg: this.yawDeg, maskR: 0, id: 'piece-preview', preview: true });
+      yawDeg: this.yawDeg, maskR: 0, id: 'piece-preview', preview: true, ground: true });
     this.preview.fixedBase = true;
     this.preview.hidden = true;
   }
@@ -309,8 +330,9 @@ export class Transplant {
     this.L.moveTo(p, this.aim.mx, this.aim.my);
     p.base = this._base(this.piece.poly, this.mode, this.aim.mx, this.aim.my, this.yawDeg, groundAt);
     p.hidden = p.base === null;
-    const rise = Math.round(this.piece.rise);
-    this.message = note || `${this.mode === 'rise' ? `Rises ${rise} m above its edge` : 'Height above sea level'} (U changes)  ·  click lays it down  ·  , . turn  ·  N puts it away`;
+    const rise = Math.round(this.piece.rise), ly = this.piece.layers;
+    const map = !ly ? '' : ly.noMap ? '  ·  no map yet' : ly.settled < ly.total ? `  ·  map ${ly.settled}/${ly.total}` : '';
+    this.message = note || `${this.mode === 'rise' ? `Rises ${rise} m above its edge` : 'Height above sea level'} (U changes)${map}  ·  click lays it down  ·  , . turn  ·  N puts it away`;
   }
 
   // Where a piece stands: the destination's ground along its turned outline's
@@ -338,14 +360,17 @@ export class Transplant {
     if (!it) return false;
     const mode = it.piece.mode === 'rise' ? 'sea' : 'rise';
     const built = buildPiece(it.piece.heightAt, it.piece.poly, mode, it.piece.cut);
-    const id = 'piece-model:' + (count++);
-    this.L.addModel(id, built);
     const base = this._base(it.piece.poly, mode, it.mx, it.my, it.yawDeg, groundAt);
     if (base === null) return false;
+    built.layers = it.piece.city ? it.piece.city.attach(built) : null;
+    const id = 'piece-model:' + (count++);
+    this.L.addModel(id, built);
     this.L.remove(it);
+    if (it.piece.layers && !this._used(it.piece.modelId)) it.piece.layers.cancel();
     const nu = this.L.add({ model: id, name: it.name, lat: it.lat, lon: it.lon, height: Math.max(built.rise, 50), yawDeg: it.yawDeg,
       maskR: 0, id: 'piece:' + (count++), dropped: true, piece: { ...it.piece, ...built, mode, modelId: id } });
     nu.fixedBase = true; nu.base = base;
+    this._layCarried(nu);
     this._say(mode === 'rise' ? `Now rises ${Math.round(built.rise)} m above its edge` : 'Now at its height above sea level');
     return true;
   }
@@ -361,7 +386,7 @@ export class Transplant {
     this.yawDeg = it.yawDeg;
     this.state = 'carrying';
     this.preview = this.L.add({ model: it.piece.modelId, name: it.name, lat: it.lat, lon: it.lon, height: it.height,
-      yawDeg: it.yawDeg, maskR: 0, id: 'piece-preview', preview: true });
+      yawDeg: it.yawDeg, maskR: 0, id: 'piece-preview', preview: true, ground: true });
     this.preview.fixedBase = true;
     this.preview.hidden = true;
     this._say('Picked it up. Click to lay it down again.');

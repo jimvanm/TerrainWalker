@@ -13,10 +13,13 @@
 import { lonToMercX, latToMercY, mercXToLon, mercYToLat, mercScale, wrapMercDx, R_MEAN } from './geo.js';
 import { loadList, loadModel, footprintOf } from './landmark_list.js';
 import { polygonArea, edgesOf, dominantBearing, suggestYaw, ovalAxis, wrapTo } from './orient.js';
+import { paintSlab } from './citykit.js';
 
-const SINK = 6;          // metres below the ground sample, so a sloping site never shows a gap
+export const SINK = 6;   // metres below the ground sample, so a sloping site never shows a gap
 const UNLOAD = 1.5;      // free a shape once every placement using it is this many times out of range
 const MIN_RANGE = 20000; // always load within 20 km, however short the landmark
+const REPAINT_MS = 600;  // a moved piece's ground is repainted at most this often while map tiles arrive
+const ALL_ON = { water: true, roads: true, built: true, cover: true, land: true };
 
 // Distance at which the top of something `height` tall can just show above the
 // horizon for an eye `agl` up: the two horizon distances added.
@@ -45,6 +48,21 @@ export function buildVertices(model, yawDeg = 0) {
   return { vertices: buf, indices: new Uint32Array(model.idx) };
 }
 
+// The same turn as buildVertices, for ready-made 16-byte vertices (a moved
+// piece's roads and buildings, citykit.js). Colours are copied as they are.
+export function turnVertices(vertices, yawDeg = 0) {
+  const out = vertices.slice(0);
+  if (!yawDeg) return out;
+  const f = new Float32Array(out);
+  const c = Math.cos(yawDeg * Math.PI / 180), s = Math.sin(yawDeg * Math.PI / 180);
+  for (let i = 0; i < f.length; i += 4) {
+    const x = f[i], z = f[i + 2];
+    f[i] = x * c - z * s;
+    f[i + 2] = x * s + z * c;
+  }
+  return out;
+}
+
 export class Landmarks {
   // mesh: the shared MeshProgram (meshprogram.js). Landmark vertices are
   // already in true metres, so they are drawn with uScale = 1.
@@ -55,6 +73,7 @@ export class Landmarks {
     this.items = [];             // placements
     this.models = new Map();     // shape id -> { state: 'loading' | 'ready' | 'failed', vao, count, footprint, ... }
     this.listed = false;
+    this.on = { ...ALL_ON };     // which layers are switched on (setLayers)
     this.kinds = [];             // the listed landmarks, as shapes to drop elsewhere (dropper.js)
     this.ready = (list ? Promise.resolve(list) : loadList()).then((all) => {
       for (const L of all) this.add({ ...L, model: L.id });
@@ -94,15 +113,25 @@ export class Landmarks {
   }
 
   remove(it) {
+    for (const c of it.carried || []) this.remove(c);     // what a moved piece carried goes with it
     this._free(it);
     const i = this.items.indexOf(it);
     if (i >= 0) this.items.splice(i, 1);
   }
 
   _free(it) {
+    this._freeSlab(it);
+    for (const x of it.xbufs || []) this.mesh.freeBuffers(x.buf);
+    it.xbufs = []; it.xn = {};
+  }
+
+  _freeSlab(it) {
     if (it.buf) this.mesh.freeBuffers(it.buf);
     it.buf = null; it.vao = null; it.count = 0;
   }
+
+  // Which map layers are on: water, roads, built, cover, land (settings.js).
+  setLayers(on) { this.on = on; }
 
   // A shape made in the app rather than read from a folder (a transplanted
   // piece of ground, transplant.js). Kept until a reload.
@@ -128,14 +157,48 @@ export class Landmarks {
   // GPU buffers are made per placement, because the turn (yaw) is baked into
   // the vertices. Cheap: a few thousand triangles each.
   _buffers(it) {
-    if (it.vao) return true;
     const m = this.models.get(it.model);
     if (!m || m.state !== 'ready') return false;
-    const { vertices, indices } = buildVertices(m.model, it.yawDeg);
-    it.buf = this.mesh.buffers(vertices, indices, null);
-    it.vao = it.buf.vao; it.count = indices.length;
-    if (!m.footprint.length && !m.keep) m.footprint = footprintOf(m.model);   // [east, north] metres, before any turn
+    if (!it.vao) {
+      const { vertices, indices } = buildVertices(m.model, it.yawDeg);
+      it.buf = this.mesh.buffers(vertices, indices, null);
+      it.vao = it.buf.vao; it.count = indices.length;
+      if (!m.footprint.length && !m.keep) m.footprint = footprintOf(m.model);   // [east, north] metres, before any turn
+    }
+    this._extras(it, m);
     return true;
+  }
+
+  // A laid piece's roads and buildings (the model's layers, city.js), added as
+  // map tiles arrive. Only what is new is uploaded: the layers only ever grow.
+  _extras(it, m) {
+    const ly = m.model.layers;
+    if (!ly || !it.piece || it.preview) return;
+    it.xbufs = it.xbufs || []; it.xn = it.xn || {};
+    for (const kind of ['roads', 'built']) {
+      const list = ly[kind];
+      for (let i = it.xn[kind] || 0; i < list.length; i++) {
+        const p = list[i];
+        it.xbufs.push({ kind, buf: this.mesh.buffers(turnVertices(p.vertices, it.yawDeg), p.indices, p.info || null) });
+      }
+      it.xn[kind] = list.length;
+    }
+  }
+
+  // A moved piece's ground carries the painted map (water, built-up, cover)
+  // from the tiles that have arrived. Redone when a layer button changes, and
+  // now and then while tiles arrive.
+  _paint(m, now) {
+    const ly = m.model.layers;
+    if (!ly || !m.model.nodeVert || !m.model.col) return;
+    const on = this.on, key = (on.water ? 1 : 0) + (on.built ? 2 : 0) + (on.cover ? 4 : 0);
+    const changed = m.paintKey !== key, grew = m.paintVer !== ly.version;
+    if (!changed && !(grew && now - (m.paintAt || 0) >= REPAINT_MS)) return;
+    if (!ly.paint.length && !m.painted) { m.paintKey = key; m.paintVer = ly.version; return; }
+    if (!m.col0) m.col0 = m.model.col.slice();
+    paintSlab(m.model.col, m.col0, m.model.nodeVert, ly.paint, on);
+    m.painted = true; m.paintKey = key; m.paintVer = ly.version; m.paintAt = now;
+    for (const it of this.items) if (this.models.get(it.model) === m) this._freeSlab(it);   // remade on the next frame
   }
 
   // view: from detail.js. heightAt: (mercX, mercY) -> { h, z } (terrain.groundAt),
@@ -158,6 +221,8 @@ export class Landmarks {
       if (gz && !it.fixedBase && (it.base === null || gz.z > it.baseZ)) { it.base = gz.h - SINK; it.baseZ = gz.z; }
       this._buffers(it);
     }
+    const now = Date.now();
+    for (const m of this.models.values()) if (m.state === 'ready') this._paint(m, now);
     // Free shapes nobody is near any more, with their placements' buffers.
     for (const [id, m] of this.models) {
       if (m.keep || (used.get(id) ?? Infinity) <= UNLOAD) continue;
@@ -176,11 +241,15 @@ export class Landmarks {
   // Draws every placement whose shape and ground are known. The mesh program
   // must already be in use for this pass; uScale and uCamAlt are changed here,
   // so landmarks are drawn last.
-  draw(pass) {
+  // on: which layers are switched on (default: setLayers). Moved ground is
+  // always drawn; its roads and buildings follow ROADS and BUILT, and the
+  // landmarks, moved or not, follow LANDMARKS.
+  draw(pass, on = this.on) {
     const gl = this.gl, u = this.mesh.u;
     gl.uniform1f(u.uScale, 1);
     for (const it of this.items) {
       if (!it.vao || it.base === null || it.hidden) continue;
+      if (!it.piece && !it.ground && !on.land) continue;      // landmarks follow their button; moved ground does not
       // Height is relative to the landmark's own base: shift the camera, not the model.
       gl.uniform1f(u.uCamAlt, pass.alt - it.base);
       // Offset uses the camera's scale, exactly like tile offsets do.
@@ -188,6 +257,12 @@ export class Landmarks {
       gl.uniform2f(u.uTileOffset, wrapMercDx(it.mx - pass.mercX) * pass.k, (pass.mercY - it.my) * pass.k);
       gl.bindVertexArray(it.vao);
       gl.drawElements(gl.TRIANGLES, it.count, gl.UNSIGNED_INT, 0);
+      if (!it.piece || it.preview) continue;
+      for (const x of it.xbufs || []) {
+        if (!x.buf.vao || !(x.kind === 'roads' ? on.roads : on.built)) continue;
+        gl.bindVertexArray(x.buf.vao);
+        gl.drawElements(gl.TRIANGLES, x.buf.count, gl.UNSIGNED_INT, 0);
+      }
     }
   }
 

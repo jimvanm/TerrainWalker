@@ -17,6 +17,8 @@ import { signedArea } from './earclip.js';
 import { POLYGON } from './mvt.js';
 import { MeshBuilder } from './meshbuilder.js';
 import { cachedFetch } from './cache.js';
+import { tileFrame, buildCityTile, samplePaint } from './citykit.js';
+import { rasterOverlays, MASK } from './overlayraster.js';
 
 const SKY_SUNK = 6;
 const FOOTPRINT_REACH = 600;   // metres: landmarks closer than this to a tile may reach into it   // far terrain is coarse, so skyline walls start deeper
@@ -95,6 +97,31 @@ async function markTile({ vurl }) {
   } };
 }
 
+// Landmark masks in a tile's local units: the landmark's own footprint, turned
+// to its facing, and its circle (maskR). Any map building touching either is
+// the landmark's stand-in on the map, so it is hidden. Only landmarks that can
+// reach into the tile are passed on. g: the tile's frame, c: its middle.
+export async function landmarkMask(sites, g, c) {
+  const half = g.size14 / 2;
+  const mask = [];
+  for (const L of sites) {
+    const r = L.maskR / g.cosLat;
+    const mx = wrapMercDx(lonToMercX(L.lon) - c.x), my = c.y - latToMercY(L.lat);
+    const reach = Math.max(r, FOOTPRINT_REACH / g.cosLat);
+    if (Math.abs(mx) >= half + reach || Math.abs(my) >= half + reach) continue;
+    let poly = null;
+    const fp = await loadFootprint(L.id).catch(() => null);
+    if (fp && fp.length >= 3) {
+      poly = new Float64Array(fp.length * 2);
+      turnFootprint(fp, L.yawDeg || 0).forEach(([e, n], i) => {     // metres east/north -> tile units (y is south)
+        poly[2 * i] = mx + e / g.cosLat; poly[2 * i + 1] = my - n / g.cosLat;
+      });
+    }
+    mask.push({ id: L.id, x: mx, y: my, r, poly });
+  }
+  return mask;
+}
+
 export async function buildNearTile(spec) {
   if (spec.marker) return markTile(spec);
   const { x, y, z = 14, vurl, eurl, skyline = false, skyMin = 50 } = spec;
@@ -119,27 +146,7 @@ export async function buildNearTile(spec) {
   const counts = {};
   const rEnds = skyline ? [0, 0, 0] : buildRoads(layers.transportation, g, mb, layers.aeroway, counts);
   const bb = new MeshBuilder();
-  // Landmark masks in this tile's local units: the landmark's own footprint,
-  // turned to its facing, and its circle (maskR). Any map building touching
-  // either is the landmark's stand-in on the map, so it is hidden. Only
-  // landmarks that can reach into this tile are passed.
-  const half = g.size14 / 2;
-  const mask = [];
-  for (const L of sites) {
-    const r = L.maskR / g.cosLat;
-    const mx = wrapMercDx(lonToMercX(L.lon) - c.x), my = c.y - latToMercY(L.lat);
-    const reach = Math.max(r, FOOTPRINT_REACH / g.cosLat);
-    if (Math.abs(mx) >= half + reach || Math.abs(my) >= half + reach) continue;
-    let poly = null;
-    const fp = await loadFootprint(L.id).catch(() => null);
-    if (fp && fp.length >= 3) {
-      poly = new Float64Array(fp.length * 2);
-      turnFootprint(fp, L.yawDeg || 0).forEach(([e, n], i) => {     // metres east/north -> tile units (y is south)
-        poly[2 * i] = mx + e / g.cosLat; poly[2 * i + 1] = my - n / g.cosLat;
-      });
-    }
-    mask.push({ id: L.id, x: mx, y: my, r, poly });
-  }
+  const mask = await landmarkMask(sites, g, c);
   const stats = buildBuildings(layers.building, g, bb, undefined,
     { ...(skyline ? { minHeight: skyMin, sunk: SKY_SUNK } : {}), mask, landuse: layers.landuse });
   Object.assign(stats, counts);
@@ -151,10 +158,42 @@ export async function buildNearTile(spec) {
            bVertices: b.vertices, bIndices: b.indices, bVerts: b.verts, bInfo: b.info, stats, rEnds };
 }
 
+
+// A moved piece of ground (city.js): one map tile's roads and buildings on the
+// piece's own ground, and the map's paint under its grid nodes, in the piece's
+// frame. spec: { vurl, tile: { x, y, z }, slab, maskModels } (see citykit.js).
+const CITY_LAYERS = ['water', 'waterway', 'landcover', 'landuse', 'transportation', 'aeroway', 'building'];
+export async function buildCityJob(spec) {
+  const { vurl, slab, tile } = spec;
+  const layers = await vectorLayers(vurl, CITY_LAYERS);
+  const fr = tileFrame(slab, tile);
+  const sites = spec.maskModels && spec.maskModels.length ? (await loadList()).filter((L) => spec.maskModels.includes(L.id)) : [];
+  const mask = await landmarkMask(sites, fr.g, fr.c);
+  const built = buildCityTile(layers, { slab, tile, mask });
+  let paint = null;
+  if (layers.water || layers.landcover || layers.landuse) {
+    try {
+      const mPerPx = fr.size * fr.g.cosLat / MASK;
+      paint = samplePaint(rasterOverlays(layers, mPerPx), slab, tile);
+    } catch (e) { /* no canvas here: the ground just goes unpainted */ }
+  }
+  return { ...built, paint };
+}
+
 if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
   self.onmessage = async (ev) => {
     const { id } = ev.data;
     try {
+      if (ev.data.city) {
+        const r = await buildCityJob(ev.data);
+        const out = { id, ok: true, city: true, stats: r.stats, paint: r.paint,
+          rVertices: r.roads.vertices, rIndices: r.roads.indices, rVerts: r.roads.verts,
+          bVertices: r.bld.vertices, bIndices: r.bld.indices, bInfo: r.bld.info, bVerts: r.bld.verts };
+        const transfer = [r.roads.vertices, r.roads.indices.buffer, r.bld.vertices, r.bld.indices.buffer, r.bld.info.buffer];
+        if (r.paint) transfer.push(r.paint.idx.buffer, r.paint.water.buffer, r.paint.built.buffer, r.paint.cov.buffer, r.paint.cover.buffer);
+        self.postMessage(out, transfer);
+        return;
+      }
       const r = await buildNearTile(ev.data);
       self.postMessage({ id, ok: true, vertices: r.vertices, indices: r.indices, verts: r.verts, info: r.info,
         bVertices: r.bVertices, bIndices: r.bIndices, bVerts: r.bVerts, bInfo: r.bInfo, stats: r.stats, rEnds: r.rEnds },

@@ -198,13 +198,45 @@ holes wherever tiles have not loaded.
       edge; the ground under it is not changed. Saved outlines: the PIECES list
       (src/pieces.js). Mountain lookup by name in the PIECES list
       (src/mountains.js): Wikidata for the summit, outline traced at the col
-      on the height tiles, within a chosen reach. Next, agreed: part 2, cities:
-      move the buildings and roads inside the outline too, draped on the
-      destination's ground (downtown Toronto on Saba, in front of Mount St
-      Helens). Open: in rise mode a valley below the outline's edge comes out
-      flat (nothing goes below the base); whether to hide the destination's
-      ground under a piece; pieces carry no water or map colours, only a
-      height colour (green, brown, rock, snow).
+      on the height tiles, within a chosen reach.
+      **Cities (0.13.13, built, not yet seen in a browser):** a piece also
+      carries what stands on it: the map's water, built-up areas and cover
+      painted on its ground, real roads, railways, airport pavement and
+      buildings (the near-field code, pointed at the piece's ground), and the
+      landmarks inside the outline (copies, turned with it). Each follows its
+      own button. Only the shape is drawn while carried; the map is fetched in
+      the background (message line: "map 3/9") and appears once laid. Files:
+      `piecegrid.js` (the ground as numbers), `citykit.js` (one map tile's
+      roads and buildings, and the paint), `city.js` (fetching, loader),
+      `overlayraster.js` (map painting, shared with the tile helper), and a
+      `city` job in `nearworker.js`. Open, in order of likely annoyance:
+      - **The destination's own map still draws under and through a laid
+        city** (its buildings, roads, water paint, and its ground where that
+        is higher than the piece). Hiding them inside the outline needs a
+        cut-out in the near field, the skyline and the terrain shader.
+      - **Overlap is not handled.** Two pieces laid over each other will
+        flicker where their surfaces cross; "last one laid wins" is the
+        intention, not what happens.
+      - Airport areas and buildings are kept or dropped whole by where their
+        middle is, so one that crosses the outline hangs over the edge. Roads
+        and railways are cut exactly.
+      - A big outline gets a coarser map (never more than 256 map tiles: zoom
+        14 for a city, 13 or 12 for a big mountain), so a mountain shows no
+        buildings. Dense cities have no distance culling, so Manhattan is a lot
+        of triangles. Not tested at that size.
+      - The painted far roads are not carried, only the real ribbons. The
+        slab's paint is one colour per grid node (about 360 across), so water
+        edges are soft, not sharp.
+      - Painting a big piece takes about 40 ms, on every WATER, BUILT or COVER
+        press and (at most every 0.6 s) while tiles arrive.
+      - Saved pieces keep the outline only; the map is fetched again when you
+        take one in hand. If the map service's address is not known yet, the
+        message line says "no map yet" (ground and landmarks still move).
+      - A dropped landmark (`M`) inside an outline comes along, but its map
+        building is not hidden (only listed landmarks mask the map).
+      Also open: in rise mode a valley below the outline's edge comes out flat
+      (nothing goes below the base); pieces carry no water or map colours into
+      the *ground* shape beyond the paint above.
 
 - [ ] **You can't stand on a moved mountain.** A laid piece has no ground
       under your feet: walking and the ground height (`groundAt`/`heightAt`)
