@@ -6,7 +6,8 @@
 
 import { loadPlaces, savePlaces, makePlace, setStart } from './places.js';
 
-const isField = (t) => t && (t.tagName === 'INPUT' || t.tagName === 'SELECT');
+const isField = (t) => t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' ||
+  (t.closest && !!t.closest('.fsearch')));     // the mountain search row, its button too
 
 export function initFavourites({ root, getView, jump }) {
   let places = loadPlaces();

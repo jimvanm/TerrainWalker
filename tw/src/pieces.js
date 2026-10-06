@@ -65,16 +65,22 @@ export function initPieces({ root, take, draw, search, find }) {
 
     // Find a mountain by name.
     if (search) {
-      const row = el('div', 'frow');
+      // The row is a 'field' (favourites.js): keys typed here, Tab included,
+      // stay here. Tab goes box, reach, magnifying glass; Enter or Space on
+      // the glass presses it.
+      const row = el('div', 'frow fsearch');
       const inp = el('input', 'fname');
       inp.placeholder = 'Find a mountain...'; inp.value = query; inp.spellcheck = false; inp.maxLength = 60;
-      inp.onkeydown = (e) => {
-        if (e.key === 'Escape') { inp.blur(); return; }
-        if (e.key !== 'Enter' || !inp.value.trim()) return;
+      const go = () => {
+        if (!inp.value.trim()) return;
         query = inp.value.trim(); status = 'Looking up ' + query + '...'; results = []; render();
         search(query).then((r) => {
           results = r; status = r.length ? '' : 'Nothing by that name with a summit position.'; render();
         }).catch(() => { status = 'Could not reach Wikidata.'; render(); });
+      };
+      inp.onkeydown = (e) => {
+        if (e.key === 'Escape') { inp.blur(); return; }
+        if (e.key === 'Enter') go();
       };
       const reach = el('select', 'freach');
       for (const km of [5, 10, 15, 25, 50]) {
@@ -82,7 +88,12 @@ export function initPieces({ root, take, draw, search, find }) {
       }
       reach.title = 'how far from the summit the outline may reach';
       reach.onchange = () => { reachKm = +reach.value; };
-      row.append(inp, reach);
+      const glass = el('button', 'fglass', '🔍');
+      glass.title = 'find it';
+      glass.onclick = go;
+      // A mouse click does not leave the keys in the panel (W still flies).
+      glass.onmousedown = (e) => e.preventDefault();
+      row.append(inp, reach, glass);
       root.append(row);
       if (status) root.append(el('div', 'fempty', status));
       if (results.length) {
