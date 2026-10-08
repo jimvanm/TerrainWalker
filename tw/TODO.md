@@ -43,8 +43,12 @@ always with everything loaded.
 
 - **Sphere (ECEF): agreed, not started.** Pole holes accepted. Prerequisite for
   the hemisphere view.
-- **Water is vector, draped as a texture.** Not raster, not flatness detection,
-  not a floating decal, and not flattened.
+- **Water is vector, draped as a texture** from afar. Not raster, not
+  flatness detection, not a floating decal. **Close by, changed 8 October:
+  flat.** For walking, painted water on coarse ground climbs the banks, so
+  within the near field each water area is a flat surface at one level, with
+  a bank up to the ground, and the terrain is cut away under it (key 0 swaps
+  back to painted). Falling water stays laid on the ground (`watersurface.js`).
 - **Land cover baked as colour, not a class index.** LINEAR filtering would
   interpolate indices into classes that do not exist.
 - **Flight speed proportional to altitude, no realism bend.** Real aircraft
@@ -152,6 +156,23 @@ the new look on Overture's buildings.
 - [ ] **Monuments are guessed** from type (religious, civic) and class
       (church, museum...). Hand-built landmarks still hide what is under them.
 - [ ] **Walking**: the new buildings are not solid yet (see physics, next).
+
+## Water close by: open ends (0.13.21)
+
+- [ ] **One level per water area, per map tile.** A canal drawn as one area
+      across several locks, or a river that falls a little within a tile,
+      gets one level (or is laid on the ground when it falls too much). Fix:
+      cut areas at **lock gates and weirs** (OpenStreetMap has them, e.g.
+      Healey Falls locks, 44.3716, -77.7765; our map tiles do not carry them),
+      and let a river's level follow its length.
+- [ ] **Small steps where a river crosses a tile edge**: each tile works out
+      its own level.
+- [ ] **Rivers drawn as lines only** (streams) stay painted.
+- [ ] **No water surface look** yet: flat colour, no reflection or movement.
+- [ ] **Better heights**: Canada's HRDEM (1 m, much of southern Canada),
+      read in pieces like the Niagara survey tiles; check its licence
+      (Open Government Licence - Canada: attribution) and that its servers
+      allow web pages to read it.
 
 ## Untested, in rough order of risk
 

@@ -12,6 +12,7 @@ export const settings = {
   levels: 9,         // view slider: how many terrain levels may be drawn
   mode: 'nav',       // 'nav' (moving about) or 'tools' (changing things); Tab swaps (ui/keys.js MODES)
   buildings: 0,      // building style, key 5: an index into BUILDING_STYLES
+  flatWater: true,   // key 0: water close by as a flat surface (watersurface.js), or painted on the ground
 };
 
 // Building styles (key 5). The near field is rebuilt when this changes.

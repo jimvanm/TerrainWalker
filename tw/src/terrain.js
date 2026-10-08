@@ -21,7 +21,7 @@ export class Terrain {
     this.prog = G.program(gl, TERRAIN_VS, TERRAIN_FS);
     this.u = G.uniforms(gl, this.prog, ['uProj', 'uView', 'uTileOffset', 'uScale', 'uCamAlt',
       'uCurv', 'uSkirt', 'uFogColor', 'uFogDensity', 'uSunDir',
-      'uTileSize', 'uMask', 'uCover', 'uLayers', 'uDebug', 'uLevel', 'uNearRect']);
+      'uTileSize', 'uMask', 'uCover', 'uLayers', 'uDebug', 'uLevel', 'uNearRect', 'uWaterRect']);
     gl.useProgram(this.prog);
     gl.uniform1i(this.u.uMask, 0);    // texture units
     gl.uniform1i(this.u.uCover, 1);
@@ -241,6 +241,8 @@ export class Terrain {
     gl.uniform4fv(u.uLayers, shading.layers);
     // Painted roads fade out inside the area the real geometry covers.
     gl.uniform4fv(u.uNearRect, shading.nearRect);
+    // Holes where flat water is drawn instead (watersurface.js).
+    gl.uniform4fv(u.uWaterRect, shading.waterRect || [1, 1, -1, -1]);
     let drawn = 0;
     for (const t of this.visible) {
       gl.uniform2f(u.uTileOffset,

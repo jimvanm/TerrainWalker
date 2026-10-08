@@ -74,7 +74,9 @@ export function rasterOverlays(layers, mPerPx = 10, sub = null) {
   const ww = layers.waterway;
   if (ww) {
     const k = MASK / ww.extent;
-    mx.strokeStyle = '#f00';
+    // 70% red, not full: the terrain shader cuts holes for flat water only
+    // where water areas are (full red), never under these lines.
+    mx.strokeStyle = '#b40000';
     for (const f of ww.features) {
       if (f.type !== LINESTRING) continue;
       mx.lineWidth = f.cls === 'river' ? 1.8 : 0.9;

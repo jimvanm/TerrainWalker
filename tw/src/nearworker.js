@@ -11,6 +11,7 @@ import { tileSizeMerc, tileToMerc, tileCentreMerc, mercYToLat } from './geo.js';
 import { decodeTerrarium, meshNodes, pxMetersFor, PX } from './heightgrid.js';
 import { buildRoads } from './roads.js';
 import { buildBuildings } from './buildings.js';
+import { buildWater } from './watersurface.js';
 import { loadList, loadFootprint, turnFootprint } from './landmark_list.js';
 import { lonToMercX, latToMercY, wrapMercDx } from './geo.js';
 import { signedArea } from './earclip.js';
@@ -151,7 +152,7 @@ export async function buildNearTile(spec) {
   const { x, y, z = 14, vurl, eurl, skyline = false, skyMin = 50 } = spec;
   const EZ = spec.ez || EZ_DEFAULT, d = z - EZ;
   const [layers, nodes, sites] = await Promise.all([
-    vectorLayers(vurl, skyline ? ['building', 'landuse'] : ['transportation', 'aeroway', 'building', 'landuse', 'poi']),
+    vectorLayers(vurl, skyline ? ['building', 'landuse'] : ['transportation', 'aeroway', 'building', 'landuse', 'poi', 'water']),
     elevationNodes(eurl, EZ, y >> d),
     loadList(),
   ]);
@@ -187,8 +188,12 @@ export async function buildNearTile(spec) {
   // For the K report: which landmark masks reached this tile, and whether the
   // landmark's outline loaded (without it only the circle masks).
   if (mask.length) stats.maskInfo = mask.map((m) => ({ id: m.id, footprint: !!m.poly }));
+  // Water as a flat surface (watersurface.js), close up only.
+  const wb = new MeshBuilder();
+  if (!skyline) stats.water = buildWater(layers.water, g, wb);
+  const w = wb.finish();
   const r = mb.finish(), b = bb.finish();
-  return { vertices: r.vertices, indices: r.indices, verts: r.verts, info: r.info,
+  return { wVertices: w.vertices, wIndices: w.indices, vertices: r.vertices, indices: r.indices, verts: r.verts, info: r.info,
            bVertices: b.vertices, bIndices: b.indices, bVerts: b.verts, bInfo: b.info, bFac: b.fac || null, bSty: b.sty || null, stats, rEnds };
 }
 
@@ -231,8 +236,10 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
       const r = await buildNearTile(ev.data);
       const transfer = [r.vertices, r.indices.buffer, r.info.buffer, r.bVertices, r.bIndices.buffer, r.bInfo.buffer];
       if (r.bFac) transfer.push(r.bFac.buffer, r.bSty.buffer);
+      transfer.push(r.wVertices, r.wIndices.buffer);
       self.postMessage({ id, ok: true, vertices: r.vertices, indices: r.indices, verts: r.verts, info: r.info,
         bVertices: r.bVertices, bIndices: r.bIndices, bVerts: r.bVerts, bInfo: r.bInfo, bFac: r.bFac, bSty: r.bSty,
+        wVertices: r.wVertices, wIndices: r.wIndices,
         stats: r.stats, rEnds: r.rEnds }, transfer);
     } catch (e) {
       self.postMessage({ id, ok: false, error: String(e && e.message || e) });

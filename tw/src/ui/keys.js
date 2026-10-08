@@ -50,6 +50,7 @@ export const KEYS = [
   { group: 'Show / hide', label: 'C', help: 'ground cover', code: 'KeyC', act: 'layer:cover', mode: 'nav' },
   { group: 'Show / hide', label: 'T', help: 'landmarks', code: 'KeyT', act: 'layer:land', mode: 'nav' },
   { group: 'Show / hide', label: 'F', help: 'fog', code: 'KeyF', act: 'toggleFog', mode: 'nav' },
+  { group: 'Show / hide', label: '0', help: 'water close by: flat / painted', code: 'Digit0', act: 'toggleFlatWater', mode: 'nav' },
 
   { group: 'Colours', label: '5', help: 'building style: today / new look / Overture', code: 'Digit5', act: 'buildStyle', mode: 'nav' },
   { group: 'Colours', label: '6', help: 'real', code: 'Digit6', act: 'lookReal', mode: 'nav' },

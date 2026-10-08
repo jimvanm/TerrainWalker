@@ -230,7 +230,7 @@ ok(log.texSizes.has('256x256'), `mask textures are 256x256 (${[...log.texSizes].
 ok(keysFired === 2 * KEYS.filter((x) => x.act).length, `pressed every action key twice (${keysFired}) without throwing`);
 ok(padFired >= 8, `fired ${padFired} pad handlers without throwing`);
 ok(workerCount === 9, `spawned ${workerCount} workers (3 terrain, 4 near, 2 skyline)`);
-ok(log.uniforms.size === 31, `resolved ${log.uniforms.size} distinct uniform names (expect 31: terrain 17, mesh adds 14)`);
+ok(log.uniforms.size === 32, `resolved ${log.uniforms.size} distinct uniform names (expect 32: terrain 18, mesh adds 14)`);
 ok(log.badUniform.length === 0, `no null uniform locations (${log.badUniform.length})`);
 ok(log.nan.length === 0, `no NaN/Inf uniform values (${log.nan.length}${log.nan.length ? ': ' + log.nan.slice(0, 3) : ''})`);
 const rep = globalThis.twReport;   // left behind by the K key

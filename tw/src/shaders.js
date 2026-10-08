@@ -75,6 +75,7 @@ uniform vec4  uLayers;      // on/off for water, roads, built-up, land cover
 uniform float uDebug;       // 0 off, 1 tile grid + level tint
 uniform float uLevel;
 uniform vec4  uNearRect;    // camera-relative minX, minZ, maxX, maxZ where real road geometry is drawn
+uniform vec4  uWaterRect;   // the same, where water is drawn as a flat surface (watersurface.js)
 
 out vec4 frag;
 
@@ -110,7 +111,16 @@ void main() {
 
   vec3 c = hypso(vHeight) * lit;
 
-  vec4 m = texture(uMask, vUV) * (1.0 - vSkirt);
+  vec4 raw = texture(uMask, vUV);
+  vec4 m = raw * (1.0 - vSkirt);
+
+  // Where water is drawn as its own flat surface, the ground under a water
+  // area is cut away (skirts too), so the surface shows with a crisp shore.
+  // Water areas are full red in the mask; rivers drawn as lines are 70% and
+  // stay painted.
+  vec2 wp = vPos.xz;
+  float inWater = step(uWaterRect.x, wp.x) * step(wp.x, uWaterRect.z) * step(uWaterRect.y, wp.y) * step(wp.y, uWaterRect.w);
+  if (inWater > 0.5 && raw.r * uLayers.x > 0.85) discard;
 
   // Painted in cartographic order: ground cover, then what is built on it,
   // then water, which wins because it is the one thing that is never under

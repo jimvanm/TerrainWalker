@@ -175,6 +175,7 @@ const actions = {
   debugFlat: () => { settings.debug = settings.debug === 2 ? 0 : 2; },
   freeze: () => { settings.frozen = !settings.frozen; },
   toggleMask: () => { settings.showMasked = !settings.showMasked; },
+  toggleFlatWater: () => { settings.flatWater = !settings.flatWater; },
   buildStyle: () => { settings.buildings = (settings.buildings + 1) % BUILDING_STYLES.length; nearField.restyle(); },
   grab: () => controls.grab(),
   faster: () => controls.bump(1.5),
@@ -360,6 +361,7 @@ function frame(now) {
   drawOutline(settings.mode === 'tools' ? transplant.outline() : null, vw, vh);
   setCursor();
   const roadsOn = layerOn('roads'), bldOn = layerOn('built'), landOn = layerOn('land');
+  const flatWater = settings.flatWater && layerOn('water');
   landmarks.setLayers({ water: layerOn('water'), roads: roadsOn, built: bldOn, cover: layerOn('cover'), land: landOn });
   landmarks.update(v, (x, y) => terrain.groundAt(x, y));
   const msg = transplant.message || dropper.message;
@@ -371,12 +373,14 @@ function frame(now) {
     debug: settings.debug,
     layers: LAYERS.slice(0, 4).map((L) => (L.on ? 1 : 0)),
     nearRect: nearField.rectUniform(v.mercX, v.mercY, v.k, roadsOn),
+    waterRect: nearField.waterRectUniform(v.mercX, v.mercY, v.k, flatWater),
   };
   // Everything is drawn twice per frame, once per depth range (see below).
   const drawScene = (pass) => {
     terrain.draw(pass, shading);
     mesh.use(pass);
     handover.draw(pass, roadsOn, bldOn);
+    if (flatWater) nearField.drawWater(pass);
     landmarks.draw(pass);   // last: it changes uScale and uCamAlt. Moved ground is always drawn; the rest follows the buttons (setLayers)
   };
 

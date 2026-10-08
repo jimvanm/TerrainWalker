@@ -98,6 +98,7 @@ export class TileLayer {
   _upload(spec, msg) {
     const roads = this.mesh.buffers(msg.vertices, msg.indices, null);   // roads need no facts
     const bld = msg.bIndices ? this.mesh.buffers(msg.bVertices, msg.bIndices, msg.bInfo, msg.bFac, msg.bSty) : { count: 0, vao: null };
+    const water = msg.wIndices && msg.wIndices.length ? this.mesh.buffers(msg.wVertices, msg.wIndices, null) : null;
     const z = spec.z || this.Z;
     const centre = tileCentreMerc(spec.rawX, spec.y, z);
     // The new look's colours depend on where the tile is (facade.js REGIONS).
@@ -105,7 +106,7 @@ export class TileLayer {
     this.tiles.set(spec.key, {
       key: spec.key, rawX: spec.rawX, y: spec.y, z,
       centre, reg,
-      roads, bld, count: roads.count + bld.count,
+      roads, bld, water, count: roads.count + bld.count,
       stats: msg.stats || null,
       rEnds: msg.rEnds || null, bEnds: (msg.stats && msg.stats.ends) || null,
       ...this._tileExtras(spec, msg),
@@ -121,6 +122,7 @@ export class TileLayer {
       if (wk.has(k) || keep(tile)) continue;
       this.mesh.freeBuffers(tile.roads);
       this.mesh.freeBuffers(tile.bld);
+      if (tile.water) this.mesh.freeBuffers(tile.water);
       this.tiles.delete(k);
     }
   }

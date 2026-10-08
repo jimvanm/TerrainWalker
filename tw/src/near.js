@@ -94,7 +94,7 @@ export class NearLayer extends TileLayer {
       if (y1 < cy + R && row(y1 + 1)) { y1++; grew = true; }
     }
     const nw = tileToMerc(x0, y0, this.Z), se = tileToMerc(x1 + 1, y1 + 1, this.Z);
-    return { w: nw.x, e: se.x, n: nw.y, s: se.y };
+    return { w: nw.x, e: se.x, n: nw.y, s: se.y, x0, x1, y0, y1 };
   }
 
   // The covered block as camera-relative true metres (minX, minZ, maxX, maxZ),
@@ -103,6 +103,26 @@ export class NearLayer extends TileLayer {
     const r = this.rect;
     if (!r || !roadsOn || !this.active) return [1, 1, -1, -1];
     return [(r.w - camMercX) * k, (camMercY - r.n) * k, (r.e - camMercX) * k, (camMercY - r.s) * k];
+  }
+
+  // Where water is drawn as a flat surface: the same fully loaded block as
+  // the roads, so every hole the terrain cuts has a surface in it. An empty
+  // rectangle when off.
+  waterRectUniform(camMercX, camMercY, k, on) { return this.rectUniform(camMercX, camMercY, k, on); }
+
+  // The flat water of the tiles in that block (watersurface.js). The mesh
+  // program must be in use for this pass.
+  drawWater(pass) {
+    const r = this.rect;
+    if (!r || !this.active) return;
+    const gl = this.gl, u = this.mesh.u;
+    for (const t of this.tiles.values()) {
+      if (!t.water || !t.water.count || t.rawX < r.x0 || t.rawX > r.x1 || t.y < r.y0 || t.y > r.y1) continue;
+      gl.uniform2f(u.uTileOffset, (t.centre.x - pass.mercX) * pass.k, (pass.mercY - t.centre.y) * pass.k);
+      gl.bindVertexArray(t.water.vao);
+      gl.drawElements(gl.TRIANGLES, t.water.count, gl.UNSIGNED_INT, 0);
+    }
+    gl.bindVertexArray(null);
   }
 
   _ring(t) { return Math.max(Math.abs(t.rawX - this.cx), Math.abs(t.y - this.cy)); }
@@ -124,7 +144,7 @@ export class NearLayer extends TileLayer {
   // The style changed: drop every tile, so each is built again in the new one.
   // Drawing goes blank for a moment where nothing has arrived yet.
   restyle() {
-    for (const t of this.tiles.values()) { this.mesh.freeBuffers(t.roads); this.mesh.freeBuffers(t.bld); }
+    for (const t of this.tiles.values()) { this.mesh.freeBuffers(t.roads); this.mesh.freeBuffers(t.bld); if (t.water) this.mesh.freeBuffers(t.water); }
     this.tiles.clear();
     this.failed.clear();
     this.pool.keepOnly(new Set());
