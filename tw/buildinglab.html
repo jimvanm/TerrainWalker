@@ -62,6 +62,7 @@
 <div id="bar2">
   <label>buildings from <select id="src"><option value="ofm">our map (OpenFreeMap)</option><option value="ovt">Overture</option></select></label>
   <label>Overture release <input id="rel" type="text" spellcheck="false" style="width:120px"></label>
+  <label>zoom <select id="ozoom"><option value="0">file's finest</option><option>13</option><option>14</option><option>15</option><option>16</option></select></label>
   <span id="counts"></span>
 </div>
 
@@ -262,7 +263,11 @@ async function loadOverture(id, lat) {
   const url = overtureUrl(rel);
   let pm = archives.get(url);
   if (!pm) { pm = new PMTiles(url); archives.set(url, pm); }
-  const reach = 1300 / scale, Zo = OVERTURE_ZOOM;
+  let head;
+  try { head = await pm.header(); } catch (e) { out.textContent = `Overture: could not read it (${e.message}).`; return; }
+  const pick = Number($('ozoom').value);
+  const Zo = Math.max(head.minZoom, Math.min(head.maxZoom, pick || head.maxZoom));
+  const reach = (Zo >= 15 ? 900 : 1300) / scale;
   const a = mercToTile(cam.mx - reach, cam.my + reach, Zo), b = mercToTile(cam.mx + reach, cam.my - reach, Zo);
   const list = [];
   for (let y = Math.floor(a.y); y <= Math.floor(b.y); y++) for (let x = Math.floor(a.x); x <= Math.floor(b.x); x++) list.push([x, y]);
@@ -291,7 +296,7 @@ async function loadOverture(id, lat) {
     out.textContent = `Overture: could not read it (${failed.message}). If the browser's console mentions CORS, the server does not let web pages read it. Or the release name may be out of date.`;
     return;
   }
-  out.innerHTML = describeCounts(counts, kept);
+  out.innerHTML = `File zooms ${head.minZoom} to ${head.maxZoom}; read zoom <b>${Zo}</b>. ` + describeCounts(counts, kept);
 }
 
 function describeCounts(c, kept) {
@@ -302,7 +307,8 @@ function describeCounts(c, kept) {
     `Height on ${k('height')}, floors on ${k('num_floors')}, type on ${k('subtype')} (${top(c.subtype)}).<br>` +
     `Roof shape on ${k('roof_shape')} (${top(c.roof, 8)}).<br>` +
     `Wall material on ${k('facade_material')} (${top(c.facade)}), wall colour on ${k('facade_color')}; ` +
-    `roof material on ${k('roof_material')} (${top(c.roofMat)}), roof colour on ${k('roof_color')}.`;
+    `roof material on ${k('roof_material')} (${top(c.roofMat)}), roof colour on ${k('roof_color')}.<br>` +
+    `Every property found: ${top(c.keys, 40)}.`;
 }
 
 // ---- moving ------------------------------------------------------------------
@@ -422,6 +428,7 @@ $('place').addEventListener('change', goPlace);
 $('rel').value = OVERTURE_RELEASE;
 const reload = () => { if (place) loadPlace(place[0], place[1], place[2], true); };
 $('src').addEventListener('change', reload);
+$('ozoom').addEventListener('change', () => { if ($('src').value === 'ovt') reload(); });
 $('rel').addEventListener('keydown', (e) => { if (e.key === 'Enter') reload(); });
 $('go').addEventListener('click', () => {
   const m = /(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)/.exec($('ll').value);
