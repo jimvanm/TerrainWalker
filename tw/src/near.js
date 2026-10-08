@@ -8,6 +8,8 @@
 import { mercToTile, tileToMerc } from './geo.js';
 import { NF_Z, NF_WORKERS } from './config.js';
 import { TileLayer } from './tilelayer.js';
+import { settings } from './settings.js';
+import { OVERTURE_RELEASE, overtureUrl } from './overture.js';
 
 const MAX_RING = 14;      // never draw tiles farther than this, in tiles
 const KEEP_TILES = 360;   // tiles held before the farthest unwanted ones are freed
@@ -105,6 +107,29 @@ export class NearLayer extends TileLayer {
 
   _ring(t) { return Math.max(Math.abs(t.rawX - this.cx), Math.abs(t.y - this.cy)); }
 
+  // Building style (settings.buildings, key 5) goes with every job; Overture's
+  // file address too when that style is on.
+  _jobOptions() {
+    const style = settings.buildings;
+    return style === 2 ? { style, ovtUrl: overtureUrl(OVERTURE_RELEASE) } : { style };
+  }
+
+  // A tile built in a style that is no longer wanted is thrown away and asked
+  // for again.
+  _upload(spec, msg) {
+    if (((msg.stats && msg.stats.style) || 0) !== settings.buildings) return;
+    super._upload(spec, msg);
+  }
+
+  // The style changed: drop every tile, so each is built again in the new one.
+  // Drawing goes blank for a moment where nothing has arrived yet.
+  restyle() {
+    for (const t of this.tiles.values()) { this.mesh.freeBuffers(t.roads); this.mesh.freeBuffers(t.bld); }
+    this.tiles.clear();
+    this.failed.clear();
+    this.pool.keepOnly(new Set());
+  }
+
   // Draw everything already in memory, not just what is wanted right now.
   // Drawing only the wanted set made far buildings appear while moving
   // (look-ahead tiles were wanted) and vanish the moment you slowed down.
@@ -128,7 +153,8 @@ export class NearLayer extends TileLayer {
         if (t.stats) { kept += t.stats.kept; dropped += t.stats.dropped; }
       }
     }
-    return n + '/' + this.want.length + ' r' + this.R + ' ' + (tris / 1000).toFixed(0) + 'k tris' +
+    const style = ['', ' new look', ' Overture'][settings.buildings] || '';
+    return n + '/' + this.want.length + ' r' + this.R + style + ' ' + (tris / 1000).toFixed(0) + 'k tris' +
       (kept ? ' ' + kept + ' bldg' + (dropped ? ' (' + dropped + ' skipped)' : '') : '') +
       (this.blocked ? ' (too fast to fetch)' : '');
   }

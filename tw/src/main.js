@@ -28,7 +28,7 @@ import { searchMountains, traceMountain } from './mountains.js';
 import { cachedFetch } from './cache.js';
 import { elevationUrl } from './placetiles.js';
 import { LOOK, SETS } from './look.js';
-import { settings, LAYERS, layerOn, toggleLayer } from './settings.js';
+import { settings, LAYERS, layerOn, toggleLayer, BUILDING_STYLES } from './settings.js';
 import { helpHtml, bindKeys, MODES, modeName } from './ui/keys.js';
 import { initPanels } from './ui/panels.js';
 import { initCompass } from './ui/compass.js';
@@ -175,6 +175,7 @@ const actions = {
   debugFlat: () => { settings.debug = settings.debug === 2 ? 0 : 2; },
   freeze: () => { settings.frozen = !settings.frozen; },
   toggleMask: () => { settings.showMasked = !settings.showMasked; },
+  buildStyle: () => { settings.buildings = (settings.buildings + 1) % BUILDING_STYLES.length; nearField.restyle(); },
   grab: () => controls.grab(),
   faster: () => controls.bump(1.5),
   slower: () => controls.bump(1 / 1.5),

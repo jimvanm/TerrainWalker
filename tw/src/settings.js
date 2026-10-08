@@ -11,7 +11,19 @@ export const settings = {
   showMasked: false, // draw the map buildings a landmark hides (key 4), to check the mask
   levels: 9,         // view slider: how many terrain levels may be drawn
   mode: 'nav',       // 'nav' (moving about) or 'tools' (changing things); Tab swaps (ui/keys.js MODES)
+  buildings: 0,      // building style, key 5: an index into BUILDING_STYLES
 };
+
+// Building styles (key 5). The near field is rebuilt when this changes.
+//   today     plain boxes, coloured by look.js
+//   new       windows, house roofs, regional colours (facade.js), on our map's buildings
+//   overture  the same, on Overture's buildings: heights, roof shapes, materials
+export const BUILDING_STYLES = [
+  { id: 'today', label: 'TODAY' },
+  { id: 'new', label: 'NEW LOOK' },
+  { id: 'overture', label: 'OVERTURE' },
+];
+export const buildingStyle = () => BUILDING_STYLES[settings.buildings].id;
 
 // Map layers. The first four are channels in the terrain shader (uLayers.xyzw,
 // in this order); landmarks are separate geometry.

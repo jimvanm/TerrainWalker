@@ -10,6 +10,7 @@ import { tileCentreMerc, mercYToLat, mercXToLon } from './geo.js';
 import { TYPE_NAMES, SIZE_NAMES } from './look.js';
 import { elevationUrl } from './placetiles.js';
 import { WorkerPool } from './pool.js';
+import { regionAt, regionUniforms } from './facade.js';
 
 const RETRY_MS = 10000;   // a failed tile is asked for again after this long
 
@@ -95,11 +96,14 @@ export class TileLayer {
 
   _upload(spec, msg) {
     const roads = this.mesh.buffers(msg.vertices, msg.indices, null);   // roads need no facts
-    const bld = msg.bIndices ? this.mesh.buffers(msg.bVertices, msg.bIndices, msg.bInfo) : { count: 0, vao: null };
+    const bld = msg.bIndices ? this.mesh.buffers(msg.bVertices, msg.bIndices, msg.bInfo, msg.bFac, msg.bSty) : { count: 0, vao: null };
     const z = spec.z || this.Z;
+    const centre = tileCentreMerc(spec.rawX, spec.y, z);
+    // The new look's colours depend on where the tile is (facade.js REGIONS).
+    const reg = msg.bFac ? regionUniforms(regionAt(mercYToLat(centre.y), mercXToLon(centre.x))) : null;
     this.tiles.set(spec.key, {
       key: spec.key, rawX: spec.rawX, y: spec.y, z,
-      centre: tileCentreMerc(spec.rawX, spec.y, z),
+      centre, reg,
       roads, bld, count: roads.count + bld.count,
       stats: msg.stats || null,
       rEnds: msg.rEnds || null, bEnds: (msg.stats && msg.stats.ends) || null,
@@ -144,6 +148,7 @@ export class TileLayer {
         const n = this._take(t.bld, t.bEnds, ringOf(t));
         if (!n) continue;
         offset(t);
+        if (t.reg) this.mesh.setRegion(t.reg);
         gl.bindVertexArray(t.bld.vao);
         gl.drawElements(gl.TRIANGLES, n, gl.UNSIGNED_INT, 0);
       }
@@ -183,7 +188,18 @@ export class TileLayer {
       rail += t.stats.rail || 0; aeroAreas += t.stats.aeroAreas || 0; aeroLines += t.stats.aeroLines || 0;
       runways += t.stats.runways || 0; runwayNumbers += t.stats.runwayNumbers || 0;
     }
-    const out = { tiles, buildingsSeen: seen, buildingsKept: kept,
+    // Overture, when that style is on: what its tiles carried.
+    let ovt = null;
+    for (const t of this.tiles.values()) {
+      const o = t.stats && t.stats.overture;
+      if (!o) continue;
+      ovt = ovt || { tiles: 0, errors: [], buildings: 0, parts: 0, withHeight: 0, withFloors: 0, withType: 0, withRoofShape: 0, withWallMaterial: 0, roofShapes: {} };
+      ovt.tiles++;
+      if (o.error) { if (ovt.errors.length < 3) ovt.errors.push(o.error); continue; }
+      for (const k of ['buildings', 'parts', 'withHeight', 'withFloors', 'withType', 'withRoofShape', 'withWallMaterial']) ovt[k] += o[k] || 0;
+      for (const [k, v] of Object.entries(o.roofShapes || {})) ovt.roofShapes[k] = (ovt.roofShapes[k] || 0) + v;
+    }
+    const out = { tiles, buildingsSeen: seen, buildingsKept: kept, ...(ovt ? { overture: ovt } : {}),
              withMapColour: real, byType: Object.fromEntries(TYPE_NAMES.map((n, i) => [n, types[i]])),
              bySize: Object.fromEntries(SIZE_NAMES.map((n, i) => [n, sizes[i]])),
              railLines: rail, airportAreas: aeroAreas, airportLines: aeroLines, runwayPieces: runways, runwayNumbers,

@@ -8,6 +8,8 @@
 // the camera in true metres, and the earth's curve drops distant points below
 // the horizon.
 
+import { FACADE_VS, FACADE_FS } from './facade.js';
+
 export const CAMERA = `
 uniform mat4  uProj;
 uniform mat4  uView;
@@ -191,6 +193,9 @@ uniform vec3  uAutoRoof[32];   // auto set: 8 roofs per size group
 uniform int   uLook;     // 1 real colours, 2 by type, 4 warmer, 8 auto set, 16 show buildings under landmarks
 out vec3 vPos;
 out vec3 vCol;
+// The new look (facade.js): windows, roofs and regional colours, for
+// buildings built in faces mode. Everything else ignores it.
+${FACADE_VS}
 vec3 buildingColour() {
   int fl = int(aInfo.a * 255.0 + 0.5);
   int num = int(aInfo.g * 255.0 + 0.5);
@@ -218,7 +223,8 @@ void main() {
   float z = aPos.z * uScale + uTileOffset.y;
   float y = aPos.y - uCamAlt;
   vPos = vec3(x, y, z);
-  vCol = aInfo.a > 0.0 ? buildingColour() : aCol.rgb;
+  vec3 nl = newLook();
+  vCol = vNew == 1 ? nl : aInfo.a > 0.0 ? buildingColour() : aCol.rgb;
   gl_Position = toClip(vPos);
   // A map building under a landmark: put every corner outside the view, so
   // the whole triangle is dropped, unless the mask is switched off (key 4).
@@ -231,12 +237,15 @@ in vec3 vPos;
 in vec3 vCol;
 uniform vec3 uSunDir;
 out vec4 frag;
+${FACADE_FS}
 void main() {
   vec3 n = cross(dFdx(vPos), dFdy(vPos));
   float len = length(n);
   n = len > 1e-9 ? n / len : vec3(0.0, 1.0, 0.0);
   if (dot(n, vPos) > 0.0) n = -n;     // always the side facing the camera (walls have n.y ~ 0)
   float lit = 0.55 + 0.45 * max(dot(n, uSunDir), 0.0);
-  vec3 c = floor(vCol * lit * 31.0 + 0.5) / 31.0;   // same 5-bit look as terrain
+  vec3 c;
+  if (vNew == 1) c = facadeShade(vCol * lit, n, lit);  // the new look keeps its full colours
+  else c = floor(vCol * lit * 31.0 + 0.5) / 31.0;     // same 5-bit look as terrain
   frag = vec4(c, 1.0);
 }`;

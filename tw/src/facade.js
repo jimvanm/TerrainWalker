@@ -107,38 +107,39 @@ export function regionAt(lat, lon) {
 }
 
 // A region's colours as flat 0..1 arrays, ready for the shader's uniforms.
+const regionCache = new Map();
 export function regionUniforms(name) {
+  if (regionCache.has(name)) return regionCache.get(name);
+  const out = makeRegionUniforms(name);
+  regionCache.set(name, out);
+  return out;
+}
+function makeRegionUniforms(name) {
   const r = REGIONS[name] || REGIONS.north_america;
   const f = (cs) => new Float32Array(cs.flat(2).map((v) => v / 255));
   const e = r.extra;
   return { wall: f(r.walls), roof: f(r.roofs), frame: f(r.frames), extra: [e.stone, e.balconies, e.arch, e.zinc] };
 }
 
-export const LAB_VS = `#version 300 es
-precision highp float;
-in vec3 aPos;
-in vec4 aCol;
-in vec4 aInfo;     // building facts (meshbuilder.js); all zero = use aCol (roads)
+
+// ---- the new look, shared by the lab and the app (shaders.js) ---------------
+// Vertex side: the attributes and what is passed on, and the colour of a
+// building corner. Used where aSty.w is 1 (buildings.js, faces mode).
+export const FACADE_VS = `
 in vec4 aFac;      // along, length, up, wall height (buildings.js opt.faces)
-in vec4 aSty;      // age 0..1, flags/255 (1 end wall, 2 pitched, 4 monument), floors/255
-uniform mat4 uProj;
-uniform mat4 uView;
-uniform vec3 uOff;      // tile centre minus camera, true metres (east, -camera height, south)
-uniform float uScale;   // mercator metres to true metres
-uniform vec3 uAutoRoof[32];
-uniform vec3 uAutoWall[32];
-uniform int uToday;     // 1: the app's colours as they are today
+in vec4 aSty;      // age 0..1, flags/255 (1 end wall, 2 pitched, 4 monument), floors/255, 1 = new look
 uniform vec3 uWall[20];
 uniform vec3 uRoofC[8];
-out vec3 vPos;
-out vec3 vCol;
 out vec4 vFac;
 flat out ivec4 vInf;    // flags, building number, size group, type
 flat out ivec3 vSty;    // old (1) or new (0), style flags, floor count (0: not known)
 flat out float vAge;
 flat out vec4 vMap;     // the map's own colour, where a mapper gave one (a = 1)
-void main() {
-  vPos = vec3(aPos.x * uScale + uOff.x, aPos.y + uOff.y, aPos.z * uScale + uOff.z);
+flat out int vNew;      // 1: drawn with the new look
+// Sets everything passed on, and returns the corner's colour. uAutoRoof must
+// be declared by the program.
+vec3 newLook() {
+  vec3 lc;
   int fl = int(aInfo.a * 255.0 + 0.5), num = int(aInfo.g * 255.0 + 0.5), tg = int(aInfo.r * 255.0 + 0.5);
   int size = tg / 16, type = tg % 16;
   int sf = int(aSty.y * 255.0 + 0.5);
@@ -148,22 +149,21 @@ void main() {
   vSty = ivec3(old ? 1 : 0, sf, int(aSty.z * 255.0 + 0.5));
   vAge = aSty.x;
   float vary = 0.92 + 0.16 * fract(float(num) * 0.37);
-  if (fl == 0) vCol = aCol.rgb;
-  else if (uToday == 1) vCol = ((fl & 4) != 0 ? uAutoRoof[size * 8 + (num / 8) % 8] : uAutoWall[size * 8 + num % 8] * aInfo.b);
+  if (fl == 0) lc = aCol.rgb;
   else if ((fl & 4) != 0) {
-    if ((sf & 2) != 0) vCol = uRoofC[(old ? 0 : 4) + (num / 4) % 4] * vary;
-    else vCol = uAutoRoof[size * 8 + (num / 8) % 8];
+    if ((sf & 2) != 0) lc = uRoofC[(old ? 0 : 4) + (num / 4) % 4] * vary;
+    else lc = uAutoRoof[size * 8 + (num / 8) % 8];
   } else {
     int cls = size == 3 ? 4 : size == 0 ? (old ? 0 : 1) : (old ? 2 : 3);
-    vCol = uWall[cls * 4 + num % 4] * vary * aInfo.b;
+    lc = uWall[cls * 4 + num % 4] * vary * aInfo.b;
   }
   // Churches, town halls, museums: dressed stone walls, lead roofs.
-  if (fl != 0 && uToday == 0 && (sf & 4) != 0) vCol = (fl & 4) != 0 ? vec3(0.42, 0.45, 0.48) * vary : vec3(0.80, 0.77, 0.70) * vary * aInfo.b;
+  if (fl != 0 && (sf & 4) != 0) lc = (fl & 4) != 0 ? vec3(0.42, 0.45, 0.48) * vary : vec3(0.80, 0.77, 0.70) * vary * aInfo.b;
   // A colour from the map wins: Scotia Plaza stays red, Royal Bank Plaza gold.
   // Softened a little toward grey, as the app does, since mappers often give
   // pure web colours.
   vMap = vec4(0.0);
-  if (uToday == 0 && fl != 0 && (fl & 2) != 0) {
+  if (fl != 0 && (fl & 2) != 0) {
     vec3 m = aCol.rgb;
     float l = dot(m, vec3(0.299, 0.587, 0.114));
     // Loud colours ("red", "yellow") are pulled much further toward grey than
@@ -173,29 +173,27 @@ void main() {
     float keep = mix(0.75, 0.32, smoothstep(0.35, 0.9, sat));
     vec3 mc = clamp(mix(vec3(l), m, keep), 0.0, 1.0) * 0.78 + 0.12;
     vMap = vec4(mc, 1.0);
-    vCol = (fl & 4) != 0 ? mc * 0.95 : mc * aInfo.b;
+    lc = (fl & 4) != 0 ? mc * 0.95 : mc * aInfo.b;
   }
   vFac = aFac;
-  gl_Position = uProj * uView * vec4(vPos, 1.0);
+  vNew = aSty.w > 0.5 ? 1 : 0;
+  return lc;
 }`;
 
-export const LAB_FS = `#version 300 es
-precision highp float;
-in vec3 vPos;
-in vec3 vCol;
+// Fragment side: what arrives, the settings, and the wall drawing.
+export const FACADE_FS = `
 in vec4 vFac;
 flat in ivec4 vInf;
 flat in ivec3 vSty;
 flat in float vAge;
 flat in vec4 vMap;
-uniform vec3 uSunDir;
+flat in int vNew;
 uniform vec3 uSky;
 uniform int uMode;
 uniform vec4 uF1;      // floor, house floor, ground floor, gap
 uniform vec4 uF2;      // window size, tower glass width, shine, -
 uniform vec3 uFrame[2];
 uniform vec4 uReg;     // stone courses, balconies, arched chance, zinc top floor
-out vec4 frag;
 
 float hash(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
 
@@ -223,14 +221,9 @@ float bars(float x, float s, float n, float bw, float px) {
   return inside * (1.0 - smoothstep(bw * 0.5 - px * 0.5, bw * 0.5 + px * 0.5, f));
 }
 
-void main() {
-  vec3 n = cross(dFdx(vPos), dFdy(vPos));
-  float len = length(n);
-  n = len > 1e-9 ? n / len : vec3(0.0, 1.0, 0.0);
-  if (dot(n, vPos) > 0.0) n = -n;
-  float lit = 0.55 + 0.45 * max(dot(n, uSunDir), 0.0);
-  vec3 c = vCol * lit;
-
+// A wall's windows, doors, ledges and so on, over its colour c. n: the
+// surface's facing, lit: its lighting. vPos must be declared by the program.
+vec3 facadeShade(vec3 c, vec3 n, float lit) {
   bool wall = (vInf.x & 1) != 0 && (vInf.x & 4) == 0 && vFac.y > 0.0;
   if (wall) {
     float u = vFac.x, L = vFac.y, v = vFac.z, H = vFac.w;
@@ -366,6 +359,47 @@ void main() {
     if ((uMode & 4) != 0) c *= mix(0.62, 1.0, smoothstep(-0.5, 2.5, v));   // darker where the wall meets the ground
   }
 
+  return c;
+}`;
+
+export const LAB_VS = `#version 300 es
+precision highp float;
+in vec3 aPos;
+in vec4 aCol;
+in vec4 aInfo;     // building facts (meshbuilder.js); all zero = use aCol (roads)
+uniform mat4 uProj;
+uniform mat4 uView;
+uniform vec3 uOff;      // tile centre minus camera, true metres (east, -camera height, south)
+uniform float uScale;   // mercator metres to true metres
+uniform vec3 uAutoRoof[32];
+uniform vec3 uAutoWall[32];
+uniform int uToday;     // 1: the app's colours as they are today
+out vec3 vPos;
+out vec3 vCol;
+${FACADE_VS}
+void main() {
+  vPos = vec3(aPos.x * uScale + uOff.x, aPos.y + uOff.y, aPos.z * uScale + uOff.z);
+  vCol = newLook();
+  int fl = vInf.x, num = vInf.y, size = vInf.z;
+  if (uToday == 1 && fl != 0) vCol = ((fl & 4) != 0 ? uAutoRoof[size * 8 + (num / 8) % 8] : uAutoWall[size * 8 + num % 8] * aInfo.b);
+  if (uToday == 1) vMap = vec4(0.0);
+  gl_Position = uProj * uView * vec4(vPos, 1.0);
+}`;
+
+export const LAB_FS = `#version 300 es
+precision highp float;
+in vec3 vPos;
+in vec3 vCol;
+uniform vec3 uSunDir;
+out vec4 frag;
+${FACADE_FS}
+void main() {
+  vec3 n = cross(dFdx(vPos), dFdy(vPos));
+  float len = length(n);
+  n = len > 1e-9 ? n / len : vec3(0.0, 1.0, 0.0);
+  if (dot(n, vPos) > 0.0) n = -n;
+  float lit = 0.55 + 0.45 * max(dot(n, uSunDir), 0.0);
+  vec3 c = facadeShade(vCol * lit, n, lit);
   // The age guess shown plainly: blue new, red old.
   if ((uMode & 32) != 0 && (vInf.x & 1) != 0) c = mix(vec3(0.20, 0.35, 0.80), vec3(0.85, 0.22, 0.15), vAge) * lit;
   if ((uMode & 16) != 0) c = mix(c, uSky, 1.0 - exp(-length(vPos) / 6000.0));

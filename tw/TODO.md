@@ -124,6 +124,28 @@ always with everything loaded.
       silently falls back and Ctrl+W still closes the window there. The pad reads
       KEYS LOCKED when it is genuinely active — trust that, not the code.
 
+## Buildings: the new look (key 5), open ends
+
+Built in `buildinglab.html` on 8 October, then wired into the near field
+(0.13.19). Key 5 cycles: today's boxes, the new look on our map's buildings,
+the new look on Overture's buildings.
+
+- [ ] **The Overture release name is fixed in the code**
+      (`OVERTURE_RELEASE`, `src/overture.js`). Overture publishes monthly and
+      may remove old releases; when tiles stop coming, the K report shows the
+      error. Needs a way to find the newest release, or a setting.
+- [ ] **The far skyline keeps today's boxes.** Only the near field has the
+      new look; the skyline still reads our map at zoom 13.
+- [ ] **Performance not measured** on real cities. Overture tiles in dense
+      downtowns are big; watch frame rate and near-field loading first.
+- [ ] **Overture tiles carry no land use**, so building types come only from
+      Overture's own type where given, and from our map's land use otherwise.
+- [ ] **Doors go on both ends of a house**: the data does not say which way
+      it faces. A street nearby could tell.
+- [ ] **Monuments are guessed** from type (religious, civic) and class
+      (church, museum...). Hand-built landmarks still hide what is under them.
+- [ ] **Walking**: the new buildings are not solid yet (see physics, next).
+
 ## Untested, in rough order of risk
 
 - [ ] **Antimeridian crossing.** Flown once (Naples to Banff eastward) with no

@@ -138,7 +138,9 @@ globalThis.Worker = class {
         id: m.id, ok: true, vertices: v.slice(0), indices: tri(), verts: 4,
         bVertices: v.slice(0), bIndices: tri(), bVerts: 4, bInfo: new Uint8Array(16),
         rEnds: [6, 6, 6],
-        stats: { seen: 1, kept: 1, dropped: 0, ends: [6, 6, 6], cover: 0.5, built: 0.5 },
+        // The new look (key 5) adds wall positions and style bytes.
+        ...(m.style ? { bFac: new Float32Array(16), bSty: new Uint32Array(4).fill(0xff000000) } : {}),
+        stats: { seen: 1, kept: 1, dropped: 0, ends: [6, 6, 6], cover: 0.5, built: 0.5, style: m.style || 0 },
       } }), 0);
       return;
     }
@@ -212,6 +214,11 @@ for (let pass = 0; pass < 2; pass++) {
   }
 }
 
+// Key 5 cycles three building styles, so two presses leave a different one
+// on, and the near field rebuilt. Let it refill, then take the report again.
+for (let f = 0; f < 30; f++) { const cb = rafCb; rafCb = null; t += 16.7; if (cb) cb(t); await new Promise((r) => setTimeout(r, 0)); }
+(listeners.keydown || []).forEach((f) => f({ code: 'KeyK', preventDefault() {}, repeat: false }));
+
 const R = [];
 const ok = (c, m) => { R.push((c ? 'PASS  ' : 'FAIL  ') + m); if (!c) process.exitCode = 1; };
 
@@ -223,7 +230,7 @@ ok(log.texSizes.has('256x256'), `mask textures are 256x256 (${[...log.texSizes].
 ok(keysFired === 2 * KEYS.filter((x) => x.act).length, `pressed every action key twice (${keysFired}) without throwing`);
 ok(padFired >= 8, `fired ${padFired} pad handlers without throwing`);
 ok(workerCount === 9, `spawned ${workerCount} workers (3 terrain, 4 near, 2 skyline)`);
-ok(log.uniforms.size === 23, `resolved ${log.uniforms.size} distinct uniform names (expect 23: terrain 17, mesh adds 6)`);
+ok(log.uniforms.size === 31, `resolved ${log.uniforms.size} distinct uniform names (expect 31: terrain 17, mesh adds 14)`);
 ok(log.badUniform.length === 0, `no null uniform locations (${log.badUniform.length})`);
 ok(log.nan.length === 0, `no NaN/Inf uniform values (${log.nan.length}${log.nan.length ? ': ' + log.nan.slice(0, 3) : ''})`);
 const rep = globalThis.twReport;   // left behind by the K key

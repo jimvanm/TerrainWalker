@@ -69,6 +69,7 @@ tiles are built on your own computer and are not in the repo (see
 | `V` `X` `B` `C` | toggle water, roads, built-up, land cover |
 | `T` | toggle landmarks (the list is `landmarks/index.json`) |
 | `F` | fog on/off (off by default) |
+| `5` | building style: today's boxes, the new look (windows, house roofs, regional colours) on our map's buildings, or the new look on Overture's buildings (heights, roof shapes, domes and spires, materials). Close up only; the far skyline keeps today's style. |
 | `6` | building colours: real map colours on/off (where a mapper entered one) |
 | `7` | building colours: by type on/off (homes, shops/offices, industry, schools/hospitals, tall, public, military) |
 | `8` | building colours: next colour set (stone, brick, render, concrete, mixed) |

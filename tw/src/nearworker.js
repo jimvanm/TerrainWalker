@@ -19,6 +19,30 @@ import { MeshBuilder } from './meshbuilder.js';
 import { cachedFetch } from './cache.js';
 import { tileFrame, buildCityTile, samplePaint } from './citykit.js';
 import { rasterOverlays, MASK } from './overlayraster.js';
+import { PMTiles } from './pmtiles.js';
+import { overtureBuildings, overtureCounts } from './overture.js';
+
+// Overture's building file, one reader per release (each keeps its directory).
+const archives = new Map();
+const anyLayer = { includes: () => true };    // decode every layer in a tile
+
+// Overture's buildings for one tile, in the names buildings.js reads, with a
+// few counts for the K report. Overture's finest zoom is 14, the near field's.
+async function overtureLayer(url, z, x, y) {
+  let pm = archives.get(url);
+  if (!pm) { pm = new PMTiles(url); archives.set(url, pm); }
+  const bytes = await pm.tile(z, x, y);
+  if (!bytes) return { layer: null, counts: { buildings: 0 } };      // Overture has nothing here
+  const L = decodeMVT(bytes, anyLayer, 'class', anyLayer);
+  const c = overtureCounts(L);
+  const n = (k) => c.keys[k] || 0;
+  return { layer: overtureBuildings(L), counts: {
+    buildings: Object.entries(c.layers).filter(([k]) => !/part/.test(k)).reduce((a, [, v]) => a + v, 0),
+    parts: Object.entries(c.layers).filter(([k]) => /part/.test(k)).reduce((a, [, v]) => a + v, 0),
+    withHeight: n('height'), withFloors: n('num_floors'), withType: n('subtype'),
+    withRoofShape: n('roof_shape'), withWallMaterial: n('facade_material'), roofShapes: c.roof,
+  } };
+}
 
 const SKY_SUNK = 6;
 const FOOTPRINT_REACH = 600;   // metres: landmarks closer than this to a tile may reach into it   // far terrain is coarse, so skyline walls start deeper
@@ -147,15 +171,25 @@ export async function buildNearTile(spec) {
   const rEnds = skyline ? [0, 0, 0] : buildRoads(layers.transportation, g, mb, layers.aeroway, counts);
   const bb = new MeshBuilder();
   const mask = await landmarkMask(sites, g, c);
-  const stats = buildBuildings(layers.building, g, bb, undefined,
-    { ...(skyline ? { minHeight: skyMin, sunk: SKY_SUNK } : {}), mask, landuse: layers.landuse });
+  // Building style (settings.buildings): 0 today's, 1 the new look, 2 the new
+  // look on Overture's buildings. Falls back to our map's if Overture fails.
+  const style = spec.style || 0;
+  let bLayer = layers.building, ovt = null;
+  if (style === 2 && spec.ovtUrl && !skyline) {
+    try { const o = await overtureLayer(spec.ovtUrl, z, x, y); bLayer = o.layer; ovt = o.counts; }
+    catch (e) { ovt = { error: String(e && e.message || e) }; }
+  }
+  const stats = buildBuildings(bLayer, g, bb, undefined,
+    { ...(skyline ? { minHeight: skyMin, sunk: SKY_SUNK } : {}), mask, landuse: layers.landuse, faces: style >= 1 && !skyline });
+  stats.style = style;
+  if (ovt) stats.overture = ovt;
   Object.assign(stats, counts);
   // For the K report: which landmark masks reached this tile, and whether the
   // landmark's outline loaded (without it only the circle masks).
   if (mask.length) stats.maskInfo = mask.map((m) => ({ id: m.id, footprint: !!m.poly }));
   const r = mb.finish(), b = bb.finish();
   return { vertices: r.vertices, indices: r.indices, verts: r.verts, info: r.info,
-           bVertices: b.vertices, bIndices: b.indices, bVerts: b.verts, bInfo: b.info, stats, rEnds };
+           bVertices: b.vertices, bIndices: b.indices, bVerts: b.verts, bInfo: b.info, bFac: b.fac || null, bSty: b.sty || null, stats, rEnds };
 }
 
 
@@ -195,9 +229,11 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
         return;
       }
       const r = await buildNearTile(ev.data);
+      const transfer = [r.vertices, r.indices.buffer, r.info.buffer, r.bVertices, r.bIndices.buffer, r.bInfo.buffer];
+      if (r.bFac) transfer.push(r.bFac.buffer, r.bSty.buffer);
       self.postMessage({ id, ok: true, vertices: r.vertices, indices: r.indices, verts: r.verts, info: r.info,
-        bVertices: r.bVertices, bIndices: r.bIndices, bVerts: r.bVerts, bInfo: r.bInfo, stats: r.stats, rEnds: r.rEnds },
-        [r.vertices, r.indices.buffer, r.info.buffer, r.bVertices, r.bIndices.buffer, r.bInfo.buffer]);
+        bVertices: r.bVertices, bIndices: r.bIndices, bVerts: r.bVerts, bInfo: r.bInfo, bFac: r.bFac, bSty: r.bSty,
+        stats: r.stats, rEnds: r.rEnds }, transfer);
     } catch (e) {
       self.postMessage({ id, ok: false, error: String(e && e.message || e) });
     }

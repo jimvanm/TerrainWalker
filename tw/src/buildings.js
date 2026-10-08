@@ -418,8 +418,9 @@ export function guessAges(cand, k) {
 // Style bytes per corner (mb.sty): age 0..255, then flags, then the floor
 // count when the map gives one (0 when not).
 export const STY_END = 1, STY_PITCHED = 2, STY_MONUMENT = 4;
+// The top byte is always 255: it marks the corner as drawn with the new look.
 export const sty = (age, flags, floors = 0) =>
-  ((Math.min(255, Math.round(floors)) << 16) | (flags << 8) | Math.round(clamp01(age) * 255)) >>> 0;
+  ((255 << 24) | (Math.min(255, Math.round(floors)) << 16) | (flags << 8) | Math.round(clamp01(age) * 255)) >>> 0;
 
 // Like emit, but every wall face has its own corners, and each corner records
 // where it is on its wall (mb.fac: along, face length, up from the base, wall

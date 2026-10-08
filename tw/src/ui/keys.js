@@ -51,6 +51,7 @@ export const KEYS = [
   { group: 'Show / hide', label: 'T', help: 'landmarks', code: 'KeyT', act: 'layer:land', mode: 'nav' },
   { group: 'Show / hide', label: 'F', help: 'fog', code: 'KeyF', act: 'toggleFog', mode: 'nav' },
 
+  { group: 'Colours', label: '5', help: 'building style: today / new look / Overture', code: 'Digit5', act: 'buildStyle', mode: 'nav' },
   { group: 'Colours', label: '6', help: 'real', code: 'Digit6', act: 'lookReal', mode: 'nav' },
   { group: 'Colours', label: '7', help: 'by type', code: 'Digit7', act: 'lookType', mode: 'nav' },
   { group: 'Colours', label: '8', help: 'colour set', code: 'Digit8', act: 'lookSet', mode: 'nav' },

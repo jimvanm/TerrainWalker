@@ -43,7 +43,8 @@ const near = (a, b, e = 1e-6) => Math.abs(a - b) < e;
   const st = buildBuildings({ extent: E, features: feats }, g, mb, 1e7, { faces: true });
   const o = mb.finish();
   ok(st.kept === 46 && o.sty && o.sty.length === o.verts && o.fac.length === o.verts * 4, 'every corner has its wall numbers and style');
-  const flags = new Set([...o.sty].map((v) => v >> 8));
+  const flags = new Set([...o.sty].map((v) => (v >>> 8) & 255));
+  ok([...o.sty].every((v) => v >>> 24 === 255), "every corner is marked for the new look");
   ok(flags.has(STY_PITCHED) && flags.has(STY_PITCHED | STY_END), 'houses are pitched, with their ends marked');
 
   // Four rows of 6 x 15 m houses, 7 m apart (a Toronto block), and big houses 60 m apart.
