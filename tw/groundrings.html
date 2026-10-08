@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ground rings</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #11161d; color: #dbe3ec; font: 13px/1.5 ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace; }
+  header { padding: 10px 16px; border-bottom: 1px solid #2a3340; }
+  h1 { font-size: 15px; margin: 0 0 4px; color: #ffd479; }
+  header p { margin: 0; color: #93a1b2; max-width: 1150px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 8px 16px; border-bottom: 1px solid #2a3340; }
+  input[type=text] { font: inherit; color: #dbe3ec; background: #1d2530; border: 1px solid #3a4552; border-radius: 3px; padding: 3px 8px; width: 190px; }
+  button, select { font: inherit; color: #dbe3ec; background: #1d2530; border: 1px solid #3a4552; border-radius: 3px; padding: 3px 10px; cursor: pointer; }
+  #status { color: #93a1b2; }
+  #rings { padding: 6px 16px; border-bottom: 1px solid #2a3340; color: #93a1b2; }
+  #rings table { border-collapse: collapse; }
+  #rings td, #rings th { padding: 1px 12px 1px 0; text-align: right; font-weight: normal; }
+  #rings th { color: #6d7d90; }
+  #rings td:first-child, #rings th:first-child { text-align: left; }
+  #rings .on { color: #ffd479; }
+  .sw { display: inline-block; width: 10px; height: 10px; margin-right: 6px; vertical-align: middle; }
+  #view { display: block; width: 100%; height: 66vh; min-height: 360px; cursor: grab; touch-action: none; background: #9ebcd8; }
+  #wrap { position: relative; }
+  #hud { position: absolute; left: 8px; bottom: 8px; padding: 2px 8px; background: rgba(17,22,29,0.75); border-radius: 3px; pointer-events: none; }
+  .key { color: #6d7d90; padding: 8px 16px 16px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Ground rings</h1>
+  <p>Detail in rings round you, as terrain engines do it: Canada's survey at 1, 2, 4 and 8 m close by, today's ground
+     at 16 and 64 m beyond. A ring is fetched only while its detail can show on your screen, which depends on your
+     height and the allowed error in pixels. Fly down from high up and back, and watch which rings come and go, what
+     each costs, and whether you can see where they meet. T tints each ring its own colour.</p>
+</header>
+<div class="bar">
+  <select id="place"></select>
+  <input id="ll" type="text" placeholder="or lat, lon" spellcheck="false">
+  <button id="go">Go</button>
+  <label>allowed error <select id="tol"><option value="1">1 pixel</option><option value="2" selected>2 pixels</option><option value="4">4 pixels</option></select></label>
+  <label><input type="checkbox" id="tint"> tint rings (T)</label>
+  <label><input type="checkbox" id="blend" checked> blend where rings meet</label>
+  <label><input type="checkbox" id="water" checked> water</label>
+  <button id="high">start high</button>
+  <button id="low">start low</button>
+</div>
+<div class="bar"><span id="status"></span></div>
+<div id="rings"></div>
+<div id="wrap"><canvas id="view"></canvas><div id="hud"></div></div>
+<div class="key">
+  Drag to look. W A S D or arrows to move, E or Space up, Q or C down, Shift for 5× faster, wheel for speed.
+  G walks on the ground or flies. R goes back to the start.
+  <br>Elevation: Contains information licensed under the Open Government Licence – Canada (Natural Resources Canada, HRDEM);
+  Mapzen / AWS Open Data Terrain Tiles. Water: © OpenStreetMap contributors, OpenMapTiles via OpenFreeMap.
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js"></script>
+<script type="module">
+import { VECTOR_TILEJSON } from './src/config.js';
+import { decodeMVT, POLYGON } from './src/mvt.js';
+import { lonToMercX, latToMercY, mercToTile, tileToMerc, tileSizeMerc } from './src/geo.js';
+import { program, perspective, viewRot, SUN_DIR, uniforms } from './src/gl.js';
+import { findPiece, openSurvey, levelFor, surveyGrid, localToGrid, localToLatLon } from './src/hrdemsource.js';
+import { TodayGround } from './src/todayground.js';
+
+const PLACES = [
+  ['Ottawa: Rideau Canal locks', 45.42426, -75.69571, 0],
+  ['Healey Falls locks', 44.3716, -77.7765, 300],
+  ['Campbellford', 44.3076, -77.7999, 20],
+  ['Toronto: Don Valley', 43.684, -79.360, 0],
+];
+const N = 513;                         // points along each ring's side
+const RINGS = [
+  { name: 'survey 1 m', cell: 1, src: 'survey', colour: [0.95, 0.35, 0.35] },
+  { name: 'survey 2 m', cell: 2, src: 'survey', colour: [0.95, 0.65, 0.25] },
+  { name: 'survey 4 m', cell: 4, src: 'survey', colour: [0.85, 0.85, 0.25] },
+  { name: 'survey 8 m', cell: 8, src: 'survey', colour: [0.35, 0.80, 0.40] },
+  { name: 'today 16 m', cell: 16, src: 'today', tz: 13, colour: [0.30, 0.65, 0.95] },
+  { name: 'today 64 m', cell: 64, src: 'today', tz: 11, colour: [0.65, 0.45, 0.95] },
+];
+const $ = (id) => document.getElementById(id);
+PLACES.forEach(([n], i) => { const o = document.createElement('option'); o.value = i; o.textContent = n; $('place').appendChild(o); });
+
+// ---- counting bytes, per ring -------------------------------------------------
+let current = null;                    // the ring being built (builds run one at a time)
+const realFetch = window.fetch.bind(window);
+window.fetch = async (url, init) => {
+  const r = await realFetch(url, init);
+  const n = Number(r.headers.get('content-length')) || 0;
+  if (current) current.bytes += n;
+  return r;
+};
+const mb = (n) => n > 1e6 ? (n / 1e6).toFixed(1) + ' MB' : (n / 1e3).toFixed(0) + ' kB';
+
+// ---- GL ------------------------------------------------------------------------
+const canvas = $('view');
+const gl = canvas.getContext('webgl2', { antialias: true });
+const VS = `#version 300 es
+precision highp float;
+in vec2 aXZ; in float aH; in float aHp; in float aMiss;
+uniform mat4 uProj, uView; uniform vec3 uCam; uniform vec2 uCentre; uniform float uHalf; uniform float uBlend;
+out vec3 vPos; out float vH; out float vMiss; out vec2 vXZ;
+void main() {
+  // Blend toward the coarser ring's heights over the outer quarter, so the
+  // edge matches the ring outside it.
+  float d = max(abs(aXZ.x - uCentre.x), abs(aXZ.y - uCentre.y)) / uHalf;
+  float k = uBlend * smoothstep(0.72, 0.95, d);
+  float h = mix(aH, aHp, k);
+  vPos = vec3(aXZ.x - uCam.x, h - uCam.y, aXZ.y - uCam.z);
+  vH = h; vMiss = aMiss; vXZ = aXZ;
+  gl_Position = uProj * uView * vec4(vPos, 1.0);
+}`;
+const FS = `#version 300 es
+precision highp float;
+in vec3 vPos; in float vH; in float vMiss; in vec2 vXZ;
+uniform vec3 uSun; uniform vec4 uInner; uniform vec3 uTint; uniform float uTintOn; uniform vec2 uRange;
+uniform sampler2D uWater; uniform float uWaterHalf; uniform float uWaterOn;
+out vec4 frag;
+void main() {
+  // The finer ring draws here.
+  if (vXZ.x > uInner.x && vXZ.x < uInner.z && vXZ.y > uInner.y && vXZ.y < uInner.w) discard;
+  vec3 n = normalize(cross(dFdx(vPos), dFdy(vPos)));
+  if (n.y < 0.0) n = -n;
+  float lit = 0.45 + 0.55 * max(dot(n, uSun), 0.0);
+  float t = clamp((vH - uRange.x) / max(10.0, uRange.y - uRange.x), 0.0, 1.0);
+  vec3 c = vec3(0.36 + 0.28 * t, 0.50 - 0.06 * t, 0.28 + 0.02 * t);
+  vec2 wuv = vXZ / (2.0 * uWaterHalf) + 0.5;
+  if (uWaterOn > 0.5 && all(greaterThan(wuv, vec2(0.0))) && all(lessThan(wuv, vec2(1.0))) && texture(uWater, wuv).r > 0.5) c = vec3(0.16, 0.33, 0.52);
+  if (vMiss > 0.5) c = mix(c, vec3(0.70, 0.30, 0.75), 0.45);
+  c *= lit;
+  c = mix(c, uTint, 0.38 * uTintOn);
+  c = mix(c, vec3(0.62, 0.74, 0.86), 1.0 - exp(-length(vPos) / 14000.0));
+  frag = vec4(c, 1.0);
+}`;
+const prog = program(gl, VS, FS);
+const U = uniforms(gl, prog, ['uProj', 'uView', 'uCam', 'uCentre', 'uHalf', 'uBlend', 'uSun', 'uInner', 'uTint', 'uTintOn', 'uRange', 'uWater', 'uWaterHalf', 'uWaterOn']);
+const A = { xz: gl.getAttribLocation(prog, 'aXZ'), h: gl.getAttribLocation(prog, 'aH'), hp: gl.getAttribLocation(prog, 'aHp'), miss: gl.getAttribLocation(prog, 'aMiss') };
+
+// One index buffer serves every ring: they all have N x N points.
+const IDX = (() => {
+  const a = new Uint32Array((N - 1) * (N - 1) * 6);
+  let p = 0;
+  for (let j = 0; j < N - 1; j++) for (let i = 0; i < N - 1; i++) {
+    const q = j * N + i; a[p++] = q; a[p++] = q + N; a[p++] = q + 1; a[p++] = q + 1; a[p++] = q + N; a[p++] = q + N + 1;
+  }
+  return a;
+})();
+const ibo = gl.createBuffer();
+gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, IDX, gl.STATIC_DRAW);
+
+function makeRingGL(r) {
+  r.vao = gl.createVertexArray(); gl.bindVertexArray(r.vao);
+  r.bxz = gl.createBuffer(); r.bh = gl.createBuffer(); r.bhp = gl.createBuffer(); r.bm = gl.createBuffer();
+  for (const [b, at, n] of [[r.bxz, A.xz, 2], [r.bh, A.h, 1], [r.bhp, A.hp, 1], [r.bm, A.miss, 1]]) {
+    gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, N * N * 4 * n, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(at); gl.vertexAttribPointer(at, n, gl.FLOAT, false, 0, 0);
+  }
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+  gl.bindVertexArray(null);
+}
+const upload = (b, data) => { gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferSubData(gl.ARRAY_BUFFER, 0, data); };
+
+// ---- the place ---------------------------------------------------------------
+let place = null, today = null, survey = null, toGrid = null, surveyNote = '';
+const cam = { x: 0, y: 3000, z: 0, yaw: 0, pitch: -0.6, speed: 150, walk: false };
+let start = null, placeId = 0;
+window.__cam = cam;   // for automated looks at the lab
+const waterTex = gl.createTexture();
+const WATER_HALF = 4096, WATER_PX = 2048;
+
+async function loadPlace(lat, lon, facing) {
+  const id = ++placeId;
+  place = { lat, lon, lo: 0, hi: 100 };
+  today = new TodayGround(lat, lon);
+  toGrid = localToGrid(lat, lon);
+  survey = null; surveyNote = '';
+  for (const r of RINGS) { r.ready = false; r.cx = r.cz = null; r.bytes = 0; r.ms = 0; r.builds = 0; r.h = null; r.missing = 0; }
+  $('status').textContent = 'finding the survey for this place...';
+  try {
+    const [la0, lo0] = localToLatLon(lat, lon, -3000, 3000), [la1, lo1] = localToLatLon(lat, lon, 3000, -3000);
+    const piece = await findPiece(lo0, la0, lo1, la1, 'dtm');
+    if (piece) { survey = await openSurvey(piece.href); surveyNote = `survey piece ${piece.id}, ${survey.levels.length} levels, ${survey.compression}, blocks ${survey.block} px`; }
+    else surveyNote = 'no survey covers this place: survey rings show today\'s ground';
+  } catch (e) { surveyNote = 'could not read the survey (' + e.message + '): survey rings show today\'s ground'; }
+  if (id !== placeId) return;
+  // Range of heights, from the widest ring, for the colours.
+  const outer = RINGS[RINGS.length - 1];
+  busy = true;
+  try { await buildRing(outer, 0, 0); } finally { busy = false; }
+  let lo = Infinity, hi = -Infinity;
+  for (const v of outer.h) { if (v < lo) lo = v; if (v > hi) hi = v; }
+  place.lo = lo; place.hi = hi;
+  const g = groundAt(0, 0) ?? lo;
+  start = { x: 0, z: 0, y: g + 3000, yaw: facing * Math.PI / 180, pitch: -0.6, speed: 150, walk: false };
+  Object.assign(cam, start);
+  waterMask(lat, lon).catch(() => {});
+}
+
+// ---- building a ring ------------------------------------------------------------
+// A ring is centred on the camera, snapped to a grid of 16 of its cells, so it
+// moves in steps and keeps what it already has in between.
+function wantCentre(r) { const s = r.cell * 16; return [Math.round(cam.x / s) * s, Math.round(cam.z / s) * s]; }
+
+async function buildRing(r, cx, cz) {
+  const t0 = performance.now();
+  current = r;
+  try {
+    const half = (N - 1) / 2 * r.cell;
+    const h = new Float32Array(N * N), miss = new Float32Array(N * N);
+    let tz = r.tz || 14;
+    if (r.src === 'survey' && survey) {
+      const lvl = levelFor(survey, r.cell);
+      const sv = await surveyGrid(survey, lvl, toGrid, cx, cz, N, r.cell);
+      let gaps = 0;
+      for (let i = 0; i < sv.length; i++) if (Number.isNaN(sv[i])) gaps++;
+      if (gaps) await today.ensure(14, cx - half, cz - half, cx + half, cz + half);
+      for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+        const k = j * N + i, v = sv[k];
+        if (Number.isNaN(v)) { h[k] = today.at(14, cx - half + i * r.cell, cz - half + j * r.cell); miss[k] = 1; } else h[k] = v;
+      }
+      r.missing = gaps / (N * N);
+    } else {
+      if (r.src === 'survey') tz = 14;
+      await today.ensure(tz, cx - half, cz - half, cx + half, cz + half);
+      for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) h[j * N + i] = today.at(tz, cx - half + i * r.cell, cz - half + j * r.cell);
+      if (r.src === 'survey') { miss.fill(1); r.missing = 1; }
+    }
+    const xz = new Float32Array(N * N * 2);
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { const k = j * N + i; xz[2 * k] = cx - half + i * r.cell; xz[2 * k + 1] = cz - half + j * r.cell; }
+    if (!r.vao) makeRingGL(r);
+    upload(r.bxz, xz); upload(r.bh, h); upload(r.bm, miss);
+    r.h = h; r.cx = cx; r.cz = cz; r.half = half; r.ready = true; r.builds++;
+    r.ms = performance.now() - t0;
+  } finally { current = null; }
+}
+
+// Heights of a ring sampled at another ring's points, for the blend at its edge.
+function sampleRing(r, x, z) {
+  if (!r || !r.ready) return null;
+  const u = (x - (r.cx - r.half)) / r.cell, v = (z - (r.cz - r.half)) / r.cell;
+  if (u < 0 || v < 0 || u > N - 1 || v > N - 1) return null;
+  const i = Math.min(N - 2, Math.floor(u)), j = Math.min(N - 2, Math.floor(v)), fu = u - i, fv = v - j, h = r.h;
+  return (h[j * N + i] * (1 - fu) + h[j * N + i + 1] * fu) * (1 - fv) + (h[(j + 1) * N + i] * (1 - fu) + h[(j + 1) * N + i + 1] * fu) * fv;
+}
+function blendHeights(r, parent) {
+  const hp = new Float32Array(N * N);
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const k = j * N + i, x = r.cx - r.half + i * r.cell, z = r.cz - r.half + j * r.cell;
+    const v = sampleRing(parent, x, z);
+    hp[k] = v === null ? r.h[k] : v;
+  }
+  upload(r.bhp, hp);
+  r.parentBuild = parent ? parent.cx + ',' + parent.cz + ',' + parent.builds : null;
+}
+
+// Which rings should be on: a survey ring's cells must show as at least the
+// allowed error on screen at your height above the ground. One pixel covers
+// about distance x (field of view / screen height) on the ground.
+function wanted() {
+  const g = groundAt(cam.x, cam.z) ?? place.lo;
+  const agl = Math.max(1, cam.y - g);
+  const tol = Number($('tol').value);
+  const pxPerRad = canvas.clientHeight / (60 * Math.PI / 180);
+  return RINGS.map((r) => r.src !== 'survey' || (r.cell * pxPerRad / agl) >= tol);
+}
+
+let busy = false;
+async function pump() {
+  if (busy || !place) return;
+  const want = wanted();
+  // Coarsest first, so there is always something under you.
+  for (let k = RINGS.length - 1; k >= 0; k--) {
+    const r = RINGS[k];
+    if (!want[k]) continue;
+    const [cx, cz] = wantCentre(r);
+    if (r.ready && r.cx === cx && r.cz === cz) continue;
+    busy = true;
+    const id = placeId;
+    try { await buildRing(r, cx, cz); } catch (e) { console.warn(r.name, e); }
+    busy = false;
+    if (id !== placeId) return;
+    break;
+  }
+  // Keep each ring's edge blend matched to the ring outside it.
+  for (let k = 0; k < RINGS.length - 1; k++) {
+    const r = RINGS[k], p = nextOuter(k, want);
+    if (!r.ready) continue;
+    const key = p ? p.cx + ',' + p.cz + ',' + p.builds : null;
+    if (key !== r.parentBuild) blendHeights(r, p);
+  }
+}
+const nextOuter = (k, want) => { for (let q = k + 1; q < RINGS.length; q++) if (want[q] && RINGS[q].ready) return RINGS[q]; return null; };
+
+function groundAt(x, z) {
+  for (const r of RINGS) { if (!r.ready) continue; const v = sampleRing(r, x, z); if (v !== null) return v; }
+  return null;
+}
+
+// ---- water, once per place ---------------------------------------------------
+async function waterMask(lat, lon) {
+  const tpl = (await (await fetch(VECTOR_TILEJSON, { mode: 'cors' })).json()).tiles[0];
+  const Z = 13, s = tileSizeMerc(Z), k = Math.cos(lat * Math.PI / 180), cmx = lonToMercX(lon), cmy = latToMercY(lat);
+  const cv = new OffscreenCanvas(WATER_PX, WATER_PX), cx = cv.getContext('2d');
+  cx.fillStyle = '#f00';
+  const px = WATER_PX / (2 * WATER_HALF);
+  const t0 = mercToTile(cmx - WATER_HALF / k, cmy + WATER_HALF / k, Z), t1 = mercToTile(cmx + WATER_HALF / k, cmy - WATER_HALF / k, Z);
+  const jobs = [];
+  for (let ty = Math.floor(t0.y); ty <= Math.floor(t1.y); ty++) for (let tx = Math.floor(t0.x); tx <= Math.floor(t1.x); tx++) jobs.push([tx, ty]);
+  await Promise.all(jobs.map(async ([tx, ty]) => {
+    const r = await realFetch(tpl.replace('{z}', Z).replace('{x}', tx).replace('{y}', ty), { mode: 'cors' });
+    if (!r.ok) return;
+    const L = decodeMVT(new Uint8Array(await r.arrayBuffer()), ['water']);
+    if (!L.water) return;
+    const nw = tileToMerc(tx, ty, Z), E = L.water.extent;
+    cx.beginPath();
+    for (const f of L.water.features) {
+      if (f.type !== POLYGON) continue;
+      for (const ring of f.parts) {
+        for (let i = 0; i < ring.length; i += 2) {
+          const X = ((nw.x + ring[i] / E * s - cmx) * k + WATER_HALF) * px, Y = ((cmy - (nw.y - ring[i + 1] / E * s)) * k + WATER_HALF) * px;
+          if (i) cx.lineTo(X, Y); else cx.moveTo(X, Y);
+        }
+        cx.closePath();
+      }
+    }
+    cx.fill('nonzero');
+  }));
+  gl.bindTexture(gl.TEXTURE_2D, waterTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, cv.transferToImageBitmap ? cv.transferToImageBitmap() : cv);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+}
+
+// ---- moving ------------------------------------------------------------------
+const keys = new Set();
+addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT' && e.target.type === 'text') return;
+  keys.add(e.code);
+  if (e.code === 'KeyR' && start) Object.assign(cam, start);
+  if (e.code === 'KeyT') $('tint').checked = !$('tint').checked;
+  if (e.code === 'KeyG') { cam.walk = !cam.walk; cam.speed = cam.walk ? 4 : 150; }
+  if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
+});
+addEventListener('keyup', (e) => keys.delete(e.code));
+addEventListener('blur', () => keys.clear());
+let drag = null;
+canvas.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY }; canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener('pointermove', (e) => {
+  if (!drag) return;
+  cam.yaw += (e.clientX - drag.x) * 0.004;
+  cam.pitch = Math.max(-1.55, Math.min(1.5, cam.pitch - (e.clientY - drag.y) * 0.004));
+  drag = { x: e.clientX, y: e.clientY };
+});
+canvas.addEventListener('pointerup', () => { drag = null; });
+canvas.addEventListener('wheel', (e) => { e.preventDefault(); cam.speed = Math.max(0.5, Math.min(3000, cam.speed * (e.deltaY < 0 ? 1.25 : 0.8))); }, { passive: false });
+function move(dt) {
+  const k = (c) => keys.has(c);
+  let f = 0, s = 0, up = 0;
+  if (k('KeyW') || k('ArrowUp')) f += 1; if (k('KeyS') || k('ArrowDown')) f -= 1;
+  if (k('KeyD') || k('ArrowRight')) s += 1; if (k('KeyA') || k('ArrowLeft')) s -= 1;
+  if (k('KeyE') || k('Space')) up += 1; if (k('KeyQ') || k('KeyC')) up -= 1;
+  const v = cam.speed * (k('ShiftLeft') || k('ShiftRight') ? 5 : 1) * dt;
+  const sy = Math.sin(cam.yaw), cy = Math.cos(cam.yaw);
+  cam.x += (f * sy + s * cy) * v; cam.z -= (f * cy - s * sy) * v; cam.y += up * v;
+  const g = groundAt(cam.x, cam.z);
+  if (g !== null) cam.y = cam.walk ? g + 1.7 : Math.max(cam.y, g + 1.7);
+}
+
+// ---- drawing -----------------------------------------------------------------
+const proj = new Float32Array(16), view = new Float32Array(16);
+let last = performance.now(), pumpAt = 0;
+function frame(now) {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  move(dt);
+  if (now > pumpAt) { pumpAt = now + 100; pump(); }
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  const w = Math.round(canvas.clientWidth * dpr), h = Math.round(canvas.clientHeight * dpr);
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  gl.viewport(0, 0, w, h);
+  gl.enable(gl.DEPTH_TEST);
+  gl.clearColor(0.62, 0.74, 0.86, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.useProgram(prog);
+  const g = place ? (groundAt(cam.x, cam.z) ?? place.lo) : 0;
+  const agl = Math.max(1, cam.y - g);
+  perspective(proj, 60 * Math.PI / 180, w / h, Math.max(0.3, agl * 0.02), 60000);
+  viewRot(view, cam.yaw, cam.pitch);
+  gl.uniformMatrix4fv(U.uProj, false, proj); gl.uniformMatrix4fv(U.uView, false, view);
+  gl.uniform3f(U.uCam, cam.x, cam.y, cam.z);
+  gl.uniform3f(U.uSun, SUN_DIR[0], SUN_DIR[1], SUN_DIR[2]);
+  gl.uniform2f(U.uRange, place ? place.lo : 0, place ? place.hi : 100);
+  gl.uniform1f(U.uBlend, $('blend').checked ? 1 : 0);
+  gl.uniform1f(U.uTintOn, $('tint').checked ? 1 : 0);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, waterTex);
+  gl.uniform1i(U.uWater, 0); gl.uniform1f(U.uWaterHalf, WATER_HALF); gl.uniform1f(U.uWaterOn, $('water').checked ? 1 : 0);
+  const want = place ? wanted() : RINGS.map(() => false);
+  let inner = null;
+  const rows = [];
+  for (let k = 0; k < RINGS.length; k++) {
+    const r = RINGS[k];
+    const on = want[k] && r.ready;
+    if (on) {
+      gl.uniform2f(U.uCentre, r.cx, r.cz); gl.uniform1f(U.uHalf, r.half);
+      gl.uniform3fv(U.uTint, r.colour);
+      // Leave a little overlap with the finer ring, so no crack shows between.
+      if (inner) { const m = 2 * r.cell; gl.uniform4f(U.uInner, inner.cx - inner.half + m, inner.cz - inner.half + m, inner.cx + inner.half - m, inner.cz + inner.half - m); }
+      else gl.uniform4f(U.uInner, 1, 1, -1, -1);
+      gl.bindVertexArray(r.vao);
+      gl.drawElements(gl.TRIANGLES, IDX.length, gl.UNSIGNED_INT, 0);
+      inner = r;
+    }
+    const sw = `<span class="sw" style="background:rgb(${r.colour.map((c) => Math.round(c * 255)).join(',')})"></span>`;
+    rows.push(`<tr class="${on ? 'on' : ''}"><td>${sw}${r.name}</td><td>${on ? 'on' : want[k] ? 'loading' : 'off'}</td>` +
+      `<td>±${((N - 1) / 2 * r.cell / 1000).toFixed(r.cell < 4 ? 2 : 1)} km</td><td>${mb(r.bytes)}</td><td>${r.builds}</td><td>${r.ms ? r.ms.toFixed(0) + ' ms' : ''}</td>` +
+      `<td>${r.src === 'survey' && r.ready ? (r.missing ? Math.round(r.missing * 100) + '% not surveyed' : '') : ''}</td></tr>`);
+  }
+  gl.bindVertexArray(null);
+  const total = RINGS.reduce((a, r) => a + r.bytes, 0);
+  $('rings').innerHTML = `<table><tr><th>ring</th><th>now</th><th>reach</th><th>fetched</th><th>builds</th><th>last build</th><th></th></tr>${rows.join('')}</table>`;
+  $('status').textContent = `${surveyNote} · total fetched ${mb(total)}`;
+  const pxPerRad = canvas.clientHeight / (60 * Math.PI / 180);
+  $('hud').textContent = `${cam.walk ? 'walking' : 'flying'} · ${agl.toFixed(0)} m above the ground · one pixel ≈ ${(agl / pxPerRad).toFixed(2)} m straight down · speed ${cam.speed.toFixed(0)} m/s`;
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+const goPlace = () => { const p = PLACES[Number($('place').value)]; loadPlace(p[1], p[2], p[3]); };
+$('place').addEventListener('change', goPlace);
+$('go').addEventListener('click', () => {
+  const m = /(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)/.exec($('ll').value);
+  if (m) loadPlace(Number(m[1]), Number(m[2]), 0);
+});
+$('ll').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('go').click(); });
+$('high').addEventListener('click', () => { if (start) Object.assign(cam, start); });
+$('low').addEventListener('click', () => { if (!start) return; const g = groundAt(0, 0) ?? 0; Object.assign(cam, { x: 0, z: 0, y: g + 30, pitch: -0.15, speed: 15, walk: false }); });
+goPlace();
+</script>
+</body>
+</html>

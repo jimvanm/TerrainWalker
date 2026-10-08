@@ -72,6 +72,7 @@ import { decodeMVT, POLYGON } from './src/mvt.js';
 import { lonToMercX, latToMercY, mercToTile, tileToMerc, tileSizeMerc } from './src/geo.js';
 import { program, perspective, viewRot, SUN_DIR, uniforms } from './src/gl.js';
 import { toCanadaAtlas } from './src/lcc.js';
+import { localToLatLon } from './src/hrdemsource.js';
 
 const PLACES = [
   ['Ottawa: Rideau Canal locks', 45.42426, -75.69571, 0],
@@ -102,7 +103,7 @@ const sumHosts = (re) => Object.entries(bytes).filter(([h]) => re.test(h)).reduc
 // ---- the area ---------------------------------------------------------------
 // A square of side S metres, N x N points, x east and z south from the middle.
 let area = null;
-const toLatLon = (a, x, z) => [a.lat - z / 110574, a.lon + x / (111320 * Math.cos(a.lat * Math.PI / 180))];
+const toLatLon = (a, x, z) => localToLatLon(a.lat, a.lon, x, z);   // the app's own metres, so the water lines up
 
 // Today's ground: the app's height tiles at zoom 14, sampled at every point.
 async function todaysGround(a) {
