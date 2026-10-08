@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ground lab</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #11161d; color: #dbe3ec; font: 13px/1.5 ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace; }
+  header { padding: 10px 16px; border-bottom: 1px solid #2a3340; }
+  h1 { font-size: 15px; margin: 0 0 4px; color: #ffd479; }
+  header p { margin: 0; color: #93a1b2; max-width: 1100px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 8px 16px; border-bottom: 1px solid #2a3340; }
+  input[type=text] { font: inherit; color: #dbe3ec; background: #1d2530; border: 1px solid #3a4552; border-radius: 3px; padding: 3px 8px; width: 190px; }
+  button, select { font: inherit; color: #dbe3ec; background: #1d2530; border: 1px solid #3a4552; border-radius: 3px; padding: 3px 10px; cursor: pointer; }
+  #status, #info { color: #93a1b2; }
+  #info b, #status b { color: #ffd479; font-weight: 600; }
+  #wrap { position: relative; }
+  #view { display: block; width: 100%; height: 70vh; min-height: 360px; cursor: grab; touch-action: none; background: #9ebcd8; }
+  #view:active { cursor: grabbing; }
+  #divider { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; background: #ffd479; pointer-events: none; }
+  .tag { position: absolute; top: 8px; padding: 2px 8px; background: rgba(17,22,29,0.75); border-radius: 3px; pointer-events: none; }
+  #tagL { left: 8px; } #tagR { right: 8px; }
+  #hud { position: absolute; left: 8px; bottom: 8px; padding: 2px 8px; background: rgba(17,22,29,0.75); border-radius: 3px; pointer-events: none; }
+  .key { color: #6d7d90; padding: 8px 16px 16px; }
+  #credit { color: #93a1b2; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Ground lab</h1>
+  <p>Is better ground worth it? Left of the yellow line is the ground the app uses today; right is Canada's
+     high-resolution elevation (HRDEM, from aircraft laser surveys), read straight from Canada's servers.
+     The map's water is painted on both. Purple on the right: no survey there, today's ground shown instead.</p>
+</header>
+
+<div class="bar">
+  <select id="place"></select>
+  <input id="ll" type="text" placeholder="or lat, lon" spellcheck="false">
+  <button id="go">Go</button>
+  <label>area <select id="size"><option value="1000">1 km</option><option value="2000" selected>2 km</option><option value="3000">3 km</option></select></label>
+  <label>detail <select id="detail"><option value="1">1 m</option><option value="2" selected>2 m</option><option value="4">4 m</option></select></label>
+  <label>surface <select id="surf"><option value="dtm">bare ground</option><option value="dsm">with trees and buildings</option></select></label>
+  <label><input type="checkbox" id="split" checked> split</label>
+  <label><input type="checkbox" id="water" checked> water</label>
+  <label>heights ×<select id="exag"><option>1</option><option>2</option><option>3</option></select></label>
+</div>
+<div class="bar"><span id="status"></span></div>
+<div class="bar"><span id="info"></span></div>
+
+<div id="wrap">
+  <canvas id="view"></canvas>
+  <div id="divider"></div>
+  <div class="tag" id="tagL">today's ground</div>
+  <div class="tag" id="tagR">HRDEM</div>
+  <div id="hud"></div>
+</div>
+
+<div class="key">
+  Drag to look. W A S D or arrows to move, E or Space up, Q or C down, Shift for 5× faster.
+  Mouse wheel changes speed. R goes back to the start.
+  <br><span id="credit">Elevation on the right: Contains information licensed under the Open Government Licence – Canada (Natural Resources Canada, HRDEM).
+  Left: Mapzen / AWS Open Data Terrain Tiles. Water: © OpenStreetMap contributors, OpenMapTiles via OpenFreeMap.</span>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js"></script>
+<script type="module">
+import { TILE_URL, VECTOR_TILEJSON } from './src/config.js';
+import { decodeMVT, POLYGON } from './src/mvt.js';
+import { lonToMercX, latToMercY, mercToTile, tileToMerc, tileSizeMerc } from './src/geo.js';
+import { program, perspective, viewRot, SUN_DIR, uniforms } from './src/gl.js';
+import { toCanadaAtlas } from './src/lcc.js';
+
+const PLACES = [
+  ['Ottawa: Rideau Canal locks', 45.42426, -75.69571, 0],
+  ['Healey Falls locks', 44.3716, -77.7765, 300],
+  ['Campbellford', 44.3076, -77.7999, 20],
+  ['Toronto: Don Valley', 43.684, -79.360, 0],
+  ['Niagara Gorge (Canadian side)', 43.087, -79.068, 0],
+];
+const STAC = 'https://datacube.services.geo.ca/stac/api/search';
+const $ = (id) => document.getElementById(id);
+PLACES.forEach(([n], i) => { const o = document.createElement('option'); o.value = i; o.textContent = n; $('place').appendChild(o); });
+
+// ---- counting what is downloaded --------------------------------------------
+const bytes = {};
+const realFetch = window.fetch.bind(window);
+window.fetch = async (url, init) => {
+  const r = await realFetch(url, init);
+  try {
+    const host = new URL(typeof url === 'string' ? url : url.url).host;
+    const n = Number(r.headers.get('content-length')) || 0;
+    bytes[host] = (bytes[host] || 0) + n;
+  } catch (e) { /* not a URL we can name */ }
+  return r;
+};
+const kb = (n) => n > 1e6 ? (n / 1e6).toFixed(1) + ' MB' : (n / 1e3).toFixed(0) + ' kB';
+const sumHosts = (re) => Object.entries(bytes).filter(([h]) => re.test(h)).reduce((a, [, n]) => a + n, 0);
+
+// ---- the area ---------------------------------------------------------------
+// A square of side S metres, N x N points, x east and z south from the middle.
+let area = null;
+const toLatLon = (a, x, z) => [a.lat - z / 110574, a.lon + x / (111320 * Math.cos(a.lat * Math.PI / 180))];
+
+// Today's ground: the app's height tiles at zoom 14, sampled at every point.
+async function todaysGround(a) {
+  const Z = 14, s = tileSizeMerc(Z);
+  const h = new Float32Array(a.N * a.N);
+  const merc = (x, z) => { const [la, lo] = toLatLon(a, x, z); return [lonToMercX(lo), latToMercY(la)]; };
+  const [mx0, my0] = merc(-a.S / 2, a.S / 2), [mx1, my1] = merc(a.S / 2, -a.S / 2);
+  const t0 = mercToTile(mx0, my1, Z), t1 = mercToTile(mx1, my0, Z);
+  const tiles = new Map();
+  for (let ty = Math.floor(t0.y); ty <= Math.floor(t1.y); ty++) for (let tx = Math.floor(t0.x); tx <= Math.floor(t1.x); tx++) tiles.set(tx + '/' + ty, null);
+  await Promise.all([...tiles.keys()].map(async (k) => {
+    const [tx, ty] = k.split('/').map(Number);
+    const r = await fetch(TILE_URL.replace('{z}', Z).replace('{x}', tx).replace('{y}', ty), { mode: 'cors' });
+    const bmp = await createImageBitmap(await r.blob());
+    const cv = new OffscreenCanvas(256, 256), cx = cv.getContext('2d');
+    cx.drawImage(bmp, 0, 0);
+    const d = cx.getImageData(0, 0, 256, 256).data, hh = new Float32Array(256 * 256);
+    for (let i = 0, p = 0; i < hh.length; i++, p += 4) hh[i] = d[p] * 256 + d[p + 1] + d[p + 2] / 256 - 32768;
+    tiles.set(k, hh);
+  }));
+  const at = (mx, my) => {
+    const t = mercToTile(mx, my, Z);
+    const tx = Math.floor(t.x), ty = Math.floor(t.y), hh = tiles.get(tx + '/' + ty);
+    if (!hh) return 0;
+    const u = Math.min(255, Math.max(0, (t.x - tx) * 256 - 0.5)), v = Math.min(255, Math.max(0, (t.y - ty) * 256 - 0.5));
+    const i = Math.floor(u), j = Math.floor(v), fu = u - i, fv = v - j, i1 = Math.min(255, i + 1), j1 = Math.min(255, j + 1);
+    return (hh[j * 256 + i] * (1 - fu) + hh[j * 256 + i1] * fu) * (1 - fv) + (hh[j1 * 256 + i] * (1 - fu) + hh[j1 * 256 + i1] * fu) * fv;
+  };
+  for (let j = 0; j < a.N; j++) for (let i = 0; i < a.N; i++) {
+    const [mx, my] = merc(-a.S / 2 + i * a.step, -a.S / 2 + j * a.step);
+    h[j * a.N + i] = at(mx, my);
+  }
+  return h;
+}
+
+// HRDEM: find the piece covering the area in Canada's catalogue, then read
+// just the window needed from its cloud file, at the coarsest level that is
+// still as fine as asked for.
+const tiffs = new Map();
+async function hrdem(a, surf, detail, note) {
+  const [la0, lo0] = toLatLon(a, -a.S / 2, a.S / 2), [la1, lo1] = toLatLon(a, a.S / 2, -a.S / 2);
+  const bbox = [lo0, la0, lo1, la1].map((v) => v.toFixed(6)).join(',');
+  let item = null;
+  for (const col of ['hrdem-mosaic-1m', 'hrdem-mosaic-2m', 'hrdem-lidar']) {
+    const r = await fetch(`${STAC}?collections=${col}&bbox=${bbox}&limit=5`, { mode: 'cors' });
+    if (!r.ok) throw new Error('catalogue HTTP ' + r.status);
+    const j = await r.json();
+    item = (j.features || []).find((f) => f.assets && f.assets[surf]);
+    if (item) break;
+  }
+  if (!item) throw new Error('no HRDEM piece covers this area');
+  const href = item.assets[surf].href;
+  note(`piece <b>${item.id}</b>, reading ${href.split('/').pop()}`);
+  let tiff = tiffs.get(href);
+  if (!tiff) { tiff = await GeoTIFF.fromUrl(href, { allowFullFile: false }); tiffs.set(href, tiff); }
+  const img0 = await tiff.getImage(0);
+  const n = await tiff.getImageCount();
+  const [ox, oy] = img0.getOrigin(), [rx, ry] = img0.getResolution();
+  let img = img0, scale = 1;
+  for (let k = 1; k < n; k++) {
+    const im = await tiff.getImage(k), sc = img0.getWidth() / im.getWidth();
+    if (Math.abs(rx) * sc <= detail * 1.01) { img = im; scale = sc; }
+  }
+  const fd = img0.fileDirectory;
+  const nodata = img0.getGDALNoData();
+  // Corners and edge middles in Canada's grid, to bound the window.
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const fx of [-0.5, 0, 0.5]) for (const fz of [-0.5, 0, 0.5]) {
+    const [la, lo] = toLatLon(a, fx * a.S, fz * a.S), [X, Y] = toCanadaAtlas(lo, la);
+    x0 = Math.min(x0, X); x1 = Math.max(x1, X); y0 = Math.min(y0, Y); y1 = Math.max(y1, Y);
+  }
+  const prx = rx * scale, pry = ry * scale;                       // this level's pixel size (ry is negative)
+  const px0 = Math.max(0, Math.floor((x0 - ox) / prx) - 2), px1 = Math.min(img.getWidth(), Math.ceil((x1 - ox) / prx) + 2);
+  const py0 = Math.max(0, Math.floor((y1 - oy) / pry) - 2), py1 = Math.min(img.getHeight(), Math.ceil((y0 - oy) / pry) + 2);
+  if (px1 <= px0 || py1 <= py0) throw new Error('the area is outside this piece');
+  const win = await img.readRasters({ window: [px0, py0, px1, py1], samples: [0], interleave: true });
+  const W = px1 - px0, H = py1 - py0;
+  const bad = (v) => !Number.isFinite(v) || (nodata !== null && Math.abs(v - nodata) < 1e-3) || v < -1000;
+  const h = new Float32Array(a.N * a.N), miss = new Uint8Array(a.N * a.N);
+  for (let j = 0; j < a.N; j++) for (let i = 0; i < a.N; i++) {
+    const [la, lo] = toLatLon(a, -a.S / 2 + i * a.step, -a.S / 2 + j * a.step), [X, Y] = toCanadaAtlas(lo, la);
+    const u = (X - ox) / prx - px0 - 0.5, v = (Y - oy) / pry - py0 - 0.5;
+    const iu = Math.floor(u), jv = Math.floor(v), fu = u - iu, fv = v - jv;
+    let s = 0, w = 0;
+    for (const [di, dj, ww] of [[0, 0, (1 - fu) * (1 - fv)], [1, 0, fu * (1 - fv)], [0, 1, (1 - fu) * fv], [1, 1, fu * fv]]) {
+      const ii = iu + di, jj = jv + dj;
+      if (ii < 0 || jj < 0 || ii >= W || jj >= H) continue;
+      const val = win[jj * W + ii];
+      if (bad(val)) continue;
+      s += val * ww; w += ww;
+    }
+    if (w > 0.2) h[j * a.N + i] = s / w; else miss[j * a.N + i] = 1;
+  }
+  const comp = { 1: 'none', 5: 'LZW', 8: 'Deflate', 32946: 'Deflate', 34887: 'LERC', 50000: 'ZSTD' }[fd.Compression] || fd.Compression;
+  return { h, miss, info: `file ${img0.getWidth().toLocaleString('en-CA')} × ${img0.getHeight().toLocaleString('en-CA')} px at ${Math.abs(rx)} m, ` +
+    `${n - 1} coarser levels, read at <b>${(Math.abs(rx) * scale).toFixed(1)} m</b>, ${W} × ${H} px window, ` +
+    `compression ${comp}, blocks ${fd.TileWidth || '?'} px, no-data ${nodata}` };
+}
+
+// The map's water, painted onto a picture of the area, one pixel per point.
+let tilejson = null;
+async function waterMask(a) {
+  if (!tilejson) tilejson = (await (await fetch(VECTOR_TILEJSON, { mode: 'cors' })).json()).tiles[0];
+  const Z = 14, s = tileSizeMerc(Z);
+  const cv = new OffscreenCanvas(a.N, a.N), cx = cv.getContext('2d');
+  const merc = (x, z) => { const [la, lo] = toLatLon(a, x, z); return [lonToMercX(lo), latToMercY(la)]; };
+  const [mx0, my0] = merc(-a.S / 2, a.S / 2), [mx1, my1] = merc(a.S / 2, -a.S / 2);
+  const t0 = mercToTile(mx0, my1, Z), t1 = mercToTile(mx1, my0, Z);
+  // Local metres per mercator metre, about this latitude.
+  const k = Math.cos(a.lat * Math.PI / 180), cmx = lonToMercX(a.lon), cmy = latToMercY(a.lat);
+  cx.fillStyle = '#fff';
+  const jobs = [];
+  for (let ty = Math.floor(t0.y); ty <= Math.floor(t1.y); ty++) for (let tx = Math.floor(t0.x); tx <= Math.floor(t1.x); tx++) jobs.push([tx, ty]);
+  await Promise.all(jobs.map(async ([tx, ty]) => {
+    const r = await fetch(tilejson.replace('{z}', Z).replace('{x}', tx).replace('{y}', ty), { mode: 'cors' });
+    if (!r.ok) return;
+    const L = decodeMVT(new Uint8Array(await r.arrayBuffer()), ['water']);
+    if (!L.water) return;
+    const nw = tileToMerc(tx, ty, Z), E = L.water.extent;
+    const px = (u, v) => [((nw.x + u / E * s - cmx) * k + a.S / 2) / a.step, ((cmy - (nw.y - v / E * s)) * k + a.S / 2) / a.step];
+    cx.beginPath();
+    for (const f of L.water.features) {
+      if (f.type !== POLYGON) continue;
+      for (const ring of f.parts) {
+        for (let i = 0; i < ring.length; i += 2) { const [X, Y] = px(ring[i], ring[i + 1]); if (i) cx.lineTo(X, Y); else cx.moveTo(X, Y); }
+        cx.closePath();
+      }
+    }
+    cx.fill('nonzero');
+  }));
+  const d = cx.getImageData(0, 0, a.N, a.N).data, m = new Uint8Array(a.N * a.N);
+  for (let i = 0; i < m.length; i++) m[i] = d[4 * i + 3];
+  return m;
+}
+
+// ---- drawing ----------------------------------------------------------------
+const canvas = $('view');
+const gl = canvas.getContext('webgl2', { antialias: true });
+const VS = `#version 300 es
+precision highp float;
+in vec3 aPos; in vec3 aNor; in vec3 aCol;
+uniform mat4 uProj, uView; uniform vec3 uCam; uniform float uExag;
+out vec3 vCol; out vec3 vNor; out float vD;
+void main() {
+  vec3 p = vec3(aPos.x - uCam.x, aPos.y * uExag - uCam.y, aPos.z - uCam.z);
+  vCol = aCol; vNor = normalize(vec3(aNor.x * uExag, aNor.y, aNor.z * uExag)); vD = length(p);
+  gl_Position = uProj * uView * vec4(p, 1.0);
+}`;
+const FS = `#version 300 es
+precision highp float;
+in vec3 vCol; in vec3 vNor; in float vD; uniform vec3 uSun; out vec4 frag;
+void main() {
+  float lit = 0.45 + 0.55 * max(dot(normalize(vNor), uSun), 0.0);
+  vec3 c = vCol * lit;
+  c = mix(c, vec3(0.62, 0.74, 0.86), 1.0 - exp(-vD / 9000.0));
+  frag = vec4(c, 1.0);
+}`;
+const prog = program(gl, VS, FS);
+const U = uniforms(gl, prog, ['uProj', 'uView', 'uCam', 'uExag', 'uSun']);
+const loc = { pos: gl.getAttribLocation(prog, 'aPos'), nor: gl.getAttribLocation(prog, 'aNor'), col: gl.getAttribLocation(prog, 'aCol') };
+const meshes = { left: null, right: null };
+
+function heightColour(h) {
+  // Greens low, browns higher, relative to the area's own range so detail shows.
+  const t = Math.max(0, Math.min(1, (h - area.lo) / Math.max(10, area.hi - area.lo)));
+  return [0.36 + 0.28 * t, 0.50 - 0.06 * t, 0.28 + 0.02 * t];
+}
+
+function buildMesh(h, miss, water, showWater) {
+  const N = area.N, st = area.step;
+  const pos = new Float32Array(N * N * 3), nor = new Float32Array(N * N * 3), col = new Float32Array(N * N * 3);
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const k = j * N + i, x = -area.S / 2 + i * st, z = -area.S / 2 + j * st;
+    pos[3 * k] = x; pos[3 * k + 1] = h[k]; pos[3 * k + 2] = z;
+    const hl = h[j * N + Math.max(0, i - 1)], hr = h[j * N + Math.min(N - 1, i + 1)];
+    const hu = h[Math.max(0, j - 1) * N + i], hd = h[Math.min(N - 1, j + 1) * N + i];
+    const nx = (hl - hr) / (2 * st), nz = (hu - hd) / (2 * st), l = Math.hypot(nx, 1, nz);
+    nor[3 * k] = nx / l; nor[3 * k + 1] = 1 / l; nor[3 * k + 2] = nz / l;
+    let c = heightColour(h[k]);
+    if (showWater && water[k] > 128) c = [0.16, 0.33, 0.52];
+    if (miss && miss[k]) c = [c[0] * 0.6 + 0.3, c[1] * 0.4, c[2] * 0.6 + 0.35];
+    col[3 * k] = c[0]; col[3 * k + 1] = c[1]; col[3 * k + 2] = c[2];
+  }
+  const idx = new Uint32Array((N - 1) * (N - 1) * 6);
+  let p = 0;
+  for (let j = 0; j < N - 1; j++) for (let i = 0; i < N - 1; i++) {
+    const a = j * N + i, b = a + 1, c = a + N, d = c + 1;
+    idx[p++] = a; idx[p++] = c; idx[p++] = b; idx[p++] = b; idx[p++] = c; idx[p++] = d;
+  }
+  const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
+  const bufs = [];
+  const put = (data, at, n) => { const b = gl.createBuffer(); bufs.push(b); gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW); gl.enableVertexAttribArray(at); gl.vertexAttribPointer(at, n, gl.FLOAT, false, 0, 0); };
+  put(pos, loc.pos, 3); put(nor, loc.nor, 3); put(col, loc.col, 3);
+  const ib = gl.createBuffer(); bufs.push(ib); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
+  gl.bindVertexArray(null);
+  return { vao, bufs, count: idx.length };
+}
+const free = (m) => { if (m) { gl.deleteVertexArray(m.vao); m.bufs.forEach((b) => gl.deleteBuffer(b)); } };
+
+// ---- loading ----------------------------------------------------------------
+const cam = { x: 0, y: 0, z: 0, yaw: 0, pitch: -0.3, speed: 20 };
+let start = null, loadId = 0, data = null;
+window.__cam = cam;   // for automated looks at the lab
+
+async function load(lat, lon, facing) {
+  const id = ++loadId;
+  for (const k of Object.keys(bytes)) delete bytes[k];
+  const S = Number($('size').value), detail = Number($('detail').value);
+  const N = Math.min(1024, Math.round(S / detail) + 1);
+  area = { lat, lon, S, N, step: S / (N - 1), lo: 0, hi: 1 };
+  const status = (t) => { if (id === loadId) $('status').innerHTML = t; };
+  const info = (t) => { if (id === loadId) $('info').innerHTML = t; };
+  status('reading today\'s ground and the map\'s water...'); info('');
+  const t0 = performance.now();
+  let left, water, right = null, err = null;
+  try { [left, water] = await Promise.all([todaysGround(area), waterMask(area).catch(() => new Uint8Array(N * N))]); }
+  catch (e) { status('could not read today\'s ground: ' + e.message); return; }
+  const tLeft = performance.now() - t0;
+  status('reading HRDEM...');
+  const t1 = performance.now();
+  try { right = await hrdem(area, $('surf').value, detail, info); }
+  catch (e) { err = e; console.warn(e); }
+  const tRight = performance.now() - t1;
+  if (id !== loadId) return;
+  let lo = Infinity, hi = -Infinity;
+  for (const v of left) { if (v < lo) lo = v; if (v > hi) hi = v; }
+  if (right) { for (let i = 0; i < right.h.length; i++) if (!right.miss[i]) { lo = Math.min(lo, right.h[i]); hi = Math.max(hi, right.h[i]); } }
+  area.lo = lo; area.hi = hi;
+  if (right) info(right.info);
+  let missing = 0;
+  if (right) for (let i = 0; i < right.h.length; i++) if (right.miss[i]) { right.h[i] = left[i]; missing++; }
+  data = { left, water, right };
+  rebuild();
+  // Start on the ground in the middle, looking the given way.
+  const mid = (Math.floor(N / 2)) * N + Math.floor(N / 2);
+  const g = right ? right.h[mid] : left[mid];
+  Object.assign(cam, { x: 0, z: 0, y: g + 40, yaw: facing * Math.PI / 180, pitch: -0.3 });
+  start = { ...cam };
+  const ours = sumHosts(/amazonaws\.com$/) - sumHosts(/canelevation/);
+  status(`today's ground: <b>${kb(ours)}</b> in ${(tLeft / 1000).toFixed(1)} s · ` +
+    (right ? `HRDEM: <b>${kb(sumHosts(/canelevation|geo\.ca/))}</b> in ${(tRight / 1000).toFixed(1)} s` +
+      (missing ? `, ${Math.round(100 * missing / (N * N))}% of the area not surveyed` : '')
+      : `HRDEM: <b>could not read it</b> (${err && err.message}). If the browser's console mentions CORS, Canada's server does not let web pages read it.`) +
+    ` · ${N} × ${N} points, ${area.step.toFixed(1)} m apart · heights ${lo.toFixed(0)} to ${hi.toFixed(0)} m`);
+}
+
+function rebuild() {
+  if (!data) return;
+  free(meshes.left); free(meshes.right);
+  const w = $('water').checked;
+  meshes.left = buildMesh(data.left, null, data.water, w);
+  meshes.right = data.right ? buildMesh(data.right.h, data.right.miss, data.water, w) : null;
+}
+
+// ---- moving -----------------------------------------------------------------
+const keys = new Set();
+addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT' && e.target.type === 'text') return;
+  keys.add(e.code);
+  if (e.code === 'KeyR' && start) Object.assign(cam, start);
+  if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
+});
+addEventListener('keyup', (e) => keys.delete(e.code));
+addEventListener('blur', () => keys.clear());
+let drag = null;
+canvas.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY }; canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener('pointermove', (e) => {
+  if (!drag) return;
+  cam.yaw += (e.clientX - drag.x) * 0.004;
+  cam.pitch = Math.max(-1.5, Math.min(1.5, cam.pitch - (e.clientY - drag.y) * 0.004));
+  drag = { x: e.clientX, y: e.clientY };
+});
+canvas.addEventListener('pointerup', () => { drag = null; });
+canvas.addEventListener('wheel', (e) => { e.preventDefault(); cam.speed = Math.max(1, Math.min(1000, cam.speed * (e.deltaY < 0 ? 1.25 : 0.8))); }, { passive: false });
+function move(dt) {
+  const k = (c) => keys.has(c);
+  let f = 0, s = 0, up = 0;
+  if (k('KeyW') || k('ArrowUp')) f += 1; if (k('KeyS') || k('ArrowDown')) f -= 1;
+  if (k('KeyD') || k('ArrowRight')) s += 1; if (k('KeyA') || k('ArrowLeft')) s -= 1;
+  if (k('KeyE') || k('Space')) up += 1; if (k('KeyQ') || k('KeyC')) up -= 1;
+  const v = cam.speed * (k('ShiftLeft') || k('ShiftRight') ? 5 : 1) * dt;
+  const sy = Math.sin(cam.yaw), cy = Math.cos(cam.yaw);
+  cam.x += (f * sy + s * cy) * v; cam.z -= (f * cy - s * sy) * v; cam.y += up * v;
+}
+
+const proj = new Float32Array(16), view = new Float32Array(16);
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  move(dt);
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  const w = Math.round(canvas.clientWidth * dpr), h = Math.round(canvas.clientHeight * dpr);
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  gl.viewport(0, 0, w, h);
+  gl.enable(gl.DEPTH_TEST);
+  gl.clearColor(0.62, 0.74, 0.86, 1);
+  gl.disable(gl.SCISSOR_TEST);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.useProgram(prog);
+  perspective(proj, 60 * Math.PI / 180, w / h, 0.5, 40000);
+  viewRot(view, cam.yaw, cam.pitch);
+  const ex = Number($('exag').value);
+  gl.uniformMatrix4fv(U.uProj, false, proj); gl.uniformMatrix4fv(U.uView, false, view);
+  gl.uniform3f(U.uCam, cam.x, cam.y, cam.z); gl.uniform1f(U.uExag, ex);
+  gl.uniform3f(U.uSun, SUN_DIR[0], SUN_DIR[1], SUN_DIR[2]);
+  const draw = (m) => { if (!m) return; gl.bindVertexArray(m.vao); gl.drawElements(gl.TRIANGLES, m.count, gl.UNSIGNED_INT, 0); };
+  const split = $('split').checked;
+  $('divider').style.display = $('tagL').style.display = split ? '' : 'none';
+  if (split) {
+    gl.enable(gl.SCISSOR_TEST);
+    gl.scissor(0, 0, Math.floor(w / 2), h); draw(meshes.left);
+    gl.scissor(Math.floor(w / 2), 0, w - Math.floor(w / 2), h); draw(meshes.right || meshes.left);
+    gl.disable(gl.SCISSOR_TEST);
+  } else draw(meshes.right || meshes.left);
+  $('hud').textContent = `${cam.y.toFixed(0)} m · speed ${cam.speed.toFixed(0)} m/s`;
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+const goPlace = () => { const p = PLACES[Number($('place').value)]; load(p[1], p[2], p[3]); };
+$('place').addEventListener('change', goPlace);
+for (const id of ['size', 'detail', 'surf']) $(id).addEventListener('change', () => area && load(area.lat, area.lon, cam.yaw * 180 / Math.PI));
+$('water').addEventListener('change', rebuild);
+$('go').addEventListener('click', () => {
+  const m = /(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)/.exec($('ll').value);
+  if (m) load(Number(m[1]), Number(m[2]), 0); else $('status').textContent = 'type a latitude and longitude, e.g. 45.4243, -75.6957';
+});
+$('ll').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('go').click(); });
+goPlace();
+</script>
+</body>
+</html>
