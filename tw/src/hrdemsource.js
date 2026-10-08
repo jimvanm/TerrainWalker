@@ -106,3 +106,103 @@ export async function surveyGrid(survey, level, toGrid, cx, cz, n, step) {
   }
   return out;
 }
+
+// ---- reading by blocks, each fetched once -------------------------------------
+//
+// The survey files are stored in square blocks (512 px). Reading a window
+// that moves a little re-reads mostly the same blocks, so instead each block
+// is fetched and decoded once, kept, and heights are taken from the kept
+// blocks. Moving then costs only the blocks newly in reach.
+
+export class SurveyBlocks {
+  constructor(survey, maxBlocks = 600) {
+    this.s = survey;
+    this.max = maxBlocks;
+    this.blocks = new Map();          // 'level/bx/by' -> Float32Array (NaN where not surveyed), or a Promise
+    this.fetched = 0;                 // blocks fetched so far
+  }
+
+  _key(li, bx, by) { return li * 1e12 + by * 1e6 + bx; }
+
+  // Fetch every block of level li under a box of the file's own grid
+  // (X0..X1, Y0..Y1, metres). Returns when all have arrived.
+  async ensure(li, X0, Y0, X1, Y1) {
+    const L = this.s.levels[li], s = this.s;
+    const tw = L.img.getTileWidth(), th = L.img.getTileHeight();
+    const px0 = Math.floor((X0 - s.ox) / L.prx) - 1, px1 = Math.ceil((X1 - s.ox) / L.prx) + 1;
+    const py0 = Math.floor((Y1 - s.oy) / L.pry) - 1, py1 = Math.ceil((Y0 - s.oy) / L.pry) + 1;
+    const jobs = [];
+    for (let by = Math.max(0, Math.floor(py0 / th)); by <= Math.min(Math.ceil(L.H / th) - 1, Math.floor(py1 / th)); by++) {
+      for (let bx = Math.max(0, Math.floor(px0 / tw)); bx <= Math.min(Math.ceil(L.W / tw) - 1, Math.floor(px1 / tw)); bx++) {
+        const k = this._key(li, bx, by);
+        let b = this.blocks.get(k);
+        if (!b) {
+          b = this._load(L, bx, by, tw, th).then((a) => { this.blocks.set(k, a); return a; });
+          b.catch(() => this.blocks.delete(k));
+          this.blocks.set(k, b);
+          this.fetched++;
+        }
+        if (b instanceof Promise) jobs.push(b);
+        else { this.blocks.delete(k); this.blocks.set(k, b); }      // most recently used last
+      }
+    }
+    await Promise.all(jobs);
+    while (this.blocks.size > this.max) this.blocks.delete(this.blocks.keys().next().value);
+  }
+
+  async _load(L, bx, by, tw, th) {
+    const w = Math.min(tw, L.W - bx * tw), h = Math.min(th, L.H - by * th);
+    const r = await L.img.readRasters({ window: [bx * tw, by * th, bx * tw + w, by * th + h], samples: [0], interleave: true });
+    const nd = this.s.nodata, a = new Float32Array(tw * th).fill(NaN);
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+      const v = r[j * w + i];
+      if (Number.isFinite(v) && v > -1000 && !(nd !== null && Math.abs(v - nd) < 1e-3)) a[j * tw + i] = v;
+    }
+    a.tw = tw; a.th = th;
+    return a;
+  }
+
+  // Height at a point of the file's grid from kept blocks of level li, NaN
+  // where not surveyed or not fetched.
+  at(li, X, Y) {
+    const L = this.s.levels[li];
+    const u = (X - this.s.ox) / L.prx - 0.5, v = (Y - this.s.oy) / L.pry - 0.5;
+    const i = Math.floor(u), j = Math.floor(v), fu = u - i, fv = v - j;
+    let s = 0, w = 0;
+    for (let q = 0; q < 4; q++) {
+      const di = q & 1, dj = q >> 1, val = this._px(li, i + di, j + dj);
+      if (Number.isNaN(val)) continue;
+      const ww = (di ? fu : 1 - fu) * (dj ? fv : 1 - fv);
+      s += val * ww; w += ww;
+    }
+    return w > 0.2 ? s / w : NaN;
+  }
+
+  _px(li, i, j) {
+    if (i < 0 || j < 0) return NaN;
+    const L = this.s.levels[li], tw = L.tw || (L.tw = L.img.getTileWidth()), th = L.th || (L.th = L.img.getTileHeight());
+    const bx = Math.floor(i / tw), by = Math.floor(j / th);
+    const k = this._key(li, bx, by);
+    let b;
+    if (k === this._lk) b = this._lb;
+    else { b = this.blocks.get(k); if (b instanceof Float32Array) { this._lk = k; this._lb = b; } }
+    if (!(b instanceof Float32Array)) return NaN;
+    return b[(j - by * b.th) * b.tw + (i - bx * b.tw)];
+  }
+}
+
+// Local metres to the file's grid over one square, fast: exact on a 17 x 17
+// lattice across the square, smoothly in between (well under a centimetre).
+export function gridMapper(toGrid, cx, cz, half) {
+  const M = 16, step = 2 * half / M, X = new Float64Array((M + 1) ** 2), Y = new Float64Array((M + 1) ** 2);
+  for (let j = 0; j <= M; j++) for (let i = 0; i <= M; i++) {
+    const [a, b] = toGrid(cx - half + i * step, cz - half + j * step);
+    X[j * (M + 1) + i] = a; Y[j * (M + 1) + i] = b;
+  }
+  return (x, z) => {
+    const u = Math.min(M - 1e-9, Math.max(0, (x - cx + half) / step)), v = Math.min(M - 1e-9, Math.max(0, (z - cz + half) / step));
+    const i = Math.floor(u), j = Math.floor(v), fu = u - i, fv = v - j, k = j * (M + 1) + i;
+    const lerp = (A) => (A[k] * (1 - fu) + A[k + 1] * fu) * (1 - fv) + (A[k + M + 1] * (1 - fu) + A[k + M + 2] * fu) * fv;
+    return [lerp(X), lerp(Y)];
+  };
+}

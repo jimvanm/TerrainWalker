@@ -19,3 +19,22 @@ import { localToGrid, localToLatLon } from '../src/hrdemsource.js';
   }
   ok(worst < 1e-6, 'local metres to the grid are exact, out to 8 km');
 }
+
+// Kept survey blocks: heights come from the right block and pixel.
+import { SurveyBlocks, gridMapper } from '../src/hrdemsource.js';
+{
+  const img = { getTileWidth: () => 4, getTileHeight: () => 4 };
+  const survey = { ox: 100, oy: 200, nodata: -9999, levels: [{ img, cell: 1, prx: 1, pry: -1, W: 8, H: 8 }] };
+  const b = new SurveyBlocks(survey);
+  for (let by = 0; by < 2; by++) for (let bx = 0; bx < 2; bx++) {
+    const a = new Float32Array(16); a.tw = 4; a.th = 4;
+    for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) a[j * 4 + i] = (bx * 4 + i) + 10 * (by * 4 + j);
+    b.blocks.set(b._key(0, bx, by), a);
+  }
+  // pixel (i, j) covers X 100+i..101+i, Y 200-j..199-j; its middle reads exactly i + 10 j
+  ok(b.at(0, 100 + 5.5, 200 - 6.5) === 5 + 60, 'a pixel middle in another block reads its own value');
+  ok(Math.abs(b.at(0, 100 + 4, 200 - 4.5) - (3.5 + 40)) < 1e-9, 'between blocks, the four nearest pixels are blended');
+  ok(Number.isNaN(b.at(0, 100 + 20, 200 - 1)), 'outside the kept blocks: no height');
+  const map = gridMapper((x, z) => [x * 2 + z * 0.1, -z + x * x * 1e-6], 0, 0, 500), [X, Y] = map(123, -77);
+  ok(Math.abs(X - (246 - 7.7)) < 1e-6 && Math.abs(Y - (77 + 123 * 123 * 1e-6)) < 2e-3, 'the lattice mapper follows a gently curving grid (to a millimetre)');
+}
