@@ -20,6 +20,9 @@
   button, select { font: inherit; color: #dbe3ec; background: #1d2530; border: 1px solid #3a4552; border-radius: 3px; padding: 3px 10px; cursor: pointer; }
   button:hover { border-color: #6d7d90; }
   #status { color: #93a1b2; }
+  #bar2 { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 6px 16px; border-bottom: 1px solid #2a3340; }
+  #counts { color: #93a1b2; }
+  #counts b { color: #ffd479; font-weight: 600; }
   #wrap { position: relative; }
   #view { display: block; width: 100%; height: 70vh; min-height: 360px; cursor: grab; touch-action: none; background: #9ebcd8; }
   #view:active { cursor: grabbing; }
@@ -56,6 +59,11 @@
   <span id="region"></span>
   <span id="status"></span>
 </div>
+<div id="bar2">
+  <label>buildings from <select id="src"><option value="ofm">our map (OpenFreeMap)</option><option value="ovt">Overture</option></select></label>
+  <label>Overture release <input id="rel" type="text" spellcheck="false" style="width:120px"></label>
+  <span id="counts"></span>
+</div>
 
 <div id="error"></div>
 <div id="wrap">
@@ -83,6 +91,8 @@ import { MeshBuilder, rgba } from './src/meshbuilder.js';
 import { lonToMercX, latToMercY, mercToTile, tileCentreMerc, tileSizeMerc, mercYToLat, mercXToLon } from './src/geo.js';
 import { program, perspective, viewRot, SUN_DIR, uniforms } from './src/gl.js';
 import { AUTO_ROOF_UNIFORM, AUTO_WALL_UNIFORM } from './src/look.js';
+import { PMTiles } from './src/pmtiles.js';
+import { OVERTURE_RELEASE, OVERTURE_ZOOM, overtureUrl, overtureBuildings, overtureCounts, addCounts } from './src/overture.js';
 import { FACADE, MODE, LAB_VS, LAB_FS, settingsLine, regionAt, regionUniforms } from './src/facade.js';
 
 // Places: lat, lon, which way you face (degrees from north).
@@ -175,16 +185,27 @@ async function getTemplate() {
   return template;
 }
 
-async function loadPlace(lat, lon, facing) {
+let place = null;
+const archives = new Map();
+const anyLayer = { includes: () => true };   // decode every layer in a tile
+const fmt = (n) => n.toLocaleString('en-CA');
+
+async function loadPlace(lat, lon, facing, keepCamera = false) {
   const id = ++loadId;
-  for (const t of tiles) { t.draws.forEach(free); free(t.today); }
+  for (const t of tiles) { free(t.roads); free(t.now); free(t.today); }
   tiles = [];
+  place = [lat, lon, facing];
+  const kept0 = keepCamera ? { ...cam } : null;
+  $('counts').textContent = '';
   scale = Math.cos(lat * Math.PI / 180);
   $('region').textContent = 'look: ' + regionAt(lat, lon).replace('_', ' ');
   cam.mx = lonToMercX(lon); cam.my = latToMercY(lat); cam.alt = EYE;
   cam.yaw = facing * Math.PI / 180; cam.pitch = 0.05;
   start = { ...cam };
+  if (kept0) Object.assign(cam, kept0);
   const status = $('status');
+  const overture = $('src').value === 'ovt';
+  const ovtDone = overture ? loadOverture(id, lat) : null;
   let tpl;
   try { tpl = await getTemplate(); } catch (e) { status.textContent = 'could not reach the map service: ' + e.message; return; }
   const t0 = mercToTile(cam.mx, cam.my, Z);
@@ -212,20 +233,76 @@ async function loadPlace(lat, lon, facing) {
       const q = [rb.vert(-h, -0.05, -h, gc), rb.vert(h, -0.05, -h, gc), rb.vert(h, -0.05, h, gc), rb.vert(-h, -0.05, h, gc)];
       rb.tri(q[0], q[2], q[1]); rb.tri(q[0], q[3], q[2]);
       buildRoads(L.transportation, g, rb, L.aeroway);
-      const bb = new MeshBuilder();
-      const st = buildBuildings(L.building, g, bb, 600000, { landuse: L.landuse, faces: true });
-      kept += st.kept;
+      let now = null;
+      if (!overture) {
+        const bb = new MeshBuilder();
+        const st = buildBuildings(L.building, g, bb, 600000, { landuse: L.landuse, faces: true });
+        kept += st.kept;
+        now = upload(bb.finish());
+      }
       const ob = new MeshBuilder();              // today's buildings, for the left side
       buildBuildings(L.building, g, ob, 600000, { landuse: L.landuse });
       const lat0 = mercYToLat(c.y), lon0 = mercXToLon(c.x);
-      tiles.push({ c, reg: regionUniforms(regionAt(lat0, lon0)), draws: [upload(rb.finish()), upload(bb.finish())].filter(Boolean),
-        today: upload(ob.finish()) });
+      tiles.push({ c, reg: regionUniforms(regionAt(lat0, lon0)), roads: upload(rb.finish()), now, today: upload(ob.finish()) });
     } catch (e) {
       console.warn('tile', x, y, e);
     }
     done++;
-    if (id === loadId) status.textContent = done < list.length ? `map ${done}/${list.length}` : `${kept} buildings`;
+    if (id === loadId) status.textContent = done < list.length ? `map ${done}/${list.length}` : overture ? '' : `${kept} buildings`;
   }));
+  if (ovtDone) await ovtDone;
+}
+
+// Overture's buildings: the zoom 13 tiles within about 1.3 km of the spot,
+// read from the release's one big file. Roads and the left side still come
+// from our usual map.
+async function loadOverture(id, lat) {
+  const out = $('counts');
+  const rel = $('rel').value.trim() || OVERTURE_RELEASE;
+  const url = overtureUrl(rel);
+  let pm = archives.get(url);
+  if (!pm) { pm = new PMTiles(url); archives.set(url, pm); }
+  const reach = 1300 / scale, Zo = OVERTURE_ZOOM;
+  const a = mercToTile(cam.mx - reach, cam.my + reach, Zo), b = mercToTile(cam.mx + reach, cam.my - reach, Zo);
+  const list = [];
+  for (let y = Math.floor(a.y); y <= Math.floor(b.y); y++) for (let x = Math.floor(a.x); x <= Math.floor(b.x); x++) list.push([x, y]);
+  out.textContent = `Overture: reading ${list.length} tiles...`;
+  const counts = { layers: {}, keys: {}, roof: {}, subtype: {}, facade: {}, roofMat: {} };
+  let kept = 0, failed = null;
+  await Promise.all(list.map(async ([x, y]) => {
+    try {
+      const bytes = await pm.tile(Zo, x, y);
+      if (id !== loadId || !bytes) return;
+      const L = decodeMVT(bytes, anyLayer, 'class', anyLayer);
+      addCounts(counts, overtureCounts(L));
+      const c = tileCentreMerc(x, y, Zo), size = tileSizeMerc(Zo);
+      const g = { size14: size, size12: size, bx: size / 2, by: size / 2, cell: size / 8,
+                  cosLat: Math.cos(lat * Math.PI / 180), nodes: null, cx: c.x, cy: c.y, hAt: () => 0 };
+      const bb = new MeshBuilder();
+      kept += buildBuildings(overtureBuildings(L), g, bb, 2000000, { faces: true }).kept;
+      tiles.push({ c, reg: regionUniforms(regionAt(mercYToLat(c.y), mercXToLon(c.x))), roads: null, now: upload(bb.finish()), today: null });
+    } catch (e) {
+      failed = e;
+      console.warn('Overture tile', x, y, e);
+    }
+  }));
+  if (id !== loadId) return;
+  if (failed && !kept) {
+    out.textContent = `Overture: could not read it (${failed.message}). If the browser's console mentions CORS, the server does not let web pages read it. Or the release name may be out of date.`;
+    return;
+  }
+  out.innerHTML = describeCounts(counts, kept);
+}
+
+function describeCounts(c, kept) {
+  const top = (o, n = 6) => Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => `${k} ${fmt(v)}`).join(', ') || 'none';
+  const k = (name) => fmt(c.keys[name] || 0);
+  const layers = Object.entries(c.layers).map(([n, v]) => `${n} <b>${fmt(v)}</b>`).join(', ');
+  return `Overture: ${layers}; drawn <b>${fmt(kept)}</b>.<br>` +
+    `Height on ${k('height')}, floors on ${k('num_floors')}, type on ${k('subtype')} (${top(c.subtype)}).<br>` +
+    `Roof shape on ${k('roof_shape')} (${top(c.roof, 8)}).<br>` +
+    `Wall material on ${k('facade_material')} (${top(c.facade)}), wall colour on ${k('facade_color')}; ` +
+    `roof material on ${k('roof_material')} (${top(c.roofMat)}), roof colour on ${k('roof_color')}.`;
 }
 
 // ---- moving ------------------------------------------------------------------
@@ -290,7 +367,7 @@ function drawAll(mode, today) {
     gl.uniform3fv(U.uRoofC, t.reg.roof);
     gl.uniform3fv(U.uFrame, t.reg.frame);
     gl.uniform4fv(U.uReg, t.reg.extra);
-    for (const d of (today ? [t.draws[0], t.today] : t.draws)) {
+    for (const d of [t.roads, today ? t.today : t.now]) {
       if (!d) continue;
       gl.bindVertexArray(d.vao);
       if (A.info >= 0) gl.vertexAttrib4f(A.info, 0, 0, 0, 0);
@@ -342,6 +419,10 @@ requestAnimationFrame(frame);
 
 const goPlace = () => { const p = PLACES[Number($('place').value)]; loadPlace(p[1], p[2], p[3]); };
 $('place').addEventListener('change', goPlace);
+$('rel').value = OVERTURE_RELEASE;
+const reload = () => { if (place) loadPlace(place[0], place[1], place[2], true); };
+$('src').addEventListener('change', reload);
+$('rel').addEventListener('keydown', (e) => { if (e.key === 'Enter') reload(); });
 $('go').addEventListener('click', () => {
   const m = /(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)/.exec($('ll').value);
   if (m) loadPlace(Number(m[1]), Number(m[2]), 0);

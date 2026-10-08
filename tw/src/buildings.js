@@ -17,6 +17,7 @@ import { rgba, info, INFO_BUILDING, INFO_REAL, INFO_ROOF, INFO_MASKED } from './
 import { LANDUSE_TYPE, TALL, SIZE_LIMITS } from './look.js';
 import { triangulate, signedArea } from './earclip.js';
 import { fitRect, pitchable, pitchFor, emitPitched } from './houseroof.js';
+import { roofKind, defaultRoofHeight, emitProfiled, PROFILES } from './roofshapes.js';
 
 const PALETTE = [
   [214, 208, 196], [204, 198, 190], [222, 216, 206], [196, 192, 188],
@@ -278,6 +279,7 @@ export function buildBuildings(layer, g, mb, maxTris = BUILDING_TRIS, opt = {}) 
       const tier = height >= 60 ? 3 : (height >= 25 || area >= 2500) ? 2 : 1;
       if (known) stats.tall.push([Math.round(h), Math.round(rings[0][0]), Math.round(rings[0][1]), Math.round(area)]);
       let type = known && height >= TALL ? 5 : 0;
+      if (!type && opt.faces && p.lab_type > 0) type = p.lab_type;   // the lab: a type the data gives directly
       if (!type && areas.length) {
         const r0 = poly[0]; let sx = 0, sy = 0;
         for (let i = 0; i < r0.length; i += 2) { sx += r0[i]; sy += r0[i + 1]; }
@@ -286,7 +288,10 @@ export function buildBuildings(layer, g, mb, maxTris = BUILDING_TRIS, opt = {}) 
       let mx = 0, my = 0;
       for (let i = 0; i < rings[0].length; i += 2) { mx += rings[0][i]; my += rings[0][i + 1]; }
       mx /= rings[0].length / 2; my /= rings[0].length / 2;
-      cand.push({ rings, height, known, minh, area, hash, mx, my, tier: hit ? 0 : tier, sunk, colour, type, masked: !!hit,
+      // Lab only (faces mode): details from richer data such as Overture's.
+      const extra = opt.faces ? { roofShape: roofKind(p.roof_shape), roofH: Number(p.roof_height) > 0 ? Number(p.roof_height) : 0,
+        roofColour: parseColour(p.roof_colour), monument: !!p.monument, floors: Number(p.num_floors) > 0 ? Number(p.num_floors) : 0 } : null;
+      cand.push({ ...extra, rings, height, known, minh, area, hash, mx, my, tier: hit ? 0 : tier, sunk, colour, type, masked: !!hit,
         tris: 3 * nv, rank: (height + 3) * Math.sqrt(Math.max(area, 1)) });
     }
   }
@@ -408,23 +413,29 @@ export function guessAges(cand, k) {
   }
 }
 
-// Style bytes per corner (mb.sty): age 0..255, then flags.
-export const STY_END = 1, STY_PITCHED = 2;
-export const sty = (age, flags) => ((flags << 8) | Math.round(clamp01(age) * 255)) >>> 0;
+// Style bytes per corner (mb.sty): age 0..255, then flags, then the floor
+// count when the map gives one (0 when not).
+export const STY_END = 1, STY_PITCHED = 2, STY_MONUMENT = 4;
+export const sty = (age, flags, floors = 0) =>
+  ((Math.min(255, Math.round(floors)) << 16) | (flags << 8) | Math.round(clamp01(age) * 255)) >>> 0;
 
 // Like emit, but every wall face has its own corners, and each corner records
 // where it is on its wall (mb.fac: along, face length, up from the base, wall
-// height, in metres) and the building's style (mb.sty). Houses close to a
-// rectangle get a pitched roof. k: true metres per unit.
+// height, in metres) and the building's style (mb.sty). Roofs follow the
+// roof shape the map gives (domes, spires, gables...), and houses close to a
+// rectangle get a pitched roof anyway. k: true metres per unit.
 function emitFaces(b, mb, hAt, k) {
   const base = PALETTE[b.hash % PALETTE.length];
   const c0 = b.colour ? rgba(b.colour[0], b.colour[1], b.colour[2]) : null;
-  const wallTop = c0 || shade(base, 1), wallBot = c0 || shade(base, 0.78), roofC = c0 || shade(base, 0.7);
+  const wallTop = c0 || shade(base, 1), wallBot = c0 || shade(base, 0.78);
+  const roofC = b.roofColour ? rgba(b.roofColour[0], b.roofColour[1], b.roofColour[2]) : shade(base, 0.7);
   const fl = INFO_BUILDING | (b.colour ? INFO_REAL : 0) | (b.masked ? INFO_MASKED : 0), num = b.hash & 255;
+  const rfl = INFO_BUILDING | INFO_ROOF | (b.roofColour ? INFO_REAL : 0) | (b.masked ? INFO_MASKED : 0);
   const tg = b.type | (sizeGroup(b) << 4);
-  const iTop = info(tg, num, 255, fl), iBot = info(tg, num, 199, fl), iRoof = info(tg, num, 255, fl | INFO_ROOF);
+  const iTop = info(tg, num, 255, fl), iBot = info(tg, num, 199, fl), iRoof = info(tg, num, 255, rfl);
   const fac = mb.fac || (mb.fac = []), st = mb.sty || (mb.sty = []);
-  const age = b.age === undefined ? 0.5 : b.age;
+  const age = b.monument ? 1 : (b.age === undefined ? 0.5 : b.age);
+  const mon = b.monument ? STY_MONUMENT : 0, floors = b.floors || 0;
 
   let gMax = -Infinity;
   const ground = b.rings.map((r) => {
@@ -432,31 +443,49 @@ function emitFaces(b, mb, hAt, k) {
     for (let i = 0; i < gs.length; i++) { gs[i] = hAt(r[2 * i], r[2 * i + 1]); if (gs[i] > gMax) gMax = gs[i]; }
     return gs;
   });
+  const single = b.rings.length === 1;
+  const outline = Math.abs(signedArea(b.rings[0]));
+  const radius = Math.sqrt(outline * k * k / Math.PI);     // metres, as if round
+  let kind = single ? b.roofShape : null;
 
-  // A pitched roof?
-  if (sizeGroup(b) === 0 && b.rings.length === 1 && !(b.minh > 0)) {
+  // Gable and hip roofs: from the map, or any house close to a rectangle.
+  const isHouse = sizeGroup(b) === 0 && !(b.minh > 0) && !b.roofShape;
+  if (single && (kind === 'gabled' || kind === 'hipped' || isHouse)) {
     const rect = fitRect(b.rings[0]);
-    const outline = Math.abs(signedArea(b.rings[0]));
-    if (pitchable(rect, outline, k)) {
+    const fits = rect && (isHouse ? pitchable(rect, outline, k) : outline / rect.area >= 0.7);
+    if (fits) {
       const pitch = pitchFor(age);
-      const rise = rect.W * k * Math.tan(pitch);
-      const eave = b.known ? Math.max(2.8, b.height - rise) : b.height;
+      const rise = b.roofH || rect.W * k * Math.tan(pitch);
+      const wallTop0 = b.known ? b.height - rise : b.height;
+      const eave = Math.max((b.minh || 0) + 2.8, wallTop0);
       const aspect = rect.L / rect.W;
-      const hip = aspect < 1.3 || ((b.hash >> 8) & 255) < (age < 0.4 ? 100 : 25);
+      const hip = kind === 'hipped' || (kind !== 'gabled' && (aspect < 1.3 || ((b.hash >> 8) & 255) < (age < 0.4 ? 100 : 25)));
       const put = (x, y, z, isRoof, f, end) => {
-        const iv = isRoof ? iRoof : (f[2] <= 0 ? iBot : iTop);
+        const iv = isRoof ? iRoof : (f[2] <= (b.minh || 0) ? iBot : iTop);
         const id = mb.vert(x, y, z, isRoof ? roofC : wallTop, iv);
         fac.push(f[0], f[1], f[2], f[3]);
-        st.push(sty(age, STY_PITCHED | (end ? STY_END : 0)));
+        st.push(sty(age, STY_PITCHED | mon | (end && isHouse ? STY_END : 0), floors));
         return id;
       };
-      emitPitched(rect, { base: gMax, gAt: hAt, sunk: b.sunk, eave, k, hip, pitch }, put, (a, c, d) => mb.tri(a, c, d));
+      emitPitched(rect, { base: gMax, gAt: hAt, sunk: b.sunk, eave, k, hip, pitch: Math.atan(rise / (rect.W * k)), minh: b.minh || 0 },
+        put, (a, c, d) => mb.tri(a, c, d));
       return;
     }
+    if (kind === 'gabled' || kind === 'hipped') kind = null;
   }
 
-  const top = gMax + b.height;
-  const s0 = sty(age, 0);
+  // Domes, onions, pyramids and spires: walls to the eaves, then the shape.
+  let rise = 0;
+  if (kind && PROFILES[kind]) {
+    const room = b.height - (b.minh || 0);
+    // A raised part with a shaped roof and no roof height (a spire on its
+    // tower, a dome on its drum) is all roof.
+    rise = b.roofH || (b.minh > 0 && b.known ? room : defaultRoofHeight(kind, radius));
+    if (b.known && rise > room) rise = room;
+  } else kind = null;
+  const wallH = Math.max(b.minh || 0, b.height - (b.known ? rise : 0));
+  const top = gMax + wallH;
+  const s0 = sty(age, mon, floors);
   for (let q = 0; q < b.rings.length; q++) {
     const r = b.rings[q], gs = ground[q], m = gs.length;
     for (let i = 0; i < m; i++) {
@@ -468,20 +497,26 @@ function emitFaces(b, mb, hAt, k) {
         mb.vert(r[2 * n], top, r[2 * n + 1], wallTop, iTop);
         // Heights count from the highest corner of the footprint, the same
         // place the roof is measured from, so floors line up with the roof.
-        fac.push(u, len, bottom - gMax, b.height, u, len, top - gMax, b.height);
+        fac.push(u, len, bottom - gMax, wallH, u, len, top - gMax, wallH);
         st.push(s0, s0);
         return a;
       };
+      if (top - gMax <= (b.minh || 0) + 0.01) continue;   // no wall at all: a roof standing on the part below
       const a = corner(i, 0), c = corner(j, len);
       mb.tri(a, c, a + 1);
       mb.tri(c, c + 1, a + 1);
     }
   }
+  if (kind) {
+    const put = (x, y, z) => { const id = mb.vert(x, y, z, roofC, iRoof); fac.push(0, 0, y - gMax, wallH); st.push(s0); return id; };
+    emitProfiled(b.rings[0], kind, top, rise, put, (a, c, d) => mb.tri(a, c, d));
+    return;
+  }
   const roofBase = mb.verts;
   for (const r of b.rings) {
     for (let i = 0; i < r.length / 2; i++) {
       mb.vert(r[2 * i], top, r[2 * i + 1], roofC, iRoof);
-      fac.push(0, 0, b.height, b.height); st.push(s0);
+      fac.push(0, 0, wallH, wallH); st.push(s0);
     }
   }
   const t = triangulate(b.rings);

@@ -54,10 +54,11 @@ export const pitchFor = (age) => (24 + 16 * age) * Math.PI / 180;
 // up, height), end true on the gable or hip ends (the short walls).
 // tri(a, b, c) adds a triangle. base: ground height at the highest corner;
 // gAt(x, y) the ground under a point; sunk: how far walls start below it;
-// eave: wall height above base; k: true metres per unit; hip: hip roof.
+// eave: wall height above base; k: true metres per unit; hip: hip roof;
+// minh: where a raised part starts above the base (0: on the ground).
 export function emitPitched(rect, o, put, tri) {
   const { cx, cy, ax, ay, bx, by, L, W } = rect;
-  const { base, gAt, sunk, eave, k, hip, pitch } = o;
+  const { base, gAt, sunk, eave, k, hip, pitch, minh = 0 } = o;
   const rise = W * k * Math.tan(pitch);           // ridge above the eaves, metres
   const top = base + eave, ridge = top + rise;
   const P = (s, t) => [cx + ax * s * L + bx * t * W, cy + ay * s * L + by * t * W];
@@ -68,7 +69,7 @@ export function emitPitched(rect, o, put, tri) {
   // Walls up to the eaves.
   for (let i = 0; i < 4; i++) {
     const p = C[i], q = C[(i + 1) % 4], len = sideLen[i], end = i % 2 === 1;
-    const fb = (pt) => gAt(pt[0], pt[1]) - sunk;
+    const fb = (pt) => (minh > 0 ? base + minh : gAt(pt[0], pt[1]) - sunk);
     const a = put(p[0], fb(p), p[1], false, [0, len, fb(p) - base, eave], end);
     put(p[0], top, p[1], false, [0, len, eave, eave], end);
     const c = put(q[0], fb(q), q[1], false, [len, len, fb(q) - base, eave], end);

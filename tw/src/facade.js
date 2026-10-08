@@ -120,7 +120,7 @@ in vec3 aPos;
 in vec4 aCol;
 in vec4 aInfo;     // building facts (meshbuilder.js); all zero = use aCol (roads)
 in vec4 aFac;      // along, length, up, wall height (buildings.js opt.faces)
-in vec4 aSty;      // age 0..1, flags/255 (1 end wall, 2 pitched house)
+in vec4 aSty;      // age 0..1, flags/255 (1 end wall, 2 pitched, 4 monument), floors/255
 uniform mat4 uProj;
 uniform mat4 uView;
 uniform vec3 uOff;      // tile centre minus camera, true metres (east, -camera height, south)
@@ -134,7 +134,7 @@ out vec3 vPos;
 out vec3 vCol;
 out vec4 vFac;
 flat out ivec4 vInf;    // flags, building number, size group, type
-flat out ivec2 vSty;    // old (1) or new (0), style flags
+flat out ivec3 vSty;    // old (1) or new (0), style flags, floor count (0: not known)
 flat out float vAge;
 flat out vec4 vMap;     // the map's own colour, where a mapper gave one (a = 1)
 void main() {
@@ -145,7 +145,7 @@ void main() {
   // Old or new: the age guess is a chance, so a mixed street stays mixed.
   bool old = fract(float(num) * 0.6180 + 0.13) < aSty.x;
   vInf = ivec4(fl, num, size, type);
-  vSty = ivec2(old ? 1 : 0, sf);
+  vSty = ivec3(old ? 1 : 0, sf, int(aSty.z * 255.0 + 0.5));
   vAge = aSty.x;
   float vary = 0.92 + 0.16 * fract(float(num) * 0.37);
   if (fl == 0) vCol = aCol.rgb;
@@ -157,6 +157,8 @@ void main() {
     int cls = size == 3 ? 4 : size == 0 ? (old ? 0 : 1) : (old ? 2 : 3);
     vCol = uWall[cls * 4 + num % 4] * vary * aInfo.b;
   }
+  // Churches, town halls, museums: dressed stone walls, lead roofs.
+  if (fl != 0 && uToday == 0 && (sf & 4) != 0) vCol = (fl & 4) != 0 ? vec3(0.42, 0.45, 0.48) * vary : vec3(0.80, 0.77, 0.70) * vary * aInfo.b;
   // A colour from the map wins: Scotia Plaza stays red, Royal Bank Plaza gold.
   // Softened a little toward grey, as the app does, since mappers often give
   // pure web colours.
@@ -178,7 +180,7 @@ in vec3 vPos;
 in vec3 vCol;
 in vec4 vFac;
 flat in ivec4 vInf;
-flat in ivec2 vSty;
+flat in ivec3 vSty;
 flat in float vAge;
 flat in vec4 vMap;
 uniform vec3 uSunDir;
@@ -228,18 +230,21 @@ void main() {
   if (wall) {
     float u = vFac.x, L = vFac.y, v = vFac.z, H = vFac.w;
     int num = vInf.y, size = vInf.z, type = vInf.w;
-    bool old = vSty.x == 1, endWall = (vSty.y & 1) != 0, pitched = (vSty.y & 2) != 0;
+    bool old = vSty.x == 1, endWall = (vSty.y & 1) != 0, pitched = (vSty.y & 2) != 0, monument = (vSty.y & 4) != 0;
+    float floors = float(vSty.z);
     float hb = float(num);
     float h1 = hash(vec3(hb, 1.0, 7.0)), h2 = hash(vec3(hb, 3.0, 2.0)), h3 = hash(vec3(hb, 5.0, 9.0));
     bool house = size == 0, tower = size == 3;
     bool industry = size == 1 && (type == 3 || (type == 0 && H < 9.0));
-    bool shop = !house && !industry && (type == 2 || (size >= 1 && h3 < 0.5));
+    bool shop = !house && !industry && !monument && (type == 2 || (size >= 1 && h3 < 0.5));
     float px = max(max(fwidth(u), fwidth(v)), 1e-4);    // metres per pixel here
     float far = smoothstep(0.12, 0.4, px);              // finer than a pixel: show the average
 
     // Floors.
     float fh = (house ? uF1.y : uF1.x) * (0.95 + 0.1 * h1);
     float gh = house ? fh : max(uF1.z, fh);
+    if (floors > 0.0 && !monument) { fh = H / floors; gh = fh; }          // the map says how many floors
+    if (monument) { fh = 7.0 + 2.0 * h1; gh = fh; }                          // tall rooms, tall windows
     float fi, fb, span;
     if (v < gh) { fi = 0.0; fb = 0.0; span = gh; }
     else { fi = 1.0 + floor((v - gh) / fh); fb = gh + (fi - 1.0) * fh; span = fh; }
@@ -249,8 +254,10 @@ void main() {
     float S = uF2.x;
     float ww, wh, nv = 0.0, nh = 0.0;
     bool arch = false;
-    if (tower) { ww = 0.0; wh = 0.0; }
-    else if (old) {
+    if (tower && !monument) { ww = 0.0; wh = 0.0; }
+    else if (monument) {
+      ww = 1.4 * S; wh = 4.2 * S; nv = 1.0; nh = 2.0; arch = true;
+    } else if (old) {
       ww = (0.85 + 0.3 * h1) * S; wh = (house ? 1.5 : 1.9) * (0.9 + 0.2 * h2) * S;
       nv = h3 < 0.6 ? 1.0 : 0.0; nh = 1.0;
       arch = !house && h2 < uReg.z;
@@ -264,6 +271,7 @@ void main() {
     wh = min(wh, span - 0.9);
     float sill = old ? min(0.9, (span - wh) * 0.6) : (span - wh) * 0.55;
     float gap = uF1.w * (old ? 1.0 + 0.4 * h2 : 0.8 + 0.4 * h2);
+    if (monument) gap = 2.6;
     float margin = house ? 0.7 : 0.6;
 
     // Ground floor: shop fronts, or a door at each end of a house.
@@ -274,12 +282,12 @@ void main() {
     float bay = ww + gap;
     float nb = floor((L - 2.0 * margin + gap) / bay);
     if (nb < 1.0 && L > ww + 1.2) nb = 1.0;
-    if (tower) { bay = 3.0 * (0.8 + 0.4 * h2); nb = max(1.0, floor((L - 1.0) / bay)); margin = 0.5; }
+    if (tower && !monument) { bay = 3.0 * (0.8 + 0.4 * h2); nb = max(1.0, floor((L - 1.0) / bay)); margin = 0.5; }
     float bw = nb > 0.0 ? (L - 2.0 * margin) / nb : 1.0;
     float uu = (u - margin) / bw, bi = floor(uu);
     float x = (fract(uu) - 0.5) * bw;                   // metres from the middle of this bay
     if (front) ww = max(1.0, bw - 0.6);
-    if (tower) { ww = bw * uF2.y; wh = span * 0.8; sill = span * 0.1; nv = 0.0; nh = 0.0; }
+    if (tower && !monument) { ww = bw * uF2.y; wh = span * 0.8; sill = span * 0.1; nv = 0.0; nh = 0.0; }
 
     bool zinc = uReg.w > 0.5 && old && !house && size == 2 && v > H - fh && H > 12.0;
     if (zinc) c = vec3(0.47, 0.50, 0.54) * lit;          // Paris mansard: the top floor in zinc
@@ -344,7 +352,7 @@ void main() {
       c = mix(c, vec3(0.08, 0.08, 0.09), rail * iron);
       c = mix(c, c * 1.15, band(y, -0.12, 0.05, px));    // the stone slab under it
     }
-    if ((uMode & 2) != 0 && !house) {
+    if ((uMode & 2) != 0 && !house && !monument) {
       // A ledge at every floor, and a cap along the top of the wall.
       float ledge = v > 0.5 && !zinc ? band(y, -0.12, 0.12, px) : 0.0;
       c *= 1.0 - 0.16 * ledge * (1.0 - far);

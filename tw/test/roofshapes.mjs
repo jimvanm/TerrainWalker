@@ -1,0 +1,47 @@
+// Roof shapes from the map, and Overture's buildings in our names.
+import { roofKind, emitProfiled, defaultRoofHeight } from '../src/roofshapes.js';
+import { mapProps, overtureBuildings, isMonument } from '../src/overture.js';
+import { buildBuildings, STY_MONUMENT } from '../src/buildings.js';
+import { MeshBuilder } from '../src/meshbuilder.js';
+import { POLYGON } from '../src/mvt.js';
+const ok = (c, m) => { if (!c) { console.error('FAIL', m); process.exit(1); } console.log('ok  ' + m); };
+
+ok(roofKind('dome') === 'dome' && roofKind('onion') === 'onion' && roofKind('pyramidal') === 'pyramid' && roofKind('gabled') === 'gabled', 'roof shape names');
+ok(roofKind('flat') === 'flat' && roofKind('unknown_thing') === null && roofKind(undefined) === null, 'flat is kept, unknown is nothing');
+
+// A dome over a square: rises by its height, ends in one point at the middle.
+{
+  const pts = [], tris = [];
+  emitProfiled([0, 0, 10, 0, 10, 10, 0, 10], 'dome', 20, 5, (x, y, z) => { pts.push([x, y, z]); return pts.length - 1; }, (a, b, c) => tris.push(a, b, c));
+  const top = pts.reduce((m, p) => (p[1] > m[1] ? p : m));
+  ok(Math.abs(top[1] - 25) < 1e-9 && Math.abs(top[0] - 5) < 1e-9 && Math.abs(top[2] - 5) < 1e-9, 'the dome top is in the middle, at eaves plus its height');
+  ok(pts.filter((p) => p[1] === 20).length === 4, 'it starts on the outline at the eaves');
+  ok(tris.length > 0 && tris.every((i) => i < pts.length), 'triangles use its own corners');
+}
+ok(defaultRoofHeight('spire', 3) > defaultRoofHeight('dome', 3), 'a spire without a height is taller than a dome');
+
+// Overture names into ours.
+{
+  const o = mapProps({ height: 40, min_height: 10, facade_material: 'brick', roof_material: 'copper', subtype: 'religious', class: 'church', has_parts: true }, false);
+  ok(o.render_height === 40 && o.render_min_height === 10, 'height and where it starts');
+  ok(o.colour === '#96523e' && o.roof_colour === '#609680', 'materials become colours');
+  ok(o.hide_3d === true && o.monument === true && o.lab_type === 6, 'an outline with parts is hidden; a church is a monument');
+  ok(mapProps({ num_floors: 5 }, true).render_height === 16, 'floors give a height when there is none');
+  ok(mapProps({ facade_color: '#123456', facade_material: 'brick' }, true).colour === '#123456', 'a given colour beats the material');
+  ok(!isMonument({ subtype: 'residential', class: 'house' }), 'a house is not a monument');
+}
+
+// A domed part, through the lab's builder: walls stop low, a dome on top.
+{
+  const E = 4096, size = 4892, g = { size14: size, size12: size, bx: size / 2, by: size / 2, cell: size / 8, cosLat: 0.72, hAt: () => 0 };
+  const circle = Array.from({ length: 17 }, (_, i) => { const a = -i / 16 * 2 * Math.PI; return [2000 + 30 * Math.cos(a), 2000 + 30 * Math.sin(a)]; }).flat();
+  const L = overtureBuildings({ building_part: { extent: E, features: [
+    { type: POLYGON, parts: [circle], props: { min_height: 50, height: 80, roof_shape: 'dome', subtype: 'religious' } }] } });
+  const mb = new MeshBuilder();
+  buildBuildings(L, g, mb, 1e7, { faces: true });
+  const o = mb.finish(), f = new Float32Array(o.vertices);
+  const ys = []; for (let i = 0; i < o.verts; i++) ys.push(f[4 * i + 1]);
+  ok(Math.max(...ys) === 80 && Math.min(...ys) === 50, 'a raised dome part spans 50 to 80 m');
+  ok([...o.sty].every((s) => (s >> 8) & STY_MONUMENT), 'it is drawn as a monument');
+}
+console.log('roofshapes ok');
