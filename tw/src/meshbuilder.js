@@ -33,6 +33,7 @@ export class MeshBuilder {
     // Optional: four numbers per vertex for windows drawn by the shader
     // (buildings.js, opt.faces). Only buildings fill it, and only when asked.
     if (this.fac) out.fac = new Float32Array(this.fac);
+    if (this.sty) out.sty = new Uint32Array(this.sty);   // style bytes per vertex, same use
     return out;
   }
 }

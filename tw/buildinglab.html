@@ -52,6 +52,8 @@
   <label><input type="checkbox" id="t-contact" checked> dark at the base</label>
   <label><input type="checkbox" id="t-retro"> app's 5-bit colours</label>
   <label><input type="checkbox" id="t-fog" checked> haze</label>
+  <label><input type="checkbox" id="t-age"> show age guess</label>
+  <span id="region"></span>
   <span id="status"></span>
 </div>
 
@@ -78,10 +80,10 @@ import { decodeMVT } from './src/mvt.js';
 import { buildBuildings } from './src/buildings.js';
 import { buildRoads } from './src/roads.js';
 import { MeshBuilder, rgba } from './src/meshbuilder.js';
-import { lonToMercX, latToMercY, mercToTile, tileCentreMerc, tileSizeMerc } from './src/geo.js';
+import { lonToMercX, latToMercY, mercToTile, tileCentreMerc, tileSizeMerc, mercYToLat, mercXToLon } from './src/geo.js';
 import { program, perspective, viewRot, SUN_DIR, uniforms } from './src/gl.js';
-import { AUTO_WALL_UNIFORM, AUTO_ROOF_UNIFORM } from './src/look.js';
-import { FACADE, MODE, LAB_VS, LAB_FS, settingsLine } from './src/facade.js';
+import { AUTO_ROOF_UNIFORM, AUTO_WALL_UNIFORM } from './src/look.js';
+import { FACADE, MODE, LAB_VS, LAB_FS, settingsLine, regionAt, regionUniforms } from './src/facade.js';
 
 // Places: lat, lon, which way you face (degrees from north).
 const PLACES = [
@@ -102,9 +104,8 @@ const SLIDERS = [
   ['floor', 'Floor height', 2.6, 5, 0.1, (v) => v.toFixed(1) + ' m'],
   ['houseFloor', 'House floor height', 2.4, 4, 0.1, (v) => v.toFixed(1) + ' m'],
   ['ground', 'Ground floor height', 3, 7, 0.1, (v) => v.toFixed(1) + ' m'],
-  ['bay', 'Window spacing', 1.5, 6, 0.1, (v) => v.toFixed(1) + ' m'],
-  ['win', 'Window width', 0.2, 1, 0.01, (v) => Math.round(v * 100) + '% of spacing'],
-  ['winH', 'Window height', 0.2, 0.9, 0.01, (v) => Math.round(v * 100) + '% of floor'],
+  ['gap', 'Wall between windows', 0.3, 4, 0.1, (v) => v.toFixed(1) + ' m'],
+  ['size', 'Window size', 0.5, 1.6, 0.05, (v) => '× ' + v.toFixed(2)],
   ['tower', 'Tower glass width', 0.5, 1, 0.01, (v) => Math.round(v * 100) + '% of spacing'],
   ['shine', 'Sky in the glass', 0, 1, 0.05, (v) => Math.round(v * 100) + '%'],
 ];
@@ -130,9 +131,11 @@ const canvas = $('view');
 const gl = canvas.getContext('webgl2', { antialias: true });
 if (!gl) { $('error').style.display = 'block'; $('error').textContent = 'WebGL2 is not available in this browser.'; throw new Error('no webgl2'); }
 const prog = program(gl, LAB_VS, LAB_FS);
-const U = uniforms(gl, prog, ['uProj', 'uView', 'uOff', 'uScale', 'uAutoWall', 'uAutoRoof', 'uSunDir', 'uSky', 'uMode', 'uF1', 'uF2']);
+const U = uniforms(gl, prog, ['uProj', 'uView', 'uOff', 'uScale', 'uAutoRoof', 'uAutoWall', 'uToday', 'uWall', 'uRoofC', 'uFrame', 'uReg',
+  'uSunDir', 'uSky', 'uMode', 'uF1', 'uF2']);
 const A = { pos: gl.getAttribLocation(prog, 'aPos'), col: gl.getAttribLocation(prog, 'aCol'),
-            info: gl.getAttribLocation(prog, 'aInfo'), fac: gl.getAttribLocation(prog, 'aFac') };
+            info: gl.getAttribLocation(prog, 'aInfo'), fac: gl.getAttribLocation(prog, 'aFac'),
+            sty: gl.getAttribLocation(prog, 'aSty') };
 const SKY = [0.62, 0.74, 0.86];
 
 function upload(m) {
@@ -147,6 +150,8 @@ function upload(m) {
   else if (A.info >= 0) gl.disableVertexAttribArray(A.info);
   if (m.fac && A.fac >= 0) { buf(m.fac); gl.enableVertexAttribArray(A.fac); gl.vertexAttribPointer(A.fac, 4, gl.FLOAT, false, 16, 0); }
   else if (A.fac >= 0) gl.disableVertexAttribArray(A.fac);
+  if (m.sty && A.sty >= 0) { buf(m.sty); gl.enableVertexAttribArray(A.sty); gl.vertexAttribPointer(A.sty, 4, gl.UNSIGNED_BYTE, true, 4, 0); }
+  else if (A.sty >= 0) gl.disableVertexAttribArray(A.sty);
   const ib = gl.createBuffer(); bufs.push(ib);
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, m.indices, gl.STATIC_DRAW);
   gl.bindVertexArray(null);
@@ -160,6 +165,7 @@ let tiles = [];            // { c: centre merc, draws: [...] }
 let scale = 1;             // cos(latitude) of the spot
 let loadId = 0;
 const cam = { mx: 0, my: 0, alt: EYE, yaw: 0, pitch: 0.05, speed: 4 };
+window.__cam = cam;   // for automated looks at the lab
 let start = null;
 
 async function getTemplate() {
@@ -171,9 +177,10 @@ async function getTemplate() {
 
 async function loadPlace(lat, lon, facing) {
   const id = ++loadId;
-  for (const t of tiles) t.draws.forEach(free);
+  for (const t of tiles) { t.draws.forEach(free); free(t.today); }
   tiles = [];
   scale = Math.cos(lat * Math.PI / 180);
+  $('region').textContent = 'look: ' + regionAt(lat, lon).replace('_', ' ');
   cam.mx = lonToMercX(lon); cam.my = latToMercY(lat); cam.alt = EYE;
   cam.yaw = facing * Math.PI / 180; cam.pitch = 0.05;
   start = { ...cam };
@@ -208,7 +215,11 @@ async function loadPlace(lat, lon, facing) {
       const bb = new MeshBuilder();
       const st = buildBuildings(L.building, g, bb, 600000, { landuse: L.landuse, faces: true });
       kept += st.kept;
-      tiles.push({ c, draws: [upload(rb.finish()), upload(bb.finish())].filter(Boolean) });
+      const ob = new MeshBuilder();              // today's buildings, for the left side
+      buildBuildings(L.building, g, ob, 600000, { landuse: L.landuse });
+      const lat0 = mercYToLat(c.y), lon0 = mercXToLon(c.x);
+      tiles.push({ c, reg: regionUniforms(regionAt(lat0, lon0)), draws: [upload(rb.finish()), upload(bb.finish())].filter(Boolean),
+        today: upload(ob.finish()) });
     } catch (e) {
       console.warn('tile', x, y, e);
     }
@@ -267,16 +278,24 @@ function modeBits(today) {
   if ($('t-contact').checked) m |= MODE.contact;
   if ($('t-retro').checked) m |= MODE.retro;
   if ($('t-fog').checked) m |= MODE.fog;
+  if ($('t-age').checked) m |= MODE.age;
   return m;
 }
-function drawAll(mode) {
+function drawAll(mode, today) {
   gl.uniform1i(U.uMode, mode);
+  gl.uniform1i(U.uToday, today ? 1 : 0);
   for (const t of tiles) {
     gl.uniform3f(U.uOff, (t.c.x - cam.mx) * scale, -cam.alt, -(t.c.y - cam.my) * scale);
-    for (const d of t.draws) {
+    gl.uniform3fv(U.uWall, t.reg.wall);
+    gl.uniform3fv(U.uRoofC, t.reg.roof);
+    gl.uniform3fv(U.uFrame, t.reg.frame);
+    gl.uniform4fv(U.uReg, t.reg.extra);
+    for (const d of (today ? [t.draws[0], t.today] : t.draws)) {
+      if (!d) continue;
       gl.bindVertexArray(d.vao);
       if (A.info >= 0) gl.vertexAttrib4f(A.info, 0, 0, 0, 0);
       if (A.fac >= 0) gl.vertexAttrib4f(A.fac, 0, 0, 0, 0);
+      if (A.sty >= 0) gl.vertexAttrib4f(A.sty, 0.5, 0, 0, 0);
       gl.drawElements(gl.TRIANGLES, d.count, gl.UNSIGNED_INT, 0);
     }
   }
@@ -302,20 +321,20 @@ function frame(now) {
   gl.uniformMatrix4fv(U.uProj, false, proj);
   gl.uniformMatrix4fv(U.uView, false, view);
   gl.uniform1f(U.uScale, scale);
-  gl.uniform3fv(U.uAutoWall, AUTO_WALL_UNIFORM);
   gl.uniform3fv(U.uAutoRoof, AUTO_ROOF_UNIFORM);
+  gl.uniform3fv(U.uAutoWall, AUTO_WALL_UNIFORM);
   gl.uniform3f(U.uSunDir, SUN_DIR[0], SUN_DIR[1], SUN_DIR[2]);
   gl.uniform3f(U.uSky, SKY[0], SKY[1], SKY[2]);
-  gl.uniform4f(U.uF1, F.floor, F.houseFloor, F.ground, F.bay);
-  gl.uniform4f(U.uF2, F.win, F.winH, F.tower, F.shine);
+  gl.uniform4f(U.uF1, F.floor, F.houseFloor, F.ground, F.gap);
+  gl.uniform4f(U.uF2, F.size, F.tower, F.shine, 0);
   const split = $('split').checked;
   $('divider').style.display = $('tagL').style.display = split ? '' : 'none';
   if (split) {
     gl.enable(gl.SCISSOR_TEST);
-    gl.scissor(0, 0, Math.floor(w / 2), h); drawAll(modeBits(true));
-    gl.scissor(Math.floor(w / 2), 0, w - Math.floor(w / 2), h); drawAll(modeBits(false));
+    gl.scissor(0, 0, Math.floor(w / 2), h); drawAll(modeBits(true), true);
+    gl.scissor(Math.floor(w / 2), 0, w - Math.floor(w / 2), h); drawAll(modeBits(false), false);
     gl.disable(gl.SCISSOR_TEST);
-  } else drawAll(modeBits(false));
+  } else drawAll(modeBits(false), false);
   $('hud').textContent = `${cam.alt.toFixed(1)} m up · speed ${cam.speed.toFixed(1)} m/s`;
   requestAnimationFrame(frame);
 }

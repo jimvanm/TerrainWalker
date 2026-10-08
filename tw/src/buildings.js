@@ -16,6 +16,7 @@ import { nodeHeightAt, GRID } from './heightgrid.js';
 import { rgba, info, INFO_BUILDING, INFO_REAL, INFO_ROOF, INFO_MASKED } from './meshbuilder.js';
 import { LANDUSE_TYPE, TALL, SIZE_LIMITS } from './look.js';
 import { triangulate, signedArea } from './earclip.js';
+import { fitRect, pitchable, pitchFor, emitPitched } from './houseroof.js';
 
 const PALETTE = [
   [214, 208, 196], [204, 198, 190], [222, 216, 206], [196, 192, 188],
@@ -282,10 +283,15 @@ export function buildBuildings(layer, g, mb, maxTris = BUILDING_TRIS, opt = {}) 
         for (let i = 0; i < r0.length; i += 2) { sx += r0[i]; sy += r0[i + 1]; }
         type = typeAt(areas, sx / (r0.length / 2), sy / (r0.length / 2), E);
       }
-      cand.push({ rings, height, minh, area, hash, tier: hit ? 0 : tier, sunk, colour, type, masked: !!hit,
+      let mx = 0, my = 0;
+      for (let i = 0; i < rings[0].length; i += 2) { mx += rings[0][i]; my += rings[0][i + 1]; }
+      mx /= rings[0].length / 2; my /= rings[0].length / 2;
+      cand.push({ rings, height, known, minh, area, hash, mx, my, tier: hit ? 0 : tier, sunk, colour, type, masked: !!hit,
         tris: 3 * nv, rank: (height + 3) * Math.sqrt(Math.max(area, 1)) });
     }
   }
+
+  if (opt.faces) guessAges(cand, g.cosLat);
 
   // Skyline first, then large, then the rest; the most important first within
   // each. The budget drops from the end, and distant tiles draw only the start.
@@ -294,7 +300,7 @@ export function buildBuildings(layer, g, mb, maxTris = BUILDING_TRIS, opt = {}) 
   for (const b of cand) {
     if (used + b.tris > maxTris) { stats.dropped++; continue; }
     used += b.tris;
-    emit(b, mb, hAt, opt.faces ? g.cosLat : 0);
+    if (opt.faces) emitFaces(b, mb, hAt, g.cosLat); else emit(b, mb, hAt);
     if (b.masked) { stats.ends[2] = mb.idx.length; continue; }   // hidden normally; last, after every tier
     stats.kept++;
     stats.types[b.type]++;
@@ -320,9 +326,7 @@ export function sizeGroup(b) {
   return b.area >= SIZE_LIMITS.bigArea ? 1 : 0;
 }
 
-// faces: 0 for shared wall corners (the app), or cos(latitude) to give each
-// wall face its own corners with their place on the wall (see opt.faces).
-function emit(b, mb, hAt, faces = 0) {
+function emit(b, mb, hAt) {
   // The vertex colour is the map colour when there is one (the shader shades
   // it), else the old baked colour, which is only a fallback.
   const base = PALETTE[b.hash % PALETTE.length];
@@ -340,28 +344,7 @@ function emit(b, mb, hAt, faces = 0) {
   });
   const top = gMax + b.height;
 
-  const fac = faces ? (mb.fac || (mb.fac = [])) : null;
-  for (let k = 0; fac && k < b.rings.length; k++) {
-    const r = b.rings[k], gs = ground[k], m = gs.length;
-    for (let i = 0; i < m; i++) {
-      const j = (i + 1) % m;
-      const len = Math.hypot(r[2 * j] - r[2 * i], r[2 * j + 1] - r[2 * i + 1]) * faces;   // true metres
-      const corner = (q, u) => {
-        const bottom = b.minh > 0 ? gs[q] + b.minh : gs[q] - b.sunk;
-        const a = mb.vert(r[2 * q], bottom, r[2 * q + 1], wallBot, iBot);
-        mb.vert(r[2 * q], top, r[2 * q + 1], wallTop, iTop);
-        // Heights count from the highest corner of the footprint, the same
-        // place the roof is measured from, so floors line up with the roof.
-        fac.push(u, len, bottom - gMax, b.height, u, len, top - gMax, b.height);
-        return a;
-      };
-      const a = corner(i, 0), c = corner(j, len);
-      mb.tri(a, c, a + 1);
-      mb.tri(c, c + 1, a + 1);
-    }
-  }
-
-  for (let k = 0; !fac && k < b.rings.length; k++) {
+  for (let k = 0; k < b.rings.length; k++) {
     const r = b.rings[k], gs = ground[k], m = gs.length;
     const first = mb.verts;
     for (let i = 0; i < m; i++) {
@@ -381,9 +364,124 @@ function emit(b, mb, hAt, faces = 0) {
   const roofBase = mb.verts;
   const ids = [];
   for (const r of b.rings) {
+    for (let i = 0; i < r.length / 2; i++) { ids.push(mb.verts - roofBase); mb.vert(r[2 * i], top, r[2 * i + 1], roof, iRoof); }
+  }
+  const t = triangulate(b.rings);
+  for (let i = 0; i < t.tris.length; i += 3) {
+    mb.tri(roofBase + t.src[t.tris[i]], roofBase + t.src[t.tris[i + 1]], roofBase + t.src[t.tris[i + 2]]);
+  }
+}
+
+// ---- faces mode (the building lab) ------------------------------------------
+
+const clamp01 = (x) => Math.max(0, Math.min(1, x));
+const ramp = (a, b, x) => clamp01((x - a) / (b - a));
+export const AGE_REACH = 60;     // metres round a building counted for how built-up its spot is
+
+// A guess at each building's age, 0 new .. 1 old, from its footprint and how
+// much of the ground round it is built on. Old city cores are small buildings
+// close together; newer suburbs are bigger houses further apart. Tall
+// buildings count as newer. k: true metres per unit. Sets b.cover and b.age.
+export function guessAges(cand, k) {
+  const cell = AGE_REACH / k, R2 = cell * cell;
+  const grid = new Map();
+  const key = (i, j) => i * 100003 + j;
+  for (const b of cand) {
+    const kk = key(Math.floor(b.mx / cell), Math.floor(b.my / cell));
+    let l = grid.get(kk); if (!l) grid.set(kk, l = []); l.push(b);
+  }
+  const disc = Math.PI * AGE_REACH * AGE_REACH;
+  for (const b of cand) {
+    const i0 = Math.floor(b.mx / cell), j0 = Math.floor(b.my / cell);
+    let built = 0;
+    for (let j = j0 - 1; j <= j0 + 1; j++) for (let i = i0 - 1; i <= i0 + 1; i++) {
+      for (const o of grid.get(key(i, j)) || []) {
+        const dx = o.mx - b.mx, dy = o.my - b.my;
+        if (dx * dx + dy * dy <= R2) built += o.area;
+      }
+    }
+    b.cover = Math.min(1, built / disc);
+    const size = sizeGroup(b);
+    if (size === 0) b.age = 0.5 * (1 - ramp(110, 280, b.area)) + 0.5 * ramp(0.12, 0.32, b.cover);
+    else if (size === 3) b.age = 0.1 * ramp(0.2, 0.5, b.cover);
+    else b.age = 0.35 * (1 - ramp(500, 3000, b.area)) + 0.45 * ramp(0.2, 0.5, b.cover) + 0.2 * (1 - ramp(20, 45, b.height));
+  }
+}
+
+// Style bytes per corner (mb.sty): age 0..255, then flags.
+export const STY_END = 1, STY_PITCHED = 2;
+export const sty = (age, flags) => ((flags << 8) | Math.round(clamp01(age) * 255)) >>> 0;
+
+// Like emit, but every wall face has its own corners, and each corner records
+// where it is on its wall (mb.fac: along, face length, up from the base, wall
+// height, in metres) and the building's style (mb.sty). Houses close to a
+// rectangle get a pitched roof. k: true metres per unit.
+function emitFaces(b, mb, hAt, k) {
+  const base = PALETTE[b.hash % PALETTE.length];
+  const c0 = b.colour ? rgba(b.colour[0], b.colour[1], b.colour[2]) : null;
+  const wallTop = c0 || shade(base, 1), wallBot = c0 || shade(base, 0.78), roofC = c0 || shade(base, 0.7);
+  const fl = INFO_BUILDING | (b.colour ? INFO_REAL : 0) | (b.masked ? INFO_MASKED : 0), num = b.hash & 255;
+  const tg = b.type | (sizeGroup(b) << 4);
+  const iTop = info(tg, num, 255, fl), iBot = info(tg, num, 199, fl), iRoof = info(tg, num, 255, fl | INFO_ROOF);
+  const fac = mb.fac || (mb.fac = []), st = mb.sty || (mb.sty = []);
+  const age = b.age === undefined ? 0.5 : b.age;
+
+  let gMax = -Infinity;
+  const ground = b.rings.map((r) => {
+    const gs = new Float64Array(r.length / 2);
+    for (let i = 0; i < gs.length; i++) { gs[i] = hAt(r[2 * i], r[2 * i + 1]); if (gs[i] > gMax) gMax = gs[i]; }
+    return gs;
+  });
+
+  // A pitched roof?
+  if (sizeGroup(b) === 0 && b.rings.length === 1 && !(b.minh > 0)) {
+    const rect = fitRect(b.rings[0]);
+    const outline = Math.abs(signedArea(b.rings[0]));
+    if (pitchable(rect, outline, k)) {
+      const pitch = pitchFor(age);
+      const rise = rect.W * k * Math.tan(pitch);
+      const eave = b.known ? Math.max(2.8, b.height - rise) : b.height;
+      const aspect = rect.L / rect.W;
+      const hip = aspect < 1.3 || ((b.hash >> 8) & 255) < (age < 0.4 ? 100 : 25);
+      const put = (x, y, z, isRoof, f, end) => {
+        const iv = isRoof ? iRoof : (f[2] <= 0 ? iBot : iTop);
+        const id = mb.vert(x, y, z, isRoof ? roofC : wallTop, iv);
+        fac.push(f[0], f[1], f[2], f[3]);
+        st.push(sty(age, STY_PITCHED | (end ? STY_END : 0)));
+        return id;
+      };
+      emitPitched(rect, { base: gMax, gAt: hAt, sunk: b.sunk, eave, k, hip, pitch }, put, (a, c, d) => mb.tri(a, c, d));
+      return;
+    }
+  }
+
+  const top = gMax + b.height;
+  const s0 = sty(age, 0);
+  for (let q = 0; q < b.rings.length; q++) {
+    const r = b.rings[q], gs = ground[q], m = gs.length;
+    for (let i = 0; i < m; i++) {
+      const j = (i + 1) % m;
+      const len = Math.hypot(r[2 * j] - r[2 * i], r[2 * j + 1] - r[2 * i + 1]) * k;   // true metres
+      const corner = (n, u) => {
+        const bottom = b.minh > 0 ? gs[n] + b.minh : gs[n] - b.sunk;
+        const a = mb.vert(r[2 * n], bottom, r[2 * n + 1], wallBot, iBot);
+        mb.vert(r[2 * n], top, r[2 * n + 1], wallTop, iTop);
+        // Heights count from the highest corner of the footprint, the same
+        // place the roof is measured from, so floors line up with the roof.
+        fac.push(u, len, bottom - gMax, b.height, u, len, top - gMax, b.height);
+        st.push(s0, s0);
+        return a;
+      };
+      const a = corner(i, 0), c = corner(j, len);
+      mb.tri(a, c, a + 1);
+      mb.tri(c, c + 1, a + 1);
+    }
+  }
+  const roofBase = mb.verts;
+  for (const r of b.rings) {
     for (let i = 0; i < r.length / 2; i++) {
-      ids.push(mb.verts - roofBase); mb.vert(r[2 * i], top, r[2 * i + 1], roof, iRoof);
-      if (fac) fac.push(0, 0, b.height, b.height);
+      mb.vert(r[2 * i], top, r[2 * i + 1], roofC, iRoof);
+      fac.push(0, 0, b.height, b.height); st.push(s0);
     }
   }
   const t = triangulate(b.rings);
