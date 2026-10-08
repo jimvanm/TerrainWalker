@@ -260,6 +260,7 @@ async function buildRing(r, cx, cz) {
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.DYNAMIC_DRAW);
     gl.bindVertexArray(null);
     r.h = h; r.cx = cx; r.cz = cz; r.half = half; r.ready = true; r.builds++;
+    r.parentBuild = undefined;   // its points moved: its edge blend must be worked out again
     r.ms = performance.now() - t0;
   } finally { current = null; }
 }
@@ -336,10 +337,11 @@ function groundAt(x, z) {
 // ---- water, once per place ---------------------------------------------------
 // Two water pictures: a wide one (8 m per dot, round the place) and a fine
 // one (1 m per dot, round you, painted again when you have moved far enough).
+// The wide one is 4 m per dot.
 // One channel each, to keep them small.
 const water = {
-  wide: { tex: gl.createTexture(), cx: 0, cz: 0, half: 8192, px: 2048, z: 13, ready: false },
-  fine: { tex: gl.createTexture(), cx: 0, cz: 0, half: 1024, px: 2048, z: 14, ready: false, busy: false },
+  wide: { tex: gl.createTexture(), cx: 0, cz: 0, half: 8192, px: 4096, z: 13, ready: false },
+  fine: { tex: gl.createTexture(), cx: 0, cz: 0, half: 2048, px: 4096, z: 14, ready: false, busy: false },
 };
 let tilejson = null;
 async function paintWater(w, lat, lon, cx0, cz0, id) {
