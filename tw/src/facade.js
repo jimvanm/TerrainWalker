@@ -157,6 +157,15 @@ vec3 newLook() {
     int cls = size == 3 ? 4 : size == 0 ? (old ? 0 : 1) : (old ? 2 : 3);
     lc = uWall[cls * 4 + num % 4] * vary * aInfo.b;
   }
+  // What a point of interest says the building is (buildings.js KIND), when
+  // the map gives no colour of its own: fire stations red brick, schools
+  // tan brick, hospitals pale, police grey, stations stone.
+  int kind = (sf >> 4) & 7;
+  if (fl != 0 && (fl & 4) == 0 && (fl & 2) == 0 && kind != 0 && kind != 5) {
+    vec3 kc = kind == 1 ? vec3(0.56, 0.27, 0.20) : kind == 2 ? vec3(0.66, 0.50, 0.38) : kind == 3 ? vec3(0.84, 0.83, 0.79)
+            : kind == 4 ? vec3(0.60, 0.61, 0.63) : vec3(0.76, 0.72, 0.64);
+    lc = kc * vary * aInfo.b;
+  }
   // Churches, town halls, museums: dressed stone walls, lead roofs.
   if (fl != 0 && (sf & 4) != 0) lc = (fl & 4) != 0 ? vec3(0.42, 0.45, 0.48) * vary : vec3(0.80, 0.77, 0.70) * vary * aInfo.b;
   // A colour from the map wins: Scotia Plaza stays red, Royal Bank Plaza gold.
@@ -234,7 +243,9 @@ vec3 facadeShade(vec3 c, vec3 n, float lit) {
     float h1 = hash(vec3(hb, 1.0, 7.0)), h2 = hash(vec3(hb, 3.0, 2.0)), h3 = hash(vec3(hb, 5.0, 9.0));
     bool house = size == 0, tower = size == 3;
     bool industry = size == 1 && (type == 3 || (type == 0 && H < 9.0));
-    bool shop = !house && !industry && !monument && (type == 2 || (size >= 1 && h3 < 0.5));
+    int kind = (vSty.y >> 4) & 7;            // buildings.js KIND: 1 fire, 2 school, 3 hospital, 4 police, 5 shop, 6 station
+    bool shop = kind == 5 || (!house && !industry && !monument && kind == 0 && (type == 2 || (size >= 1 && h3 < 0.5)));
+    if (kind != 0 && kind != 5) industry = false;
     float px = max(max(fwidth(u), fwidth(v)), 1e-4);    // metres per pixel here
     float far = smoothstep(0.12, 0.4, px);              // finer than a pixel: show the average
 
@@ -255,6 +266,10 @@ vec3 facadeShade(vec3 c, vec3 n, float lit) {
     if (tower && !monument) { ww = 0.0; wh = 0.0; }
     else if (monument) {
       ww = 1.4 * S; wh = 4.2 * S; nv = 1.0; nh = 2.0; arch = true;
+    } else if (kind == 2) {
+      ww = 2.6 * S; wh = 1.6 * S; nv = 2.0; nh = old ? 1.0 : 0.0;     // schools: wide classroom windows
+    } else if (kind == 3) {
+      ww = 1.3 * S; wh = 1.4 * S; nv = 1.0;                           // hospitals: even rows
     } else if (old) {
       ww = (0.85 + 0.3 * h1) * S; wh = (house ? 1.5 : 1.9) * (0.9 + 0.2 * h2) * S;
       nv = h3 < 0.6 ? 1.0 : 0.0; nh = 1.0;
@@ -273,8 +288,10 @@ vec3 facadeShade(vec3 c, vec3 n, float lit) {
     float margin = house ? 0.7 : 0.6;
 
     // Ground floor: shop fronts, or a door at each end of a house.
-    bool front = fi == 0.0 && shop;
+    bool front = fi == 0.0 && (shop || kind == 6);
     if (front) { gap = 0.5; ww = 3.2; wh = gh - 1.2; sill = 0.45; nv = 0.0; nh = 0.0; arch = false; }
+    bool doorBays = kind == 1 && fi == 0.0;   // door-sized bays; doors in the first four, glass after
+    if (doorBays) { gap = 0.8; ww = 3.6; wh = min(3.8, span - 0.4); sill = 0.05; nv = 0.0; nh = 0.0; arch = false; }
 
     // Bays: as many windows as fit with a gap between, spread evenly.
     float bay = ww + gap;
@@ -301,12 +318,24 @@ vec3 facadeShade(vec3 c, vec3 n, float lit) {
     bool any = nb > 0.0 && uu >= 0.0 && uu < nb && fb + sill + wh < H - 0.3;
     if (industry) { any = any && fi == 0.0; sill = span - 1.4; wh = 0.8; }
     // A door: the first bay of each end wall of a house.
-    bool door = house && pitched && endWall && fi == 0.0 && bi == 0.0;
+    bool door = house && pitched && endWall && fi == 0.0 && bi == 0.0 && kind != 5;
+    // Fire stations: big red doors along the ground floor.
+    bool bayDoor = doorBays && L > 7.0 && bi < 4.0;
 
     if ((uMode & 1) != 0 && any) {
       float fw = 0.08;
       vec3 frameC = uFrame[old ? 0 : 1];
-      if (door) {
+      if (bayDoor) {
+        float dw = min(3.6, bw - 0.6), dh = min(3.8, span - 0.4);
+        float m = opening(x, y - 0.05, dw, dh, false, px);
+        float fr = opening(x, y - 0.05 + fw, dw + 2.0 * fw, dh + 2.0 * fw, false, px);
+        // Panels across the door, as on a roll-up door, with a strip of glass.
+        float panel = 1.0 - 0.15 * (1.0 - smoothstep(0.02, 0.02 + px, abs(fract((y - 0.05) / 0.6) - 0.5) * 0.6)) * (1.0 - far);
+        vec3 dc = vec3(0.66, 0.13, 0.10) * panel;
+        if (y > 0.05 + dh * 0.62 && y < 0.05 + dh * 0.74) dc = mix(dc, vec3(0.12, 0.14, 0.17), 0.85);
+        c = mix(c, frameC * lit, fr * (1.0 - far));
+        c = mix(c, dc * lit, m);
+      } else if (door) {
         float dw = 0.95, dh = min(2.1, span - 0.3);
         float m = opening(x, y - 0.15, dw, dh, false, px);
         float fr = opening(x, y - 0.15 + fw, dw + 2.0 * fw, dh + 2.0 * fw, false, px);
@@ -323,7 +352,7 @@ vec3 facadeShade(vec3 c, vec3 n, float lit) {
         vec3 dark = vec3(0.09, 0.11, 0.14);
         vec3 glass = mix(dark, uSky * 0.9, clamp(uF2.z * (0.25 + 0.75 * fres) * (0.6 + 0.8 * hw), 0.0, 1.0));
         if (vMap.a > 0.5) glass = mix(glass, vMap.rgb * 0.75, tower ? 0.45 : 0.15);   // tinted glass
-        if (!tower && hw > 0.84) glass = mix(glass, vec3(0.56, 0.51, 0.43), 0.55);   // blinds drawn
+        if (!tower && kind != 3 && hw > 0.84) glass = mix(glass, vec3(0.56, 0.51, 0.43), 0.55);   // blinds drawn
         glass *= mix(0.65, 1.0, smoothstep(0.0, 0.18, wh - yy));                      // shade under the top
         // Glazing bars.
         float bar = max(bars(x + ww * 0.5, ww, nv, 0.06, px), bars(yy, wh, nh, 0.06, px)) * (1.0 - far);

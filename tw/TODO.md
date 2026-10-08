@@ -61,6 +61,13 @@ always with everything loaded.
   and 16 there only. Open question: they are built ahead of time, not streamed
   from the public source (see Features).
 - **Labels must be toggleable**, never always-on.
+- **The ground gives way to the road, not the other way round** (agreed
+  8 October, not started). For walking and driving: along a road the terrain
+  is cut and filled to the road's own gentle slope; buildings stand on a
+  levelled pad; water lies flat; bridges and tunnels (marked in the map data)
+  leave the ground alone. All of it edits the one shared height function
+  (`heightgrid.js`) that the terrain and everything on it already read, so
+  ground, roads and buildings stay in agreement. Comes with physics.
 - **Overlay direction is VFR sectional symbology**, not place labels. Detail
   level and altitude behaviour both undecided; explicitly a thing to play with
   rather than specify up front. Needs a spike, not a spec.

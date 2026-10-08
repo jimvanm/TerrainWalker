@@ -189,6 +189,18 @@ async function getTemplate() {
 }
 
 let place = null;
+const poiLayers = new Map();   // our map's points of interest per tile, for Overture's buildings
+async function ourPois(x, y) {
+  const k = x + '/' + y;
+  if (poiLayers.has(k)) return poiLayers.get(k);
+  try {
+    const tpl = await getTemplate();
+    const r = await fetch(tpl.replace('{z}', Z).replace('{x}', x).replace('{y}', y), { mode: 'cors' });
+    const L = r.ok ? decodeMVT(new Uint8Array(await r.arrayBuffer()), ['poi'], 'class', ['poi']) : {};
+    poiLayers.set(k, L.poi || null);
+  } catch (e) { poiLayers.set(k, null); }
+  return poiLayers.get(k);
+}
 const archives = new Map();
 const anyLayer = { includes: () => true };   // decode every layer in a tile
 const fmt = (n) => n.toLocaleString('en-CA');
@@ -226,7 +238,7 @@ async function loadPlace(lat, lon, facing, keepCamera = false) {
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const buf = new Uint8Array(await res.arrayBuffer());
       if (id !== loadId) return;
-      const want = ['transportation', 'aeroway', 'building', 'landuse'];
+      const want = ['transportation', 'aeroway', 'building', 'landuse', 'poi'];
       const L = buf.length ? decodeMVT(buf, want, 'class', want) : {};
       const c = tileCentreMerc(x, y, Z), size = tileSizeMerc(Z);
       const g = { size14: size, size12: size, bx: size / 2, by: size / 2, cell: size / 8,
@@ -238,7 +250,8 @@ async function loadPlace(lat, lon, facing, keepCamera = false) {
       rb.tri(q[0], q[2], q[1]); rb.tri(q[0], q[3], q[2]);
       buildRoads(L.transportation, g, rb, L.aeroway);
       const bb = new MeshBuilder();
-      const st = buildBuildings(L.building, g, bb, 600000, { landuse: L.landuse, faces: true });
+      const st = buildBuildings(L.building, g, bb, 600000, { landuse: L.landuse, pois: L.poi, faces: true });
+      poiLayers.set(x + '/' + y, L.poi || null);
       if (!overture) kept += st.kept;
       tally(tallies.ours, L.building, c, size, (p) => p.hide_3d !== true, (p) => Number(p.render_height) > 3);
       const ob = new MeshBuilder();              // today's buildings, for the left side
@@ -322,7 +335,8 @@ async function loadOverture(id, lat) {
       const g = { size14: size, size12: size, bx: size / 2, by: size / 2, cell: size / 8,
                   cosLat: Math.cos(lat * Math.PI / 180), nodes: null, cx: c.x, cy: c.y, hAt: () => 0 };
       const bb = new MeshBuilder();
-      kept += buildBuildings(overtureBuildings(L), g, bb, 2000000, { faces: true }).kept;
+      const pois = Zo === Z ? await ourPois(x, y) : null;   // our map's points of interest, same tile
+      kept += buildBuildings(overtureBuildings(L), g, bb, 2000000, { faces: true, pois }).kept;
       tiles.push({ c, reg: regionUniforms(regionAt(mercYToLat(c.y), mercXToLon(c.x))), roads: null, ovt: upload(bb.finish()) });
     } catch (e) {
       failed = e;

@@ -11,7 +11,7 @@
 // by size and height, and the least important are dropped when the tile runs
 // out of triangles.
 
-import { POLYGON } from './mvt.js';
+import { POLYGON, POINT } from './mvt.js';
 import { nodeHeightAt, GRID } from './heightgrid.js';
 import { rgba, info, INFO_BUILDING, INFO_REAL, INFO_ROOF, INFO_MASKED } from './meshbuilder.js';
 import { LANDUSE_TYPE, TALL, SIZE_LIMITS } from './look.js';
@@ -26,6 +26,9 @@ const PALETTE = [
 const SUNK = 0.5;          // walls start this far below the ground, so slopes never show a gap
 const MIN_AREA = 12;       // m2: smaller than this is a shed, unless it is tall
 export const BUILDING_TRIS = 90000;
+// The new look (faces mode) has its own corners per wall and real roofs, so it
+// needs more room before a dense tile starts leaving buildings out.
+export const FACES_TRIS = 300000;
 
 const shade = (c, f) => rgba(Math.round(c[0] * f), Math.round(c[1] * f), Math.round(c[2] * f));
 
@@ -226,7 +229,7 @@ export function buildBuildings(layer, g, mb, maxTris = BUILDING_TRIS, opt = {}) 
   // real: buildings that carry a map colour. types: kept buildings per type.
   // sizes: kept buildings per size group (look.js SIZE_NAMES).
   const stats = { tall: [], kept: 0, dropped: 0, tris: 0, ends: [0, 0, 0], seen: 0, hist: [0, 0, 0, 0, 0, 0, 0],
-                  real: 0, types: [0, 0, 0, 0, 0, 0, 0, 0], sizes: [0, 0, 0, 0] };
+                  real: 0, types: [0, 0, 0, 0, 0, 0, 0, 0], sizes: [0, 0, 0, 0], kinds: [0, 0, 0, 0, 0, 0, 0] };
   if (!layer) return stats;
   const areas = landuseAreas(opt.landuse);
   const E = layer.extent;
@@ -298,7 +301,11 @@ export function buildBuildings(layer, g, mb, maxTris = BUILDING_TRIS, opt = {}) 
     }
   }
 
-  if (opt.faces) guessAges(cand, g.cosLat);
+  if (opt.faces) {
+    guessAges(cand, g.cosLat);
+    markKinds(cand, poiKinds(opt.pois), g.size14);
+    if (maxTris === BUILDING_TRIS) maxTris = FACES_TRIS;
+  }
 
   // Skyline first, then large, then the rest; the most important first within
   // each. The budget drops from the end, and distant tiles draw only the start.
@@ -312,6 +319,7 @@ export function buildBuildings(layer, g, mb, maxTris = BUILDING_TRIS, opt = {}) 
     stats.kept++;
     stats.types[b.type]++;
     stats.sizes[sizeGroup(b)]++;
+    if (b.kind) stats.kinds[b.kind]++;
     if (b.colour) stats.real++;
     if (b.tier === 3) stats.ends[0] = mb.idx.length;
     if (b.tier >= 2) stats.ends[1] = mb.idx.length;
@@ -418,6 +426,8 @@ export function guessAges(cand, k) {
 // Style bytes per corner (mb.sty): age 0..255, then flags, then the floor
 // count when the map gives one (0 when not).
 export const STY_END = 1, STY_PITCHED = 2, STY_MONUMENT = 4;
+// The next three bits of the flags byte: what the map's points of interest say
+// the building is (KIND below), 0 when nothing does.
 // The top byte is always 255: it marks the corner as drawn with the new look.
 export const sty = (age, flags, floors = 0) =>
   ((255 << 24) | (Math.min(255, Math.round(floors)) << 16) | (flags << 8) | Math.round(clamp01(age) * 255)) >>> 0;
@@ -438,7 +448,7 @@ function emitFaces(b, mb, hAt, k) {
   const iTop = info(tg, num, 255, fl), iBot = info(tg, num, 199, fl), iRoof = info(tg, num, 255, rfl);
   const fac = mb.fac || (mb.fac = []), st = mb.sty || (mb.sty = []);
   const age = b.monument ? 1 : (b.age === undefined ? 0.5 : b.age);
-  const mon = b.monument ? STY_MONUMENT : 0, floors = b.floors || 0;
+  const mon = (b.monument ? STY_MONUMENT : 0) | ((b.kind || 0) << 4), floors = b.floors || 0;
 
   let gMax = -Infinity;
   const ground = b.rings.map((r) => {
@@ -537,5 +547,74 @@ function emitFaces(b, mb, hAt, k) {
   const t = triangulate(b.rings);
   for (let i = 0; i < t.tris.length; i += 3) {
     mb.tri(roofBase + t.src[t.tris[i]], roofBase + t.src[t.tris[i + 1]], roofBase + t.src[t.tris[i + 2]]);
+  }
+}
+
+// ---- points of interest (faces mode) ----------------------------------------
+
+// What a point on the map says about the building it stands in. The numbers
+// go to the shader (facade.js), which gives each its own look.
+export const KIND = { fire: 1, school: 2, hospital: 3, police: 4, shop: 5, station: 6 };
+export const KIND_NAMES = ['none', 'fire station', 'school', 'hospital', 'police', 'shop', 'station'];
+const KIND_OF = {
+  fire_station: KIND.fire,
+  school: KIND.school, college: KIND.school, university: KIND.school, kindergarten: KIND.school,
+  hospital: KIND.hospital, clinic: KIND.hospital,
+  police: KIND.police,
+  station: KIND.station, bus_station: KIND.station, railway: KIND.station, train_station: KIND.station,
+  shop: KIND.shop, grocery: KIND.shop, supermarket: KIND.shop, convenience: KIND.shop, bakery: KIND.shop,
+  cafe: KIND.shop, restaurant: KIND.shop, fast_food: KIND.shop, bar: KIND.shop, pub: KIND.shop,
+  clothing_store: KIND.shop, clothes: KIND.shop, alcohol_shop: KIND.shop, pharmacy: KIND.shop, bank: KIND.shop,
+  ice_cream: KIND.shop, beer: KIND.shop, laundry: KIND.shop, hairdresser: KIND.shop, books: KIND.shop,
+  jewelry: KIND.shop, shoes: KIND.shop, florist: KIND.shop, gift: KIND.shop, mobile_phone: KIND.shop,
+  hardware: KIND.shop, butcher: KIND.shop, deli: KIND.shop, optician: KIND.shop, music: KIND.shop,
+};
+// Points that make a building a monument (stone, arched windows).
+const MONUMENT_POI = new Set(['place_of_worship', 'town_hall', 'library', 'museum', 'theatre', 'courthouse', 'castle']);
+
+// The map's points of interest as { x, y (tile units), kind, monument }.
+// Our tiles call the layer "poi", with class and subclass; a railway point
+// is a station only when its subclass says so.
+export function poiKinds(layer) {
+  if (!layer) return [];
+  const out = [];
+  for (const f of layer.features) {
+    if (f.type !== POINT || !f.parts || !f.parts.length) continue;
+    const p = f.props || {};
+    const cls = p.class || f.cls, sub = p.subclass;
+    let kind = KIND_OF[sub] || KIND_OF[cls] || 0;
+    if (cls === 'railway' && sub && sub !== 'station' && sub !== 'halt') kind = 0;
+    const monument = MONUMENT_POI.has(cls) || MONUMENT_POI.has(sub);
+    if (!kind && !monument) continue;
+    out.push({ x: f.parts[0][0], y: f.parts[0][1], E: layer.extent, kind, monument });
+  }
+  return out;
+}
+
+// Gives each building the kind of the point inside it. A building with more
+// than one point takes the first that is not a shop (a fire station with a
+// café counter is still a fire station).
+export function markKinds(cand, pois, size) {
+  if (!pois.length) return;
+  for (const b of cand) {
+    const r = b.rings[0];
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (let i = 0; i < r.length; i += 2) {
+      if (r[i] < x0) x0 = r[i]; if (r[i] > x1) x1 = r[i];
+      if (r[i + 1] < y0) y0 = r[i + 1]; if (r[i + 1] > y1) y1 = r[i + 1];
+    }
+    for (const q of pois) {
+      const px = (q.x / q.E - 0.5) * size, py = (q.y / q.E - 0.5) * size;
+      if (px < x0 || px > x1 || py < y0 || py > y1) continue;
+      let inside = false;
+      const n = r.length / 2;
+      for (let i = 0, j = n - 1; i < n; j = i++) {
+        const xi = r[2 * i], yi = r[2 * i + 1], xj = r[2 * j], yj = r[2 * j + 1];
+        if ((yi > py) !== (yj > py) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
+      }
+      if (!inside) continue;
+      if (q.monument) b.monument = true;
+      if (q.kind && (!b.kind || b.kind === KIND.shop)) b.kind = q.kind;
+    }
   }
 }

@@ -151,7 +151,7 @@ export async function buildNearTile(spec) {
   const { x, y, z = 14, vurl, eurl, skyline = false, skyMin = 50 } = spec;
   const EZ = spec.ez || EZ_DEFAULT, d = z - EZ;
   const [layers, nodes, sites] = await Promise.all([
-    vectorLayers(vurl, skyline ? ['building', 'landuse'] : ['transportation', 'aeroway', 'building', 'landuse']),
+    vectorLayers(vurl, skyline ? ['building', 'landuse'] : ['transportation', 'aeroway', 'building', 'landuse', 'poi']),
     elevationNodes(eurl, EZ, y >> d),
     loadList(),
   ]);
@@ -180,7 +180,7 @@ export async function buildNearTile(spec) {
     catch (e) { ovt = { error: String(e && e.message || e) }; }
   }
   const stats = buildBuildings(bLayer, g, bb, undefined,
-    { ...(skyline ? { minHeight: skyMin, sunk: SKY_SUNK } : {}), mask, landuse: layers.landuse, faces: style >= 1 && !skyline });
+    { ...(skyline ? { minHeight: skyMin, sunk: SKY_SUNK } : {}), mask, landuse: layers.landuse, pois: layers.poi, faces: style >= 1 && !skyline });
   stats.style = style;
   if (ovt) stats.overture = ovt;
   Object.assign(stats, counts);

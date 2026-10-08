@@ -63,3 +63,24 @@ import { fitRect, turnRect, emitSkillion } from '../src/houseroof.js';
   ok(south.y < north.y, 'a roof facing south is low on the south side');
 }
 console.log('roof directions ok');
+
+// Points of interest: a fire station point inside a building makes it one.
+import { poiKinds, markKinds, KIND } from '../src/buildings.js';
+import { POINT } from '../src/mvt.js';
+{
+  const E = 4096, size = 2446;
+  const pts = poiKinds({ extent: E, features: [
+    { type: POINT, parts: [[1100, 1100]], props: { class: 'fire_station' } },
+    { type: POINT, parts: [[2100, 1100]], props: { class: 'place_of_worship' } },
+    { type: POINT, parts: [[3100, 1100]], props: { class: 'railway', subclass: 'level_crossing' } },
+    { type: POINT, parts: [[1150, 1150]], props: { class: 'cafe' } },
+  ] });
+  ok(pts.length === 3 && pts[0].kind === KIND.fire && pts[1].monument && pts[2].kind === KIND.shop, 'points read: fire station, church, café (a level crossing is no station)');
+  const box = (x, y, w) => { const m = (v) => (v / E - 0.5) * size; return [new Float64Array([m(x), m(y), m(x + w), m(y), m(x + w), m(y + w), m(x), m(y + w)])]; };
+  const cand = [{ rings: box(1000, 1000, 300) }, { rings: box(2000, 1000, 300) }, { rings: box(3000, 3000, 300) }];
+  markKinds(cand, pts, size);
+  ok(cand[0].kind === KIND.fire, 'the café inside does not turn the fire station into a shop');
+  ok(cand[1].monument === true && !cand[1].kind, 'a church point makes a monument');
+  ok(!cand[2].kind && !cand[2].monument, 'a building with no point stays as it was');
+}
+console.log('points of interest ok');

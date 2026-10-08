@@ -8,6 +8,7 @@
 import { probe } from './perf.js';
 import { tileCentreMerc, mercYToLat, mercXToLon } from './geo.js';
 import { TYPE_NAMES, SIZE_NAMES } from './look.js';
+import { KIND_NAMES } from './buildings.js';
 import { elevationUrl } from './placetiles.js';
 import { WorkerPool } from './pool.js';
 import { regionAt, regionUniforms } from './facade.js';
@@ -176,7 +177,7 @@ export class TileLayer {
   // plus a close look at the tiles around a point (mercator metres).
   report(cmx, cmy) {
     const hist = [0, 0, 0, 0, 0, 0, 0];
-    const types = [0, 0, 0, 0, 0, 0, 0, 0], sizes = [0, 0, 0, 0];
+    const types = [0, 0, 0, 0, 0, 0, 0, 0], sizes = [0, 0, 0, 0], kinds = new Array(KIND_NAMES.length).fill(0);
     let seen = 0, kept = 0, tiles = 0, real = 0, rail = 0, aeroAreas = 0, aeroLines = 0, runways = 0, runwayNumbers = 0;
     for (const t of this.tiles.values()) {
       if (!t.stats || !t.stats.hist) continue;
@@ -185,6 +186,7 @@ export class TileLayer {
       real += t.stats.real || 0;
       if (t.stats.types) for (let i = 0; i < 8; i++) types[i] += t.stats.types[i];
       if (t.stats.sizes) for (let i = 0; i < 4; i++) sizes[i] += t.stats.sizes[i];
+      if (t.stats.kinds) for (let i = 1; i < kinds.length; i++) kinds[i] += t.stats.kinds[i] || 0;
       rail += t.stats.rail || 0; aeroAreas += t.stats.aeroAreas || 0; aeroLines += t.stats.aeroLines || 0;
       runways += t.stats.runways || 0; runwayNumbers += t.stats.runwayNumbers || 0;
     }
@@ -202,6 +204,7 @@ export class TileLayer {
     const out = { tiles, buildingsSeen: seen, buildingsKept: kept, ...(ovt ? { overture: ovt } : {}),
              withMapColour: real, byType: Object.fromEntries(TYPE_NAMES.map((n, i) => [n, types[i]])),
              bySize: Object.fromEntries(SIZE_NAMES.map((n, i) => [n, sizes[i]])),
+             byPointOfInterest: Object.fromEntries(KIND_NAMES.slice(1).map((n, i) => [n, kinds[i + 1]])),
              railLines: rail, airportAreas: aeroAreas, airportLines: aeroLines, runwayPieces: runways, runwayNumbers,
              heightBands: { none: hist[0], upTo5: hist[1], upTo10: hist[2], upTo25: hist[3], upTo50: hist[4], upTo100: hist[5], over100: hist[6] } };
     if (cmx !== undefined) {
