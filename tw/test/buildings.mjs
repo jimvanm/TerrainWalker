@@ -75,4 +75,23 @@ ok(Math.min(...y) === 140 && Math.max(...y) === 160, 'a floating part runs from 
   ] }, g, mb);
   ok(st.seen === 6 && JSON.stringify(st.hist) === JSON.stringify([1, 1, 1, 0, 1, 1, 1]), 'height bands counted: ' + st.hist.join(','));
 }
+// 10. faces mode (the building lab): each wall face has its own corners, and
+// each corner knows where it is on its wall. Off by default.
+{
+  const side = 300 / E * size14 * g.cosLat;             // one side, in true metres
+  const plain = run([poly([sq(1000, 1000, 300, 300)], { render_height: 30 })]);
+  ok(!plain.out.fac, 'without faces mode there is no wall data');
+  const mb = new MeshBuilder();
+  buildBuildings({ extent: E, features: [poly([sq(1000, 1000, 300, 300)], { render_height: 30 })] }, g, mb, undefined, { faces: true });
+  const o = mb.finish(), f = o.fac;
+  ok(o.verts === 4 * 4 + 4 && o.indices.length === (8 + 2) * 3, 'faces mode: 4 corners per face plus the roof, same triangles');
+  ok(f && f.length === o.verts * 4, 'four numbers per corner');
+  const near = (a, b) => Math.abs(a - b) < 1e-3;
+  // first face: corners at 0 and the side length; bottom half a metre down, top 30 m up
+  ok(near(f[0], 0) && near(f[1], side) && near(f[2], -0.5) && near(f[3], 30), 'bottom of a wall start: along 0, length, 0.5 m below, height 30');
+  ok(near(f[4], 0) && near(f[6], 30), 'top of the wall start: 30 m up');
+  ok(near(f[8], side) && near(f[9], side), 'the far corner is a whole side along');
+  const ry = ys(o).slice(16);
+  ok(ry.every((v) => v === 130), 'the roof is where it was');
+}
 console.log('buildings ok');

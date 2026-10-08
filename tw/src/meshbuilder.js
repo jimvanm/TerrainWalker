@@ -29,7 +29,11 @@ export class MeshBuilder {
       f[4 * i + 2] = this.pos[3 * i + 2];
       u[4 * i + 3] = this.col[i];
     }
-    return { vertices: buf, indices: new Uint32Array(this.idx), verts: n, info: new Uint32Array(this.info) };
+    const out = { vertices: buf, indices: new Uint32Array(this.idx), verts: n, info: new Uint32Array(this.info) };
+    // Optional: four numbers per vertex for windows drawn by the shader
+    // (buildings.js, opt.faces). Only buildings fill it, and only when asked.
+    if (this.fac) out.fac = new Float32Array(this.fac);
+    return out;
   }
 }
 

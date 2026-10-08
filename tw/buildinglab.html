@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Building lab</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #11161d; color: #dbe3ec; font: 13px/1.5 ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace; }
+  header { padding: 10px 16px; border-bottom: 1px solid #2a3340; }
+  h1 { font-size: 15px; margin: 0 0 4px; color: #ffd479; }
+  header p { margin: 0; color: #93a1b2; max-width: 1100px; }
+  #controls { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 4px 24px; padding: 10px 16px; border-bottom: 1px solid #2a3340; }
+  .ctl label { display: flex; justify-content: space-between; gap: 8px; }
+  .ctl label b { color: #ffd479; font-weight: 600; }
+  .ctl input[type=range] { width: 100%; }
+  #bar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 8px 16px; border-bottom: 1px solid #2a3340; }
+  input[type=text] { font: inherit; color: #dbe3ec; background: #1d2530; border: 1px solid #3a4552; border-radius: 3px; padding: 3px 8px; width: 190px; }
+  button, select { font: inherit; color: #dbe3ec; background: #1d2530; border: 1px solid #3a4552; border-radius: 3px; padding: 3px 10px; cursor: pointer; }
+  button:hover { border-color: #6d7d90; }
+  #status { color: #93a1b2; }
+  #wrap { position: relative; }
+  #view { display: block; width: 100%; height: 70vh; min-height: 360px; cursor: grab; touch-action: none; background: #9ebcd8; }
+  #view:active { cursor: grabbing; }
+  #divider { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; background: #ffd479; pointer-events: none; }
+  .tag { position: absolute; top: 8px; padding: 2px 8px; background: rgba(17,22,29,0.75); border-radius: 3px; pointer-events: none; }
+  #tagL { left: 8px; } #tagR { right: 8px; }
+  #hud { position: absolute; left: 8px; bottom: 8px; padding: 2px 8px; background: rgba(17,22,29,0.75); border-radius: 3px; pointer-events: none; }
+  .key { color: #6d7d90; padding: 8px 16px 16px; }
+  #settings { width: 100%; max-width: 760px; }
+  #error { display: none; color: #ff8080; white-space: pre-wrap; padding: 8px 16px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Building lab</h1>
+  <p>Do windows drawn by maths make the buildings worth walking past? Left of the yellow line is how the app
+     draws buildings today; right is the new way. Walk around, try a few places, move the sliders.
+     The settings line at the bottom is what the app would use; copy it and send it over.</p>
+</header>
+
+<div id="controls"></div>
+
+<div id="bar">
+  <select id="place"></select>
+  <input id="ll" type="text" placeholder="or lat, lon" spellcheck="false">
+  <button id="go">Go</button>
+  <label><input type="checkbox" id="split" checked> split</label>
+  <label><input type="checkbox" id="t-windows" checked> windows</label>
+  <label><input type="checkbox" id="t-ledges" checked> ledges</label>
+  <label><input type="checkbox" id="t-contact" checked> dark at the base</label>
+  <label><input type="checkbox" id="t-retro"> app's 5-bit colours</label>
+  <label><input type="checkbox" id="t-fog" checked> haze</label>
+  <span id="status"></span>
+</div>
+
+<div id="error"></div>
+<div id="wrap">
+  <canvas id="view"></canvas>
+  <div id="divider"></div>
+  <div class="tag" id="tagL">today</div>
+  <div class="tag" id="tagR">windows by maths</div>
+  <div id="hud"></div>
+</div>
+
+<div class="key">
+  Drag to look. W A S D or arrows to walk, E or Space up, Q or C down, Shift for 5× faster.
+  Mouse wheel changes walking speed. R puts you back on the street at the start.
+  The ground is flat here, on purpose: this is about the buildings.
+  <br><br>
+  Settings: <input id="settings" type="text" readonly>
+</div>
+
+<script type="module">
+import { VECTOR_TILEJSON } from './src/config.js';
+import { decodeMVT } from './src/mvt.js';
+import { buildBuildings } from './src/buildings.js';
+import { buildRoads } from './src/roads.js';
+import { MeshBuilder, rgba } from './src/meshbuilder.js';
+import { lonToMercX, latToMercY, mercToTile, tileCentreMerc, tileSizeMerc } from './src/geo.js';
+import { program, perspective, viewRot, SUN_DIR, uniforms } from './src/gl.js';
+import { AUTO_WALL_UNIFORM, AUTO_ROOF_UNIFORM } from './src/look.js';
+import { FACADE, MODE, LAB_VS, LAB_FS, settingsLine } from './src/facade.js';
+
+// Places: lat, lon, which way you face (degrees from north).
+const PLACES = [
+  ['Toronto: King and Bay', 43.6484, -79.3803, 340],
+  ['Toronto: houses in the Annex', 43.6703, -79.4040, 0],
+  ['Toronto: Queen West shops', 43.6476, -79.4045, 70],
+  ['Montréal: the Plateau', 45.5225, -73.5795, 330],
+  ['Vancouver: West End', 49.2848, -123.1330, 315],
+  ['Paris: near the Opéra', 48.8713, 2.3318, 0],
+  ['London: the City', 51.5133, -0.0870, 90],
+  ['New York: Midtown', 40.7549, -73.9840, 30],
+];
+const Z = 14, RADIUS = 1;     // 3 × 3 map tiles around the spot
+const EYE = 1.7;
+
+// Sliders: [key, label, min, max, step, shown as]
+const SLIDERS = [
+  ['floor', 'Floor height', 2.6, 5, 0.1, (v) => v.toFixed(1) + ' m'],
+  ['houseFloor', 'House floor height', 2.4, 4, 0.1, (v) => v.toFixed(1) + ' m'],
+  ['ground', 'Ground floor height', 3, 7, 0.1, (v) => v.toFixed(1) + ' m'],
+  ['bay', 'Window spacing', 1.5, 6, 0.1, (v) => v.toFixed(1) + ' m'],
+  ['win', 'Window width', 0.2, 1, 0.01, (v) => Math.round(v * 100) + '% of spacing'],
+  ['winH', 'Window height', 0.2, 0.9, 0.01, (v) => Math.round(v * 100) + '% of floor'],
+  ['tower', 'Tower glass width', 0.5, 1, 0.01, (v) => Math.round(v * 100) + '% of spacing'],
+  ['shine', 'Sky in the glass', 0, 1, 0.05, (v) => Math.round(v * 100) + '%'],
+];
+
+const F = { ...FACADE };
+const $ = (id) => document.getElementById(id);
+const ctl = $('controls');
+const showSettings = () => { $('settings').value = settingsLine(F); };
+for (const [key, label, min, max, step, fmt] of SLIDERS) {
+  const d = document.createElement('div');
+  d.className = 'ctl';
+  d.innerHTML = `<label><span>${label}</span><b></b></label><input type="range" min="${min}" max="${max}" step="${step}">`;
+  const inp = d.querySelector('input'), out = d.querySelector('b');
+  inp.value = F[key]; out.textContent = fmt(F[key]);
+  inp.addEventListener('input', () => { F[key] = Number(inp.value); out.textContent = fmt(F[key]); showSettings(); });
+  ctl.appendChild(d);
+}
+showSettings();
+PLACES.forEach(([name], i) => { const o = document.createElement('option'); o.value = i; o.textContent = name; $('place').appendChild(o); });
+
+// ---- GL ----------------------------------------------------------------------
+const canvas = $('view');
+const gl = canvas.getContext('webgl2', { antialias: true });
+if (!gl) { $('error').style.display = 'block'; $('error').textContent = 'WebGL2 is not available in this browser.'; throw new Error('no webgl2'); }
+const prog = program(gl, LAB_VS, LAB_FS);
+const U = uniforms(gl, prog, ['uProj', 'uView', 'uOff', 'uScale', 'uAutoWall', 'uAutoRoof', 'uSunDir', 'uSky', 'uMode', 'uF1', 'uF2']);
+const A = { pos: gl.getAttribLocation(prog, 'aPos'), col: gl.getAttribLocation(prog, 'aCol'),
+            info: gl.getAttribLocation(prog, 'aInfo'), fac: gl.getAttribLocation(prog, 'aFac') };
+const SKY = [0.62, 0.74, 0.86];
+
+function upload(m) {
+  if (!m.indices.length) return null;
+  const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
+  const bufs = [];
+  const buf = (data) => { const b = gl.createBuffer(); bufs.push(b); gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW); };
+  buf(m.vertices);
+  gl.enableVertexAttribArray(A.pos); gl.vertexAttribPointer(A.pos, 3, gl.FLOAT, false, 16, 0);
+  gl.enableVertexAttribArray(A.col); gl.vertexAttribPointer(A.col, 4, gl.UNSIGNED_BYTE, true, 16, 12);
+  if (m.info && m.info.length && A.info >= 0) { buf(m.info); gl.enableVertexAttribArray(A.info); gl.vertexAttribPointer(A.info, 4, gl.UNSIGNED_BYTE, true, 4, 0); }
+  else if (A.info >= 0) gl.disableVertexAttribArray(A.info);
+  if (m.fac && A.fac >= 0) { buf(m.fac); gl.enableVertexAttribArray(A.fac); gl.vertexAttribPointer(A.fac, 4, gl.FLOAT, false, 16, 0); }
+  else if (A.fac >= 0) gl.disableVertexAttribArray(A.fac);
+  const ib = gl.createBuffer(); bufs.push(ib);
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, m.indices, gl.STATIC_DRAW);
+  gl.bindVertexArray(null);
+  return { vao, bufs, count: m.indices.length };
+}
+function free(d) { if (!d) return; gl.deleteVertexArray(d.vao); d.bufs.forEach((b) => gl.deleteBuffer(b)); }
+
+// ---- loading a place ---------------------------------------------------------
+let template = null;
+let tiles = [];            // { c: centre merc, draws: [...] }
+let scale = 1;             // cos(latitude) of the spot
+let loadId = 0;
+const cam = { mx: 0, my: 0, alt: EYE, yaw: 0, pitch: 0.05, speed: 4 };
+let start = null;
+
+async function getTemplate() {
+  if (template) return template;
+  const j = await (await fetch(VECTOR_TILEJSON, { mode: 'cors' })).json();
+  template = j.tiles[0];
+  return template;
+}
+
+async function loadPlace(lat, lon, facing) {
+  const id = ++loadId;
+  for (const t of tiles) t.draws.forEach(free);
+  tiles = [];
+  scale = Math.cos(lat * Math.PI / 180);
+  cam.mx = lonToMercX(lon); cam.my = latToMercY(lat); cam.alt = EYE;
+  cam.yaw = facing * Math.PI / 180; cam.pitch = 0.05;
+  start = { ...cam };
+  const status = $('status');
+  let tpl;
+  try { tpl = await getTemplate(); } catch (e) { status.textContent = 'could not reach the map service: ' + e.message; return; }
+  const t0 = mercToTile(cam.mx, cam.my, Z);
+  const cx = Math.floor(t0.x), cy = Math.floor(t0.y);
+  const list = [];
+  for (let dy = -RADIUS; dy <= RADIUS; dy++) for (let dx = -RADIUS; dx <= RADIUS; dx++) list.push([cx + dx, cy + dy]);
+  list.sort((a, b) => (Math.abs(a[0] - cx) + Math.abs(a[1] - cy)) - (Math.abs(b[0] - cx) + Math.abs(b[1] - cy)));
+  let done = 0, kept = 0;
+  status.textContent = `map 0/${list.length}`;
+  await Promise.all(list.map(async ([x, y]) => {
+    try {
+      const url = tpl.replace('{z}', Z).replace('{x}', x).replace('{y}', y);
+      const res = await fetch(url, { mode: 'cors' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const buf = new Uint8Array(await res.arrayBuffer());
+      if (id !== loadId) return;
+      const want = ['transportation', 'aeroway', 'building', 'landuse'];
+      const L = buf.length ? decodeMVT(buf, want, 'class', want) : {};
+      const c = tileCentreMerc(x, y, Z), size = tileSizeMerc(Z);
+      const g = { size14: size, size12: size, bx: size / 2, by: size / 2, cell: size / 8,
+                  cosLat: Math.cos(lat * Math.PI / 180), nodes: null, cx: c.x, cy: c.y, hAt: () => 0 };
+      const rb = new MeshBuilder();
+      // the ground: one flat square under the whole tile
+      const gc = rgba(118, 122, 112), h = size / 2;
+      const q = [rb.vert(-h, -0.05, -h, gc), rb.vert(h, -0.05, -h, gc), rb.vert(h, -0.05, h, gc), rb.vert(-h, -0.05, h, gc)];
+      rb.tri(q[0], q[2], q[1]); rb.tri(q[0], q[3], q[2]);
+      buildRoads(L.transportation, g, rb, L.aeroway);
+      const bb = new MeshBuilder();
+      const st = buildBuildings(L.building, g, bb, 600000, { landuse: L.landuse, faces: true });
+      kept += st.kept;
+      tiles.push({ c, draws: [upload(rb.finish()), upload(bb.finish())].filter(Boolean) });
+    } catch (e) {
+      console.warn('tile', x, y, e);
+    }
+    done++;
+    if (id === loadId) status.textContent = done < list.length ? `map ${done}/${list.length}` : `${kept} buildings`;
+  }));
+}
+
+// ---- moving ------------------------------------------------------------------
+const keys = new Set();
+addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT' && e.target.type === 'text') return;
+  keys.add(e.code);
+  if (e.code === 'KeyR' && start) Object.assign(cam, start);
+  if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
+});
+addEventListener('keyup', (e) => keys.delete(e.code));
+addEventListener('blur', () => keys.clear());
+let drag = null;
+canvas.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY }; canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener('pointermove', (e) => {
+  if (!drag) return;
+  cam.yaw += (e.clientX - drag.x) * 0.004;
+  cam.pitch = Math.max(-1.5, Math.min(1.5, cam.pitch - (e.clientY - drag.y) * 0.004));
+  drag = { x: e.clientX, y: e.clientY };
+});
+canvas.addEventListener('pointerup', () => { drag = null; });
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  cam.speed = Math.max(0.5, Math.min(200, cam.speed * (e.deltaY < 0 ? 1.25 : 0.8)));
+}, { passive: false });
+
+function move(dt) {
+  const k = (c) => keys.has(c);
+  let f = 0, s = 0, up = 0;
+  if (k('KeyW') || k('ArrowUp')) f += 1;
+  if (k('KeyS') || k('ArrowDown')) f -= 1;
+  if (k('KeyD') || k('ArrowRight')) s += 1;
+  if (k('KeyA') || k('ArrowLeft')) s -= 1;
+  if (k('KeyE') || k('Space')) up += 1;
+  if (k('KeyQ') || k('KeyC')) up -= 1;
+  const v = cam.speed * (k('ShiftLeft') || k('ShiftRight') ? 5 : 1) * dt;
+  const sy = Math.sin(cam.yaw), cy = Math.cos(cam.yaw);
+  const east = (f * sy + s * cy) * v, north = (f * cy - s * sy) * v;
+  cam.mx += east / scale; cam.my += north / scale;
+  cam.alt = Math.max(EYE, cam.alt + up * v);
+}
+
+// ---- drawing -----------------------------------------------------------------
+const proj = new Float32Array(16), view = new Float32Array(16);
+function modeBits(today) {
+  if (today) return MODE.retro | ($('t-fog').checked ? MODE.fog : 0);
+  let m = 0;
+  if ($('t-windows').checked) m |= MODE.windows;
+  if ($('t-ledges').checked) m |= MODE.ledges;
+  if ($('t-contact').checked) m |= MODE.contact;
+  if ($('t-retro').checked) m |= MODE.retro;
+  if ($('t-fog').checked) m |= MODE.fog;
+  return m;
+}
+function drawAll(mode) {
+  gl.uniform1i(U.uMode, mode);
+  for (const t of tiles) {
+    gl.uniform3f(U.uOff, (t.c.x - cam.mx) * scale, -cam.alt, -(t.c.y - cam.my) * scale);
+    for (const d of t.draws) {
+      gl.bindVertexArray(d.vao);
+      if (A.info >= 0) gl.vertexAttrib4f(A.info, 0, 0, 0, 0);
+      if (A.fac >= 0) gl.vertexAttrib4f(A.fac, 0, 0, 0, 0);
+      gl.drawElements(gl.TRIANGLES, d.count, gl.UNSIGNED_INT, 0);
+    }
+  }
+  gl.bindVertexArray(null);
+}
+
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  move(dt);
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  const w = Math.round(canvas.clientWidth * dpr), h = Math.round(canvas.clientHeight * dpr);
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  gl.viewport(0, 0, w, h);
+  gl.enable(gl.DEPTH_TEST);
+  gl.disable(gl.CULL_FACE);
+  gl.clearColor(SKY[0], SKY[1], SKY[2], 1);
+  gl.disable(gl.SCISSOR_TEST);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.useProgram(prog);
+  perspective(proj, 60 * Math.PI / 180, w / h, 0.3, 30000);
+  viewRot(view, cam.yaw, cam.pitch);
+  gl.uniformMatrix4fv(U.uProj, false, proj);
+  gl.uniformMatrix4fv(U.uView, false, view);
+  gl.uniform1f(U.uScale, scale);
+  gl.uniform3fv(U.uAutoWall, AUTO_WALL_UNIFORM);
+  gl.uniform3fv(U.uAutoRoof, AUTO_ROOF_UNIFORM);
+  gl.uniform3f(U.uSunDir, SUN_DIR[0], SUN_DIR[1], SUN_DIR[2]);
+  gl.uniform3f(U.uSky, SKY[0], SKY[1], SKY[2]);
+  gl.uniform4f(U.uF1, F.floor, F.houseFloor, F.ground, F.bay);
+  gl.uniform4f(U.uF2, F.win, F.winH, F.tower, F.shine);
+  const split = $('split').checked;
+  $('divider').style.display = $('tagL').style.display = split ? '' : 'none';
+  if (split) {
+    gl.enable(gl.SCISSOR_TEST);
+    gl.scissor(0, 0, Math.floor(w / 2), h); drawAll(modeBits(true));
+    gl.scissor(Math.floor(w / 2), 0, w - Math.floor(w / 2), h); drawAll(modeBits(false));
+    gl.disable(gl.SCISSOR_TEST);
+  } else drawAll(modeBits(false));
+  $('hud').textContent = `${cam.alt.toFixed(1)} m up · speed ${cam.speed.toFixed(1)} m/s`;
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+const goPlace = () => { const p = PLACES[Number($('place').value)]; loadPlace(p[1], p[2], p[3]); };
+$('place').addEventListener('change', goPlace);
+$('go').addEventListener('click', () => {
+  const m = /(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)/.exec($('ll').value);
+  if (m) loadPlace(Number(m[1]), Number(m[2]), 0);
+  else $('status').textContent = 'type a latitude and longitude, e.g. 43.6484, -79.3803';
+});
+$('ll').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('go').click(); });
+goPlace();
+</script>
+</body>
+</html>

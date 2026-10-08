@@ -212,6 +212,11 @@ function recordOutline(stats, c, ring, g) {
 // opt.mask      : circles { x, y, r } (tile-local) where no building is drawn: landmark sites
 // opt.sunk      : how far walls start below the ground, for coarse far terrain
 // opt.landuse   : the tile's land use layer, used to give buildings a type
+// opt.faces     : give every wall face its own four corners, and record for each
+//                 corner where it sits on its wall (mb.fac, four numbers: metres
+//                 along the face, the face's length, metres above the building's
+//                 base, the building's height). For windows drawn by the shader
+//                 (buildinglab.html). Off: walls share corners, as before.
 export function buildBuildings(layer, g, mb, maxTris = BUILDING_TRIS, opt = {}) {
   const sunk = opt.sunk === undefined ? SUNK : opt.sunk;
   // hist: how the data labels building heights, as a count per band:
@@ -289,7 +294,7 @@ export function buildBuildings(layer, g, mb, maxTris = BUILDING_TRIS, opt = {}) 
   for (const b of cand) {
     if (used + b.tris > maxTris) { stats.dropped++; continue; }
     used += b.tris;
-    emit(b, mb, hAt);
+    emit(b, mb, hAt, opt.faces ? g.cosLat : 0);
     if (b.masked) { stats.ends[2] = mb.idx.length; continue; }   // hidden normally; last, after every tier
     stats.kept++;
     stats.types[b.type]++;
@@ -315,7 +320,9 @@ export function sizeGroup(b) {
   return b.area >= SIZE_LIMITS.bigArea ? 1 : 0;
 }
 
-function emit(b, mb, hAt) {
+// faces: 0 for shared wall corners (the app), or cos(latitude) to give each
+// wall face its own corners with their place on the wall (see opt.faces).
+function emit(b, mb, hAt, faces = 0) {
   // The vertex colour is the map colour when there is one (the shader shades
   // it), else the old baked colour, which is only a fallback.
   const base = PALETTE[b.hash % PALETTE.length];
@@ -333,7 +340,28 @@ function emit(b, mb, hAt) {
   });
   const top = gMax + b.height;
 
-  for (let k = 0; k < b.rings.length; k++) {
+  const fac = faces ? (mb.fac || (mb.fac = [])) : null;
+  for (let k = 0; fac && k < b.rings.length; k++) {
+    const r = b.rings[k], gs = ground[k], m = gs.length;
+    for (let i = 0; i < m; i++) {
+      const j = (i + 1) % m;
+      const len = Math.hypot(r[2 * j] - r[2 * i], r[2 * j + 1] - r[2 * i + 1]) * faces;   // true metres
+      const corner = (q, u) => {
+        const bottom = b.minh > 0 ? gs[q] + b.minh : gs[q] - b.sunk;
+        const a = mb.vert(r[2 * q], bottom, r[2 * q + 1], wallBot, iBot);
+        mb.vert(r[2 * q], top, r[2 * q + 1], wallTop, iTop);
+        // Heights count from the highest corner of the footprint, the same
+        // place the roof is measured from, so floors line up with the roof.
+        fac.push(u, len, bottom - gMax, b.height, u, len, top - gMax, b.height);
+        return a;
+      };
+      const a = corner(i, 0), c = corner(j, len);
+      mb.tri(a, c, a + 1);
+      mb.tri(c, c + 1, a + 1);
+    }
+  }
+
+  for (let k = 0; !fac && k < b.rings.length; k++) {
     const r = b.rings[k], gs = ground[k], m = gs.length;
     const first = mb.verts;
     for (let i = 0; i < m; i++) {
@@ -353,7 +381,10 @@ function emit(b, mb, hAt) {
   const roofBase = mb.verts;
   const ids = [];
   for (const r of b.rings) {
-    for (let i = 0; i < r.length / 2; i++) { ids.push(mb.verts - roofBase); mb.vert(r[2 * i], top, r[2 * i + 1], roof, iRoof); }
+    for (let i = 0; i < r.length / 2; i++) {
+      ids.push(mb.verts - roofBase); mb.vert(r[2 * i], top, r[2 * i + 1], roof, iRoof);
+      if (fac) fac.push(0, 0, b.height, b.height);
+    }
   }
   const t = triangulate(b.rings);
   for (let i = 0; i < t.tris.length; i += 3) {
