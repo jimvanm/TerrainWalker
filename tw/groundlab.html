@@ -59,6 +59,7 @@
 
 <div class="key">
   Drag to look. W A S D or arrows to move, E or Space up, Q or C down, Shift for 5× faster.
+  G walks on the ground (eyes 1.7 m up, on the survey's ground) or flies.
   Mouse wheel changes speed. R goes back to the start.
   <br><span id="credit">Elevation on the right: Contains information licensed under the Open Government Licence – Canada (Natural Resources Canada, HRDEM).
   Left: Mapzen / AWS Open Data Terrain Tiles. Water: © OpenStreetMap contributors, OpenMapTiles via OpenFreeMap.</span>
@@ -302,7 +303,7 @@ function buildMesh(h, miss, water, showWater) {
 const free = (m) => { if (m) { gl.deleteVertexArray(m.vao); m.bufs.forEach((b) => gl.deleteBuffer(b)); } };
 
 // ---- loading ----------------------------------------------------------------
-const cam = { x: 0, y: 0, z: 0, yaw: 0, pitch: -0.3, speed: 20 };
+const cam = { x: 0, y: 0, z: 0, yaw: 0, pitch: -0.3, speed: 20, walk: false };
 let start = null, loadId = 0, data = null;
 window.__cam = cam;   // for automated looks at the lab
 
@@ -362,6 +363,7 @@ addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT' && e.target.type === 'text') return;
   keys.add(e.code);
   if (e.code === 'KeyR' && start) Object.assign(cam, start);
+  if (e.code === 'KeyG') { cam.walk = !cam.walk; if (cam.walk) cam.speed = 4; else cam.speed = 20; }
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
 });
 addEventListener('keyup', (e) => keys.delete(e.code));
@@ -375,7 +377,7 @@ canvas.addEventListener('pointermove', (e) => {
   drag = { x: e.clientX, y: e.clientY };
 });
 canvas.addEventListener('pointerup', () => { drag = null; });
-canvas.addEventListener('wheel', (e) => { e.preventDefault(); cam.speed = Math.max(1, Math.min(1000, cam.speed * (e.deltaY < 0 ? 1.25 : 0.8))); }, { passive: false });
+canvas.addEventListener('wheel', (e) => { e.preventDefault(); cam.speed = Math.max(0.5, Math.min(1000, cam.speed * (e.deltaY < 0 ? 1.25 : 0.8))); }, { passive: false });
 function move(dt) {
   const k = (c) => keys.has(c);
   let f = 0, s = 0, up = 0;
@@ -385,6 +387,20 @@ function move(dt) {
   const v = cam.speed * (k('ShiftLeft') || k('ShiftRight') ? 5 : 1) * dt;
   const sy = Math.sin(cam.yaw), cy = Math.cos(cam.yaw);
   cam.x += (f * sy + s * cy) * v; cam.z -= (f * cy - s * sy) * v; cam.y += up * v;
+  // Walking: eyes 1.7 m above the ground (the survey's where there is one),
+  // and never under it while flying either.
+  const g = groundAt(cam.x, cam.z);
+  if (g !== null) { if (cam.walk) cam.y = g * Number($('exag').value) + 1.7; else cam.y = Math.max(cam.y, g * Number($('exag').value) + 1.7); }
+}
+
+// Ground height under a point, from the survey side when it loaded, else today's.
+function groundAt(x, z) {
+  if (!data || !area) return null;
+  const h = data.right ? data.right.h : data.left, N = area.N;
+  const u = (x + area.S / 2) / area.step, v = (z + area.S / 2) / area.step;
+  if (u < 0 || v < 0 || u > N - 1 || v > N - 1) return null;
+  const i = Math.min(N - 2, Math.floor(u)), j = Math.min(N - 2, Math.floor(v)), fu = u - i, fv = v - j;
+  return (h[j * N + i] * (1 - fu) + h[j * N + i + 1] * fu) * (1 - fv) + (h[(j + 1) * N + i] * (1 - fu) + h[(j + 1) * N + i + 1] * fu) * fv;
 }
 
 const proj = new Float32Array(16), view = new Float32Array(16);
@@ -416,7 +432,7 @@ function frame(now) {
     gl.scissor(Math.floor(w / 2), 0, w - Math.floor(w / 2), h); draw(meshes.right || meshes.left);
     gl.disable(gl.SCISSOR_TEST);
   } else draw(meshes.right || meshes.left);
-  $('hud').textContent = `${cam.y.toFixed(0)} m · speed ${cam.speed.toFixed(0)} m/s`;
+  $('hud').textContent = `${cam.walk ? 'walking' : 'flying'} · ${cam.y.toFixed(0)} m · speed ${cam.speed.toFixed(1)} m/s`;
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
