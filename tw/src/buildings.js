@@ -16,7 +16,7 @@ import { nodeHeightAt, GRID } from './heightgrid.js';
 import { rgba, info, INFO_BUILDING, INFO_REAL, INFO_ROOF, INFO_MASKED } from './meshbuilder.js';
 import { LANDUSE_TYPE, TALL, SIZE_LIMITS } from './look.js';
 import { triangulate, signedArea } from './earclip.js';
-import { fitRect, pitchable, pitchFor, emitPitched } from './houseroof.js';
+import { fitRect, pitchable, pitchFor, emitPitched, turnRect, emitSkillion } from './houseroof.js';
 import { roofKind, defaultRoofHeight, emitProfiled, PROFILES } from './roofshapes.js';
 
 const PALETTE = [
@@ -290,7 +290,9 @@ export function buildBuildings(layer, g, mb, maxTris = BUILDING_TRIS, opt = {}) 
       mx /= rings[0].length / 2; my /= rings[0].length / 2;
       // Lab only (faces mode): details from richer data such as Overture's.
       const extra = opt.faces ? { roofShape: roofKind(p.roof_shape), roofH: Number(p.roof_height) > 0 ? Number(p.roof_height) : 0,
-        roofColour: parseColour(p.roof_colour), monument: !!p.monument, floors: Number(p.num_floors) > 0 ? Number(p.num_floors) : 0 } : null;
+        roofColour: parseColour(p.roof_colour), monument: !!p.monument,
+        roofDir: p.roof_direction !== undefined && p.roof_direction !== null && p.roof_direction !== '' ? Number(p.roof_direction) : null,
+        roofOrient: p.roof_orientation || null, floors: Number(p.num_floors) > 0 ? Number(p.num_floors) : 0 } : null;
       cand.push({ ...extra, rings, height, known, minh, area, hash, mx, my, tier: hit ? 0 : tier, sunk, colour, type, masked: !!hit,
         tris: 3 * nv, rank: (height + 3) * Math.sqrt(Math.max(area, 1)) });
     }
@@ -450,9 +452,21 @@ function emitFaces(b, mb, hAt, k) {
 
   // Gable and hip roofs: from the map, or any house close to a rectangle.
   const isHouse = sizeGroup(b) === 0 && !(b.minh > 0) && !b.roofShape;
-  if (single && (kind === 'gabled' || kind === 'hipped' || isHouse)) {
-    const rect = fitRect(b.rings[0]);
-    const fits = rect && (isHouse ? pitchable(rect, outline, k) : outline / rect.area >= 0.7);
+  if (single && (kind === 'gabled' || kind === 'hipped' || kind === 'skillion' || isHouse)) {
+    const rect0 = fitRect(b.rings[0]);
+    const fits = rect0 && (isHouse ? pitchable(rect0, outline, k) : outline / rect0.area >= 0.7);
+    const { rect, low } = fits ? turnRect(rect0, b.roofDir, b.roofOrient) : { rect: rect0, low: -1 };
+    if (fits && kind === 'skillion') {
+      const rise = b.roofH || 2 * rect.W * k * Math.tan(12 * Math.PI / 180);
+      const eave = Math.max((b.minh || 0) + 2.8, b.known ? b.height - rise : b.height);
+      const put = (x, y, z, isRoof, f) => {
+        const id = mb.vert(x, y, z, isRoof ? roofC : wallTop, isRoof ? iRoof : (f[2] <= (b.minh || 0) ? iBot : iTop));
+        fac.push(f[0], f[1], f[2], f[3]); st.push(sty(age, mon, floors));
+        return id;
+      };
+      emitSkillion(rect, { base: gMax, gAt: hAt, sunk: b.sunk, eave, k, rise, low, minh: b.minh || 0 }, put, (a, c, d) => mb.tri(a, c, d));
+      return;
+    }
     if (fits) {
       const pitch = pitchFor(age);
       const rise = b.roofH || rect.W * k * Math.tan(pitch);
@@ -471,7 +485,7 @@ function emitFaces(b, mb, hAt, k) {
         put, (a, c, d) => mb.tri(a, c, d));
       return;
     }
-    if (kind === 'gabled' || kind === 'hipped') kind = null;
+    if (kind === 'gabled' || kind === 'hipped' || kind === 'skillion') kind = null;
   }
 
   // Domes, onions, pyramids and spires: walls to the eaves, then the shape.

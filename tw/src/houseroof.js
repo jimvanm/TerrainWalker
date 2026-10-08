@@ -108,3 +108,44 @@ export function emitPitched(rect, o, put, tri) {
   }
   return { top: ridge };
 }
+
+// Turns the fitted rectangle so its ridge lies the way the map says. dirDeg:
+// the way the roof's slopes face, as a compass bearing (OpenStreetMap's
+// roof:direction), or null; orient: 'along' or 'across' the long side, or
+// null. Returns the rectangle to build on, with low: which side (+1 or -1
+// across it) a single-slope roof comes down to.
+export function turnRect(rect, dirDeg, orient) {
+  let r = rect, low = -1;
+  const swap = (q) => ({ ...q, L: q.W, W: q.L, ax: q.bx, ay: q.by, bx: -q.ax, by: -q.ay });
+  if (Number.isFinite(dirDeg)) {
+    const t = dirDeg * Math.PI / 180, dx = Math.sin(t), dy = -Math.cos(t);   // east and south, as the outline's units
+    if (Math.abs(dx * r.ax + dy * r.ay) > Math.abs(dx * r.bx + dy * r.by)) r = swap(r);
+    low = dx * r.bx + dy * r.by >= 0 ? 1 : -1;
+  } else if (orient === 'across') r = swap(r);
+  return { rect: r, low };
+}
+
+// A single-slope roof over the rectangle: high along one long side, down to
+// the eaves on the other (low: +1 or -1, which side). Same put and tri as
+// emitPitched; rise: metres from the low eaves to the high edge.
+export function emitSkillion(rect, o, put, tri) {
+  const { cx, cy, ax, ay, bx, by, L, W } = rect;
+  const { base, gAt, sunk, eave, k, rise, low, minh = 0 } = o;
+  const hAt = (t) => base + eave + rise * (1 - (t * low + 1) / 2);
+  const P = (s, t) => [cx + ax * s * L + bx * t * W, cy + ay * s * L + by * t * W];
+  const ST = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+  const sideLen = [2 * L * k, 2 * W * k, 2 * L * k, 2 * W * k];
+  const fb = (pt) => (minh > 0 ? base + minh : gAt(pt[0], pt[1]) - sunk);
+  for (let i = 0; i < 4; i++) {
+    const [s0, t0] = ST[i], [s1, t1] = ST[(i + 1) % 4];
+    const p = P(s0, t0), q = P(s1, t1), len = sideLen[i];
+    const a = put(p[0], fb(p), p[1], false, [0, len, fb(p) - base, eave], false);
+    put(p[0], hAt(t0), p[1], false, [0, len, hAt(t0) - base, eave], false);
+    const c = put(q[0], fb(q), q[1], false, [len, len, fb(q) - base, eave], false);
+    put(q[0], hAt(t1), q[1], false, [len, len, hAt(t1) - base, eave], false);
+    tri(a, c, a + 1); tri(c, c + 1, a + 1);
+  }
+  const oh = 0.3 / k, so = (L + oh) / L, to = (W + oh) / W;
+  const R = ST.map(([s, t]) => { const pt = P(s * so, t * to); return put(pt[0], hAt(t * to), pt[1], true, [0, 0, hAt(t * to) - base, eave], false); });
+  tri(R[0], R[1], R[2]); tri(R[0], R[2], R[3]);
+}

@@ -13,7 +13,8 @@ const SHAPES = {
   pyramidal: 'pyramid', pyramid: 'pyramid', cone: 'spire', conical: 'spire', spire: 'spire',
   gabled: 'gabled', half_hipped: 'gabled', 'half-hipped': 'gabled', saltbox: 'gabled', gambrel: 'gabled', round: 'gabled',
   hipped: 'hipped', mansard: 'hipped', side_hipped: 'hipped',
-  flat: 'flat', skillion: 'flat', butterfly: 'flat',   // said to be flat: no house roof added
+  skillion: 'skillion', lean_to: 'skillion',
+  flat: 'flat', butterfly: 'flat',   // said to be flat: no house roof added
 };
 export const roofKind = (shape) => SHAPES[String(shape || '').toLowerCase()] || null;
 

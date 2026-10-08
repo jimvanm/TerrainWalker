@@ -166,9 +166,14 @@ void main() {
   if (uToday == 0 && fl != 0 && (fl & 2) != 0) {
     vec3 m = aCol.rgb;
     float l = dot(m, vec3(0.299, 0.587, 0.114));
-    vec3 mc = clamp(mix(vec3(l), m, 0.75), 0.0, 1.0) * 0.8 + 0.1;
+    // Loud colours ("red", "yellow") are pulled much further toward grey than
+    // quiet ones, so Osgoode Hall comes out brick, not fire-engine red.
+    float hi = max(m.r, max(m.g, m.b)), lo = min(m.r, min(m.g, m.b));
+    float sat = hi > 0.0 ? (hi - lo) / hi : 0.0;
+    float keep = mix(0.75, 0.32, smoothstep(0.35, 0.9, sat));
+    vec3 mc = clamp(mix(vec3(l), m, keep), 0.0, 1.0) * 0.78 + 0.12;
     vMap = vec4(mc, 1.0);
-    vCol = (fl & 4) != 0 ? mc * 0.8 : mc * aInfo.b;
+    vCol = (fl & 4) != 0 ? mc * 0.95 : mc * aInfo.b;
   }
   vFac = aFac;
   gl_Position = uProj * uView * vec4(vPos, 1.0);

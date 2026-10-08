@@ -62,7 +62,9 @@
 <div id="bar2">
   <label>buildings from <select id="src"><option value="ofm">our map (OpenFreeMap)</option><option value="ovt">Overture</option></select></label>
   <label>Overture release <input id="rel" type="text" spellcheck="false" style="width:120px"></label>
+  <label>left side <select id="left"><option value="today">today's app</option><option value="ours">our map, new look</option></select></label>
   <label>zoom <select id="ozoom"><option value="0">file's finest</option><option>13</option><option>14</option><option>15</option><option>16</option></select></label>
+  <span id="compare"></span>
   <span id="counts"></span>
 </div>
 
@@ -85,7 +87,7 @@
 
 <script type="module">
 import { VECTOR_TILEJSON } from './src/config.js';
-import { decodeMVT } from './src/mvt.js';
+import { decodeMVT, POLYGON } from './src/mvt.js';
 import { buildBuildings } from './src/buildings.js';
 import { buildRoads } from './src/roads.js';
 import { MeshBuilder, rgba } from './src/meshbuilder.js';
@@ -193,7 +195,8 @@ const fmt = (n) => n.toLocaleString('en-CA');
 
 async function loadPlace(lat, lon, facing, keepCamera = false) {
   const id = ++loadId;
-  for (const t of tiles) { free(t.roads); free(t.now); free(t.today); }
+  for (const t of tiles) { free(t.roads); free(t.ours); free(t.today); free(t.ovt); }
+  tallies.ours = newTally(); tallies.ovt = null; $('compare').textContent = '';
   tiles = [];
   place = [lat, lon, facing];
   const kept0 = keepCamera ? { ...cam } : null;
@@ -234,24 +237,56 @@ async function loadPlace(lat, lon, facing, keepCamera = false) {
       const q = [rb.vert(-h, -0.05, -h, gc), rb.vert(h, -0.05, -h, gc), rb.vert(h, -0.05, h, gc), rb.vert(-h, -0.05, h, gc)];
       rb.tri(q[0], q[2], q[1]); rb.tri(q[0], q[3], q[2]);
       buildRoads(L.transportation, g, rb, L.aeroway);
-      let now = null;
-      if (!overture) {
-        const bb = new MeshBuilder();
-        const st = buildBuildings(L.building, g, bb, 600000, { landuse: L.landuse, faces: true });
-        kept += st.kept;
-        now = upload(bb.finish());
-      }
+      const bb = new MeshBuilder();
+      const st = buildBuildings(L.building, g, bb, 600000, { landuse: L.landuse, faces: true });
+      if (!overture) kept += st.kept;
+      tally(tallies.ours, L.building, c, size, (p) => p.hide_3d !== true, (p) => Number(p.render_height) > 3);
       const ob = new MeshBuilder();              // today's buildings, for the left side
       buildBuildings(L.building, g, ob, 600000, { landuse: L.landuse });
       const lat0 = mercYToLat(c.y), lon0 = mercXToLon(c.x);
-      tiles.push({ c, reg: regionUniforms(regionAt(lat0, lon0)), roads: upload(rb.finish()), now, today: upload(ob.finish()) });
+      tiles.push({ c, reg: regionUniforms(regionAt(lat0, lon0)), roads: upload(rb.finish()), ours: upload(bb.finish()), today: upload(ob.finish()) });
     } catch (e) {
       console.warn('tile', x, y, e);
     }
     done++;
     if (id === loadId) status.textContent = done < list.length ? `map ${done}/${list.length}` : overture ? '' : `${kept} buildings`;
   }));
+  showCompare();
   if (ovtDone) await ovtDone;
+}
+
+// Like-for-like counts: buildings whose middle falls in the same 2.6 km
+// square round the starting spot, from each source.
+const tallies = { ours: null, ovt: null, box: null };
+const newTally = () => ({ n: 0, h: 0, area: 0 });
+function tally(t, layer, c, size, keep, hasHeight) {
+  if (!t || !layer || !start) return;
+  const half = 1300 / scale, E = layer.extent;
+  for (const f of layer.features) {
+    if (f.type !== POLYGON || !f.parts || !f.parts.length) continue;
+    const p = f.props || {};
+    if (!keep(p)) continue;
+    const r = f.parts[0];
+    let sx = 0, sy = 0, a = 0;
+    const n = r.length / 2;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      sx += r[2 * i]; sy += r[2 * i + 1];
+      a += r[2 * i] * r[2 * j + 1] - r[2 * j] * r[2 * i + 1];
+    }
+    const mx = c.x + (sx / n / E - 0.5) * size, my = c.y - (sy / n / E - 0.5) * size;
+    if (Math.abs(mx - start.mx) > half || Math.abs(my - start.my) > half) continue;
+    t.n++;
+    if (hasHeight(p)) t.h++;
+    t.area += Math.abs(a / 2) * (size / E) * (size / E) * scale * scale;
+  }
+}
+function showCompare() {
+  const line = (name, t) => `${name}: <b>${fmt(t.n)}</b> buildings, ${fmt(t.h)} with a height, ${(t.area / 1e6).toFixed(2)} km² of ground`;
+  const parts = [];
+  if (tallies.ours) parts.push(line('our map', tallies.ours));
+  if (tallies.ovt) parts.push(line('Overture', tallies.ovt));
+  $('compare').innerHTML = parts.length ? `Same 2.6 km square, roughly. ${parts.join(' · ')}.<br>` : '';
 }
 
 // Overture's buildings: the zoom 13 tiles within about 1.3 km of the spot,
@@ -273,6 +308,7 @@ async function loadOverture(id, lat) {
   for (let y = Math.floor(a.y); y <= Math.floor(b.y); y++) for (let x = Math.floor(a.x); x <= Math.floor(b.x); x++) list.push([x, y]);
   out.textContent = `Overture: reading ${list.length} tiles...`;
   const counts = { layers: {}, keys: {}, roof: {}, subtype: {}, facade: {}, roofMat: {} };
+  tallies.ovt = newTally();
   let kept = 0, failed = null;
   await Promise.all(list.map(async ([x, y]) => {
     try {
@@ -280,12 +316,14 @@ async function loadOverture(id, lat) {
       if (id !== loadId || !bytes) return;
       const L = decodeMVT(bytes, anyLayer, 'class', anyLayer);
       addCounts(counts, overtureCounts(L));
+      for (const [n, layer] of Object.entries(L)) if (/build/.test(n) && !/part/.test(n))
+        tally(tallies.ovt, layer, tileCentreMerc(x, y, Zo), tileSizeMerc(Zo), (p) => p.is_underground !== true, (p) => Number(p.height) > 0 || Number(p.num_floors) > 0);
       const c = tileCentreMerc(x, y, Zo), size = tileSizeMerc(Zo);
       const g = { size14: size, size12: size, bx: size / 2, by: size / 2, cell: size / 8,
                   cosLat: Math.cos(lat * Math.PI / 180), nodes: null, cx: c.x, cy: c.y, hAt: () => 0 };
       const bb = new MeshBuilder();
       kept += buildBuildings(overtureBuildings(L), g, bb, 2000000, { faces: true }).kept;
-      tiles.push({ c, reg: regionUniforms(regionAt(mercYToLat(c.y), mercXToLon(c.x))), roads: null, now: upload(bb.finish()), today: null });
+      tiles.push({ c, reg: regionUniforms(regionAt(mercYToLat(c.y), mercXToLon(c.x))), roads: null, ovt: upload(bb.finish()) });
     } catch (e) {
       failed = e;
       console.warn('Overture tile', x, y, e);
@@ -296,6 +334,7 @@ async function loadOverture(id, lat) {
     out.textContent = `Overture: could not read it (${failed.message}). If the browser's console mentions CORS, the server does not let web pages read it. Or the release name may be out of date.`;
     return;
   }
+  showCompare();
   out.innerHTML = `File zooms ${head.minZoom} to ${head.maxZoom}; read zoom <b>${Zo}</b>. ` + describeCounts(counts, kept);
 }
 
@@ -364,7 +403,7 @@ function modeBits(today) {
   if ($('t-age').checked) m |= MODE.age;
   return m;
 }
-function drawAll(mode, today) {
+function drawAll(mode, today, leftSide = false) {
   gl.uniform1i(U.uMode, mode);
   gl.uniform1i(U.uToday, today ? 1 : 0);
   for (const t of tiles) {
@@ -373,7 +412,9 @@ function drawAll(mode, today) {
     gl.uniform3fv(U.uRoofC, t.reg.roof);
     gl.uniform3fv(U.uFrame, t.reg.frame);
     gl.uniform4fv(U.uReg, t.reg.extra);
-    for (const d of [t.roads, today ? t.today : t.now]) {
+    const right = $('src').value === 'ovt' ? t.ovt : t.ours;
+    const left = $('left').value === 'today' ? t.today : t.ours;
+    for (const d of [t.roads, leftSide ? left : right]) {
       if (!d) continue;
       gl.bindVertexArray(d.vao);
       if (A.info >= 0) gl.vertexAttrib4f(A.info, 0, 0, 0, 0);
@@ -412,9 +453,12 @@ function frame(now) {
   gl.uniform4f(U.uF2, F.size, F.tower, F.shine, 0);
   const split = $('split').checked;
   $('divider').style.display = $('tagL').style.display = split ? '' : 'none';
+  $('tagL').textContent = $('left').value === 'today' ? 'today' : 'our map, new look';
+  $('tagR').textContent = $('src').value === 'ovt' ? 'Overture, new look' : 'windows by maths';
   if (split) {
     gl.enable(gl.SCISSOR_TEST);
-    gl.scissor(0, 0, Math.floor(w / 2), h); drawAll(modeBits(true), true);
+    const oldLeft = $('left').value === 'today';
+    gl.scissor(0, 0, Math.floor(w / 2), h); drawAll(modeBits(oldLeft), oldLeft, true);
     gl.scissor(Math.floor(w / 2), 0, w - Math.floor(w / 2), h); drawAll(modeBits(false), false);
     gl.disable(gl.SCISSOR_TEST);
   } else drawAll(modeBits(false), false);

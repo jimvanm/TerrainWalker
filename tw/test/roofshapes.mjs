@@ -45,3 +45,21 @@ ok(defaultRoofHeight('spire', 3) > defaultRoofHeight('dome', 3), 'a spire withou
   ok([...o.sty].every((s) => (s >> 8) & STY_MONUMENT), 'it is drawn as a monument');
 }
 console.log('roofshapes ok');
+
+// Ridge direction, and single-slope roofs.
+import { fitRect, turnRect, emitSkillion } from '../src/houseroof.js';
+{
+  const r = fitRect([0, 0, 20, 0, 20, 10, 0, 10]);          // long side east-west (units: x east, y south)
+  ok(Math.abs(r.ax) > 0.99, 'fitted: long side runs east-west');
+  ok(Math.abs(turnRect(r, 180, null).rect.ax) > 0.99, 'slopes facing south: ridge stays east-west');
+  ok(Math.abs(turnRect(r, 90, null).rect.ay) > 0.99, 'slopes facing east: ridge turns north-south');
+  ok(Math.abs(turnRect(r, null, 'across').rect.ay) > 0.99, '"across": ridge across the long side');
+  const { rect, low } = turnRect(r, 180, null);
+  const pts = [];
+  emitSkillion(rect, { base: 0, gAt: () => 0, sunk: 0, eave: 5, k: 1, rise: 2, low, minh: 0 },
+    (x, y, z, roof) => { pts.push({ x, y, z, roof }); return pts.length - 1; }, () => {});
+  const roof = pts.filter((p) => p.roof);
+  const south = roof.reduce((a, p) => (p.z > a.z ? p : a)), north = roof.reduce((a, p) => (p.z < a.z ? p : a));
+  ok(south.y < north.y, 'a roof facing south is low on the south side');
+}
+console.log('roof directions ok');
