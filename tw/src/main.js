@@ -26,7 +26,7 @@ import { workerRunner } from './city.js';
 import { initPieces } from './pieces.js';
 import { searchMountains, traceMountain } from './mountains.js';
 import { cachedFetch } from './cache.js';
-import { plainElevationUrl, bumpSurveyGeneration } from './placetiles.js';
+import { plainElevationUrl, bumpSurveyGeneration, inSurveyArea } from './placetiles.js';
 import { LOOK, SETS } from './look.js';
 import { settings, LAYERS, layerOn, toggleLayer, BUILDING_STYLES } from './settings.js';
 import { helpHtml, bindKeys, MODES, modeName } from './ui/keys.js';
@@ -35,7 +35,7 @@ import { initCompass } from './ui/compass.js';
 import { Hud, fatal } from './ui/hud.js';
 import { heightReport } from './ui/report.js';
 import { VECTOR_TILEJSON, FOV, NEAR, EYE_HEIGHT, readHash, writeHash } from './config.js';
-import { lonToMercX, latToMercY, mercXToLon, mercYToLat, wrapLon } from './geo.js';
+import { lonToMercX, latToMercY, mercXToLon, mercYToLat, wrapLon, mercToTile } from './geo.js';
 
 // ---- graphics ---------------------------------------------------------------
 const canvas = document.getElementById('c');
@@ -379,7 +379,10 @@ function frame(now) {
   drawOutline(settings.mode === 'tools' ? transplant.outline() : null, vw, vh);
   setCursor();
   const roadsOn = layerOn('roads'), bldOn = layerOn('built'), landOn = layerOn('land');
-  const flatWater = settings.flatWater && layerOn('water');
+  // Flat-water patches are not used on survey ground (its water is already
+  // right), so the ground is not cut away for them there either.
+  const camT = mercToTile(cam.mercX, cam.mercY, 14);
+  const flatWater = settings.flatWater && layerOn('water') && !(settings.survey && inSurveyArea(14, Math.floor(camT.x), Math.floor(camT.y)));
   landmarks.setLayers({ water: layerOn('water'), roads: roadsOn, built: bldOn, cover: layerOn('cover'), land: landOn });
   landmarks.update(v, (x, y) => terrain.groundAt(x, y));
   const msg = transplant.message || dropper.message;

@@ -232,9 +232,10 @@ tiles. Decided: leave it as is for now, come back with walking.
       ground in Canada comes from the survey (16, 8, 4, 2 m), gaps filled from
       the usual tiles (`surveytile.js`). Pieces are kept in the browser's
       storage ("tw-survey-v1"), shared by the helpers and between visits.
-- [ ] **Roads and buildings drape on zoom 14** (8 m survey) while the ground
-      is drawn at zoom 16 (2 m): small floats and sinks on steep ground. Same
-      as at Niagara before. Drape on the finest level instead.
+- [x] **Roads and buildings drape on the drawn ground (0.13.32).** They used
+      zoom 14 (8 m) while zoom 16 (2 m) was drawn, so roads looked torn. Now
+      the near field stitches the 16 zoom-16 tiles under its square and
+      drapes on those, wherever all 16 are present.
 - [ ] **No 1 m level in the app yet** (would be a zoom 17 level). The rings
       lab showed the 1 m detail is worth having on foot.
 - [ ] **The survey storage has no size limit yet.** Check what it grows to
@@ -251,7 +252,11 @@ tiles. Decided: leave it as is for now, come back with walking.
       smoothly; paint white only for a big drop over a short stretch (real
       falls and rapids). With survey ground, water painted on it is already
       at the right levels, reach by reach.
-- [ ] Retire the flat-water patches (key 0) where the survey covers.
+- [x] Flat-water patches (key 0) are off where the survey covers (0.13.32).
+- [x] **Small steps in the survey's own water** (a metre or so where its
+      sections meet) are smoothed over about 10 m under mapped water, so they
+      become gentle slopes; real falls stay steep and white (0.13.32).
+      Untested by Jim yet.
 - [ ] Other countries' surveys (US 3DEP, much of Europe), later.
 
 ## Untested, in rough order of risk

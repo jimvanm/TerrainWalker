@@ -98,3 +98,50 @@ export function nodeHeightAt(nodes, u, v, N = GRID) {
   if (tx + ty <= 1) return a + (b - a) * tx + (c - a) * ty;
   return d + (c - d) * (1 - tx) + (b - d) * (1 - ty);
 }
+
+// Smooths the ground under water (laser-survey tiles): each water pixel
+// becomes the average of the water pixels within r pixels of it. The
+// survey's water surface comes in sections with steps of a metre or so
+// between them, which on a river read as a staircase painted white as falling
+// water. Over about 10 m a small step becomes a gentle slope, while a real
+// fall, many metres high, stays steep. Ground outside water is untouched.
+// mask: the tile's RGBA overlay (R water, 256 x 256). Returns pixels changed.
+// Used by worker.js and nearworker.js alike, so both get the same ground.
+export function smoothWater(h, mask, r) {
+  if (!mask || r < 1) return 0;
+  const W = PX, M = Math.round(Math.sqrt(mask.length / 4));
+  const wet = new Uint8Array(W * W);
+  let any = 0;
+  for (let j = 0; j < W; j++) {
+    const mj = Math.min(M - 1, Math.floor(j * M / (W - 1)));
+    for (let i = 0; i < W; i++) {
+      const mi = Math.min(M - 1, Math.floor(i * M / (W - 1)));
+      if (mask[4 * (mj * M + mi)] > 160) { wet[j * W + i] = 1; any++; }
+    }
+  }
+  if (!any) return 0;
+  // Box sums of wet heights and wet counts: across, then down.
+  const hs = new Float64Array(W * W), hc = new Float64Array(W * W);
+  for (let j = 0; j < W; j++) {
+    let s = 0, c = 0;
+    for (let i = -r; i < W + r; i++) {
+      const a = i + r, b = i - r - 1;
+      if (a >= 0 && a < W && wet[j * W + a]) { s += h[j * W + a]; c++; }
+      if (b >= 0 && b < W && wet[j * W + b]) { s -= h[j * W + b]; c--; }
+      if (i >= 0 && i < W) { hs[j * W + i] = s; hc[j * W + i] = c; }
+    }
+  }
+  for (let i = 0; i < W; i++) {
+    let s = 0, c = 0;
+    for (let j = -r; j < W + r; j++) {
+      const a = j + r, b = j - r - 1;
+      if (a >= 0 && a < W) { s += hs[a * W + i]; c += hc[a * W + i]; }
+      if (b >= 0 && b < W) { s -= hs[b * W + i]; c -= hc[b * W + i]; }
+      if (j >= 0 && j < W && wet[j * W + i] && c > 0) h[j * W + i] = s / c;
+    }
+  }
+  return any;
+}
+
+// The smoothing distance in pixels for tile z, row y: about 10 m.
+export const waterSmoothPx = (z, y) => Math.max(1, Math.round(10 / pxMetersFor(z, y)));
