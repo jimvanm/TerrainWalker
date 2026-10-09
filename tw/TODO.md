@@ -174,6 +174,41 @@ the new look on Overture's buildings.
       (Open Government Licence - Canada: attribution) and that its servers
       allow web pages to read it.
 
+## Ground: Canada's survey in rings (findings, 8 October; not in the app yet)
+
+Labs: `groundlab.html` (today's ground beside the survey) and
+`groundrings.html` (detail in rings round you). Jim checked Ottawa's Rideau
+Canal locks, Healey Falls, Campbellford, the Welland Canal: all much better
+than today's ground, and water painted on the survey's ground lies right.
+Niagara Falls: not good (and mostly not surveyed); it keeps its own place
+tiles. Decided: leave it as is for now, come back with walking.
+
+- **Source:** HRDEM, Natural Resources Canada, Open Government Licence -
+  Canada (credit on screen). Catalogue `datacube.services.geo.ca/stac`,
+  files on `canelevation-dem.s3.ca-central-1.amazonaws.com`, one cloud
+  GeoTIFF per region (500,000 px square at 1 m, 11 levels, LZW, 512 px
+  blocks, no-data -32767), on Canada Atlas Lambert (`src/lcc.js`). Browsers
+  may read it. Bare ground (`dtm`) and surface with trees and buildings
+  (`dsm`); surface minus ground gives tree heights, if ever wanted.
+- **The rule that works:** rings at 1, 2, 4, 8 m round you (today's ground
+  beyond), each reaching 256 cells each side; a ring is on while one of its
+  cells covers at least 2 pixels on screen (off below 60% of that); rings
+  move in steps of 64 cells; the finer ring's outer quarter blends to the
+  coarser ring's heights; cut squares along the closer diagonal.
+- **Cost:** a 512 px block is about 1 MB. Fetch each once and keep it
+  (`SurveyBlocks`). A visit low down: 25-40 MB; a long low flight
+  wandering across a town: about 180 MB (Campbellford). Ring builds take
+  30-80 ms; the wait is for blocks, so in the app fetch in the background
+  and show the coarser ring until the finer arrives.
+- **Coverage:** gaps (Niagara Gorge 71%, Campbellford edges 30-55% at 2-8
+  m reach) fall back to today's ground.
+- [ ] **Water paint climbs canal walls** where the map's outline is wider
+      than the channel: paint water only where the survey's ground is at
+      the water's level.
+- [ ] **Bring it into the app** (the near field's ground), then retire the
+      flat-water patches (key 0) where the survey covers.
+- [ ] Other countries' surveys (US 3DEP, much of Europe), later.
+
 ## Untested, in rough order of risk
 
 - [ ] **Antimeridian crossing.** Flown once (Naples to Banff eastward) with no
