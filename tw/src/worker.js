@@ -13,7 +13,7 @@
 import { tileSizeMerc, tileCentreMerc, tileToMerc, mercYToLat } from './geo.js';
 import { decodeMVT } from './mvt.js';
 import { rasterOverlays, MASK } from './overlayraster.js';
-import { decodeTerrarium, pxMetersFor, sample, meshNodes, PX, COARSE, smoothWater, waterSmoothPx } from './heightgrid.js';
+import { decodeTerrarium, pxMetersFor, sample, meshNodes, PX, COARSE } from './heightgrid.js';
 import { cachedFetch } from './cache.js';
 import { surveyTileHeights, parseSurveyUrl } from './surveytile.js';
 import { SURVEY_PREFIX } from './placetiles.js';
@@ -136,8 +136,6 @@ self.onmessage = async (ev) => {
         : loadTile(url, z, y),
       vurl ? loadVector(vurl, mPerPx, vsub).catch(() => null) : Promise.resolve(null),
     ]);
-    // Survey ground: smooth the small steps in its water (heightgrid.js).
-    if (survey && survey.surveyed > 0 && ov) smoothWater(heights, ov.mask, waterSmoothPx(z, y));
     const { positions, indices } = buildMesh(heights, z, grid);
     const centre = tileCentreMerc(x, y, z);
     const nw = tileToMerc(x, y, z);

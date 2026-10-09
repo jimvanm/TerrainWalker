@@ -8,7 +8,7 @@
 
 import { decodeMVT } from './mvt.js';
 import { tileSizeMerc, tileToMerc, tileCentreMerc, mercYToLat } from './geo.js';
-import { decodeTerrarium, meshNodes, pxMetersFor, PX, nodeHeightAt, smoothWater, waterSmoothPx } from './heightgrid.js';
+import { decodeTerrarium, meshNodes, pxMetersFor, PX } from './heightgrid.js';
 import { buildRoads } from './roads.js';
 import { buildBuildings } from './buildings.js';
 import { buildWater } from './watersurface.js';
@@ -54,48 +54,6 @@ const FOOTPRINT_REACH = 600;   // metres: landmarks closer than this to a tile m
 const EZ_DEFAULT = 12;
 
 const cache = new Map();   // elevation url -> Promise<Float32Array nodes>
-
-// The zoom-16 ground under a zoom-14 near tile, as one grid of 513 x 513
-// nodes: the 4 x 4 zoom-16 tiles the terrain draws there (Canada's survey or
-// a place's own tiles), built exactly as worker.js builds them, water
-// smoothing included, so roads and buildings stand on the ground that is
-// drawn. urls: the 16 tiles' elevation addresses, row by row.
-const N16 = 512;
-async function fineNodes(urls, x14, y14, layers) {
-  const out = new Float32Array((N16 + 1) * (N16 + 1));
-  await Promise.all(urls.map(async (url, k) => {
-    const i = k % 4, j = Math.floor(k / 4), x = x14 * 4 + i, y = y14 * 4 + j;
-    let p = cache.get('16:' + url);
-    if (!p) {
-      p = (async () => {
-        let h, smooth = false;
-        if (url.startsWith(SURVEY_PREFIX)) {
-          const r = await surveyTileHeights(16, x, y);
-          h = r.heights; smooth = r.surveyed > 0;
-        } else {
-          const res = await cachedFetch(url, { mode: 'cors' });
-          if (!res.ok) throw new Error('elevation HTTP ' + res.status);
-          const bmp = await createImageBitmap(await res.blob());
-          const cv = new OffscreenCanvas(PX, PX), ctx = cv.getContext('2d', { willReadFrequently: true });
-          ctx.drawImage(bmp, 0, 0, PX, PX); bmp.close();
-          h = decodeTerrarium(ctx.getImageData(0, 0, PX, PX).data, pxMetersFor(16, y));
-        }
-        if (smooth && (layers.water || layers.waterway)) {
-          let ov = null;
-          try { ov = rasterOverlays({ water: layers.water, waterway: layers.waterway }, 10, { s: 4, ox: i, oy: j }); } catch (e) { /* no canvas */ }
-          if (ov) smoothWater(h, ov.mask, waterSmoothPx(16, y));
-        }
-        return meshNodes(h);
-      })();
-      cache.set('16:' + url, p);
-      p.catch(() => cache.delete('16:' + url));
-    }
-    const n = await p;
-    for (let jj = 0; jj <= 128; jj++) for (let ii = 0; ii <= 128; ii++) out[(j * 128 + jj) * (N16 + 1) + i * 128 + ii] = n[jj * 129 + ii];
-  }));
-  while (cache.size > 80) cache.delete(cache.keys().next().value);
-  return out;
-}
 
 function elevationNodes(url, ez, y) {
   let p = cache.get(url);
@@ -200,8 +158,8 @@ export async function buildNearTile(spec) {
   const { x, y, z = 14, vurl, eurl, skyline = false, skyMin = 50 } = spec;
   const EZ = spec.ez || EZ_DEFAULT, d = z - EZ;
   const [layers, nodes, sites] = await Promise.all([
-    vectorLayers(vurl, skyline ? ['building', 'landuse'] : ['transportation', 'aeroway', 'building', 'landuse', 'poi', 'water', 'waterway']),
-    spec.e16 ? null : elevationNodes(eurl, EZ, y >> d),
+    vectorLayers(vurl, skyline ? ['building', 'landuse'] : ['transportation', 'aeroway', 'building', 'landuse', 'poi', 'water']),
+    elevationNodes(eurl, EZ, y >> d),
     loadList(),
   ]);
   const nw12 = tileToMerc(x >> d, y >> d, EZ);
@@ -215,12 +173,6 @@ export async function buildNearTile(spec) {
     nodes,
     cx: c.x, cy: c.y,                 // tile centre, so runway dashes line up across tiles
   };
-  // Where the terrain draws zoom-16 ground here, stand on exactly that.
-  if (spec.e16) {
-    const fine = await fineNodes(spec.e16, x, y, layers), size = g.size14;
-    Object.assign(g, { size12: size, bx: size / 2, by: size / 2, nodes: null, cell: size / N16,
-      hAt: (e, s) => nodeHeightAt(fine, (e + size / 2) / size, (size / 2 + s) / size, N16) });
-  }
   const mb = new MeshBuilder();
   const counts = {};
   const rEnds = skyline ? [0, 0, 0] : buildRoads(layers.transportation, g, mb, layers.aeroway, counts);
@@ -245,8 +197,7 @@ export async function buildNearTile(spec) {
   if (mask.length) stats.maskInfo = mask.map((m) => ({ id: m.id, footprint: !!m.poly }));
   // Water as a flat surface (watersurface.js), close up only.
   const wb = new MeshBuilder();
-  // Not on survey ground: its water is already at the right levels.
-  if (!skyline && !spec.noFlatWater) stats.water = buildWater(layers.water, g, wb);
+  if (!skyline) stats.water = buildWater(layers.water, g, wb);
   const w = wb.finish();
   const r = mb.finish(), b = bb.finish();
   return { wVertices: w.vertices, wIndices: w.indices, vertices: r.vertices, indices: r.indices, verts: r.verts, info: r.info,

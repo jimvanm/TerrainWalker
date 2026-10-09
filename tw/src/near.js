@@ -10,7 +10,7 @@ import { NF_Z, NF_WORKERS } from './config.js';
 import { TileLayer } from './tilelayer.js';
 import { settings } from './settings.js';
 import { OVERTURE_RELEASE, overtureUrl } from './overture.js';
-import { surveyGeneration, hasPlaceTile, elevationUrl, SURVEY_PREFIX } from './placetiles.js';
+import { surveyGeneration } from './placetiles.js';
 
 const MAX_RING = 14;      // never draw tiles farther than this, in tiles
 const KEEP_TILES = 360;   // tiles held before the farthest unwanted ones are freed
@@ -130,20 +130,9 @@ export class NearLayer extends TileLayer {
 
   // Building style (settings.buildings, key 5) goes with every job; Overture's
   // file address too when that style is on.
-  _jobOptions(spec) {
+  _jobOptions() {
     const style = settings.buildings, sgen = surveyGeneration();
-    const o = style === 2 ? { style, sgen, ovtUrl: overtureUrl(OVERTURE_RELEASE) } : { style, sgen };
-    // Where the terrain draws zoom-16 ground (Canada's survey, or a place's
-    // own tiles), roads and buildings stand on exactly that ground.
-    const n = Math.pow(2, this.Z), x = ((spec.rawX % n) + n) % n, y = spec.y;
-    const e16 = [];
-    for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) {
-      if (!hasPlaceTile(16, x * 4 + i, y * 4 + j)) return o;
-      e16.push(elevationUrl(16, x * 4 + i, y * 4 + j));
-    }
-    o.e16 = e16;
-    if (e16.some((u) => u.startsWith(SURVEY_PREFIX))) o.noFlatWater = true;
-    return o;
+    return style === 2 ? { style, sgen, ovtUrl: overtureUrl(OVERTURE_RELEASE) } : { style, sgen };
   }
 
   // A tile built in a style that is no longer wanted is thrown away and asked
