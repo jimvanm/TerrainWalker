@@ -8,6 +8,8 @@ const { MeshProgram } = await import('../src/meshprogram.js');
 const { NearLayer } = await import('../src/near.js');
 const { SkylineLayer } = await import('../src/skyline.js');
 const { Handover } = await import('../src/handover.js');
+// The fake replies carry no style; check with today's buildings (key 5).
+(await import('../src/settings.js')).settings.buildings = 0;
 const mesh = new MeshProgram(gl);
 const { mercToTile } = await import('../src/geo.js');
 const mx = -8847000, my = 5440000;

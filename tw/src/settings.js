@@ -11,7 +11,7 @@ export const settings = {
   showMasked: false, // draw the map buildings a landmark hides (key 4), to check the mask
   levels: 9,         // view slider: how many terrain levels may be drawn
   mode: 'nav',       // 'nav' (moving about) or 'tools' (changing things); Tab swaps (ui/keys.js MODES)
-  buildings: 0,      // building style, key 5: an index into BUILDING_STYLES
+  buildings: 2,      // building style, key 5: an index into BUILDING_STYLES (Overture by default)
   flatWater: true,   // key 0: water close by as a flat surface (watersurface.js), or painted on the ground
   survey: true,      // key J: Canada's laser survey as the close-up ground where it exists (surveytile.js)
 };
