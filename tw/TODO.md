@@ -205,8 +205,20 @@ tiles. Decided: leave it as is for now, come back with walking.
 - [ ] **Water paint climbs canal walls** where the map's outline is wider
       than the channel: paint water only where the survey's ground is at
       the water's level.
-- [ ] **Bring it into the app** (the near field's ground), then retire the
-      flat-water patches (key 0) where the survey covers.
+- [x] **In the app since 0.13.28 (key J, on by default):** zoom 13 to 16
+      ground in Canada comes from the survey (16, 8, 4, 2 m), gaps filled from
+      the usual tiles (`surveytile.js`). Pieces are kept in the browser's
+      storage ("tw-survey-v1"), shared by the helpers and between visits.
+- [ ] **Roads and buildings drape on zoom 14** (8 m survey) while the ground
+      is drawn at zoom 16 (2 m): small floats and sinks on steep ground. Same
+      as at Niagara before. Drape on the finest level instead.
+- [ ] **No 1 m level in the app yet** (would be a zoom 17 level). The rings
+      lab showed the 1 m detail is worth having on foot.
+- [ ] **The survey storage has no size limit yet.** Check what it grows to
+      after long trips; add a cap.
+- [ ] **The GeoTIFF reader comes from a public library site** (jsdelivr).
+      If it cannot be reached, survey tiles fall back to the usual ones.
+- [ ] Retire the flat-water patches (key 0) where the survey covers.
 - [ ] Other countries' surveys (US 3DEP, much of Europe), later.
 
 ## Untested, in rough order of risk

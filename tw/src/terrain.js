@@ -8,7 +8,7 @@ import { keyOf } from './tiles.js';
 import { CACHE_TILES, LEVELS, SKIRT } from './config.js';
 import { tileSizeMerc, mercToTile, HALF } from './geo.js';
 import { nodeHeightAt, COARSE } from './heightgrid.js';
-import { hasPlaceTile } from './placetiles.js';
+import { hasPlaceTile, surveyGeneration, SURVEY_MIN_Z } from './placetiles.js';
 
 const PX = 256;
 // The place levels come first in LEVELS (config.js); this many of them.
@@ -78,6 +78,8 @@ export class Terrain {
   _uploadInner(key, spec, msg) {
     const gl = this.gl;
     if (this.tiles.has(key)) return;
+    // Built before the survey was last switched on or off: no longer right.
+    if (spec.z >= SURVEY_MIN_Z && (spec.sgen || 0) !== surveyGeneration()) return;
     const vao = gl.createVertexArray();
     const vbo = gl.createBuffer();
     const ibo = gl.createBuffer();
@@ -105,6 +107,7 @@ export class Terrain {
       centre: msg.centre, nw: msg.nw, size: msg.size,
       heights: msg.heights || null,
       coarse: msg.coarse || null,     // 33 x 33 heights, for lookups far from the camera
+      survey: msg.survey || null,     // { surveyed 0..1, cell metres } where built from Canada's survey
       used: performance.now(),
     });
     this._evict();
@@ -292,6 +295,28 @@ export class Terrain {
   }
 
   get loaded() { return this.tiles.size; }
+
+  // The survey was switched on or off: drop every tile it could change (zoom
+  // 13 and finer), so each is built again the new way. Zoom 12 shows until
+  // they arrive.
+  dropSurveyLevels() {
+    const gl = this.gl;
+    for (const [k, t] of this.tiles) {
+      if (t.z < SURVEY_MIN_Z) continue;
+      gl.deleteVertexArray(t.vao); gl.deleteBuffer(t.vbo); gl.deleteBuffer(t.ibo);
+      if (t.tex) gl.deleteTexture(t.tex);
+      if (t.cover) gl.deleteTexture(t.cover);
+      this.tiles.delete(k);
+    }
+    this.visible = this.visible.filter((t) => t.z < SURVEY_MIN_Z);
+  }
+
+  // Of the tiles on screen, how many came from the survey, and how many could have.
+  get surveyCount() {
+    let n = 0, of = 0;
+    for (const t of this.visible) { if (t.z < SURVEY_MIN_Z) continue; of++; if (t.survey && t.survey.surveyed > 0) n++; }
+    return { n, of };
+  }
 
   get evicted() { return this._evicted || 0; }
 

@@ -35,7 +35,7 @@ export async function findPiece(lon0, lat0, lon1, lat1, surf = 'dtm') {
     if (!r.ok) throw new Error('catalogue HTTP ' + r.status);
     const j = await r.json();
     const item = (j.features || []).find((f) => f.assets && f.assets[surf]);
-    if (item) return { id: item.id, href: item.assets[surf].href };
+    if (item) return { id: item.id, href: item.assets[surf].href, bbox: item.bbox || null };
   }
   return null;
 }
@@ -45,23 +45,26 @@ export async function findPiece(lon0, lat0, lon1, lat1, surf = 'dtm') {
 const opened = new Map();
 export async function openSurvey(href) {
   if (opened.has(href)) return opened.get(href);
-  const p = (async () => {
-    const tiff = await GeoTIFF.fromUrl(href, { allowFullFile: false });
-    const img0 = await tiff.getImage(0), n = await tiff.getImageCount();
-    const [ox, oy] = img0.getOrigin(), [rx, ry] = img0.getResolution();
-    const levels = [];
-    for (let k = 0; k < n; k++) {
-      const im = k ? await tiff.getImage(k) : img0, sc = img0.getWidth() / im.getWidth();
-      levels.push({ img: im, cell: Math.abs(rx) * sc, prx: rx * sc, pry: ry * sc, W: im.getWidth(), H: im.getHeight() });
-    }
-    const fd = img0.fileDirectory;
-    return { href, ox, oy, levels, nodata: img0.getGDALNoData(),
-      compression: { 1: 'none', 5: 'LZW', 8: 'Deflate', 32946: 'Deflate', 34887: 'LERC', 50000: 'ZSTD' }[fd.Compression] || fd.Compression,
-      block: fd.TileWidth || null, size: [img0.getWidth(), img0.getHeight()] };
-  })();
+  const p = (async () => describeSurvey(await GeoTIFF.fromUrl(href, { allowFullFile: false }), href))();
   opened.set(href, p);
   p.catch(() => opened.delete(href));
   return p;
+}
+
+// The same, for a file already opened (the app opens it through its own
+// caching reader, surveytile.js).
+export async function describeSurvey(tiff, href) {
+  const img0 = await tiff.getImage(0), n = await tiff.getImageCount();
+  const [ox, oy] = img0.getOrigin(), [rx, ry] = img0.getResolution();
+  const levels = [];
+  for (let k = 0; k < n; k++) {
+    const im = k ? await tiff.getImage(k) : img0, sc = img0.getWidth() / im.getWidth();
+    levels.push({ img: im, cell: Math.abs(rx) * sc, prx: rx * sc, pry: ry * sc, W: im.getWidth(), H: im.getHeight() });
+  }
+  const fd = img0.fileDirectory;
+  return { href, ox, oy, levels, nodata: img0.getGDALNoData(),
+    compression: { 1: 'none', 5: 'LZW', 8: 'Deflate', 32946: 'Deflate', 34887: 'LERC', 50000: 'ZSTD' }[fd.Compression] || fd.Compression,
+    block: fd.TileWidth || null, size: [img0.getWidth(), img0.getHeight()] };
 }
 
 // The level whose cells are the largest not over `cell` metres.

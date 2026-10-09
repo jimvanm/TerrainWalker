@@ -7,6 +7,10 @@ const { addPlace, clearPlaceTiles, elevationUrl, hasPlaceTile, placeNames } = aw
 const { Terrain } = await import('../src/terrain.js');
 const { LEVELS, TILE_URL } = await import('../src/config.js');
 const geo = await import('../src/geo.js');
+const { settings } = await import('../src/settings.js');
+// These checks are about a place's own tiles; Canada's survey (key J) is
+// tested at the end, so it is off until then.
+settings.survey = false;
 
 const BASE = 'http://localhost:8080/';
 // The Horseshoe Falls, and the tiles over it at each zoom.
@@ -60,3 +64,20 @@ function plan(minLevel) {
   console.log('ok  with no place here, nothing is fetched for zoom 15 and 16');
 }
 console.log('placetiles ok');
+
+// Canada's survey (key J): zoom 13 to 16 inside Canada come from it, the
+// rest as before; outside Canada nothing changes.
+{
+  const { inSurveyArea, SURVEY_PREFIX } = await import('../src/placetiles.js');
+  settings.survey = true;
+  const t = (z, lat, lon) => { const p = geo.mercToTile(geo.lonToMercX(lon), geo.latToMercY(lat), z); return [z, Math.floor(p.x), Math.floor(p.y)]; };
+  const ottawa16 = t(16, 45.424, -75.696), ottawa12 = t(12, 45.424, -75.696), buffaloish = t(14, 40.7, -74.0), seattle = t(15, 47.6, -122.3);
+  assert.equal(elevationUrl(...ottawa16), SURVEY_PREFIX + ottawa16.join('/'), 'Ottawa, zoom 16: from the survey');
+  assert.ok(hasPlaceTile(...ottawa16), 'the finest levels exist all over surveyed Canada');
+  assert.ok(!elevationUrl(...ottawa12).startsWith(SURVEY_PREFIX), 'zoom 12 and coarser: always the usual tiles');
+  assert.ok(!inSurveyArea(...buffaloish) && !inSurveyArea(...seattle), 'New York and Seattle are not in the survey area');
+  assert.ok(!elevationUrl(...seattle).startsWith(SURVEY_PREFIX) && !hasPlaceTile(...seattle), 'and get the usual tiles');
+  settings.survey = false;
+  assert.ok(!elevationUrl(...ottawa16).startsWith(SURVEY_PREFIX) && !hasPlaceTile(...ottawa16), 'key J off: the usual tiles in Canada too');
+  console.log('ok  Canada\'s survey is used for zoom 13 to 16 in Canada only, and only when switched on');
+}

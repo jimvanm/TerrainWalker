@@ -62,6 +62,7 @@ export class Hud {
       [flyText + (settings.fog ? ' +fog' : '') + (settings.debug ? ' +dbg' + settings.debug : '') +
         (settings.frozen ? ' FROZEN' : '') + (settings.showMasked ? ' +unmasked' : '')],
       [`${terrain.visible.length}/${terrain.loaded} tiles`, loader.queued === 0 && terrain.holes === 0 && terrain.loaded > 0],
+      ...(settings.survey && terrain.surveyCount && terrain.surveyCount.of ? [[`survey ${terrain.surveyCount.n}/${terrain.surveyCount.of}`]] : []),
       [`L${view.minLevel}-${view.drawLevels - 1}`],
       [`holes ${terrain.holes}/${this.holePeak}`, terrain.holes === 0],
       [`evict ${terrain.evicted}`],

@@ -15,6 +15,8 @@ import { decodeMVT } from './mvt.js';
 import { rasterOverlays, MASK } from './overlayraster.js';
 import { decodeTerrarium, pxMetersFor, sample, meshNodes, PX, COARSE } from './heightgrid.js';
 import { cachedFetch } from './cache.js';
+import { surveyTileHeights, parseSurveyUrl } from './surveytile.js';
+import { SURVEY_PREFIX } from './placetiles.js';
 
 export { decodeTerrarium };
 
@@ -126,8 +128,12 @@ self.onmessage = async (ev) => {
   const mPerPx = tileSizeMerc(vz) * Math.cos(mercYToLat(tileCentreMerc(x, y, z).y) * Math.PI / 180) / MASK;
   try {
     // Water is optional: a failure here must never cost us the terrain.
+    let survey = null;
     const [heights, ov] = await Promise.all([
-      loadTile(url, z, y),
+      url.startsWith(SURVEY_PREFIX)
+        ? (async () => { const t = parseSurveyUrl(url), r = await surveyTileHeights(t.z, t.x, t.y);
+            survey = { surveyed: r.surveyed, cell: r.cell, note: r.note }; return r.heights; })()
+        : loadTile(url, z, y),
       vurl ? loadVector(vurl, mPerPx, vsub).catch(() => null) : Promise.resolve(null),
     ]);
     const { positions, indices } = buildMesh(heights, z, grid);
@@ -142,7 +148,7 @@ self.onmessage = async (ev) => {
     transfer.push(coarse.buffer);
     if (keepHeights) { hcopy = heights; transfer.push(hcopy.buffer); }
     self.postMessage(
-      { id, ok: true, positions, indices, centre, nw, size: tileSizeMerc(z),
+      { id, ok: true, positions, indices, centre, nw, size: tileSizeMerc(z), survey,
         heights: hcopy, coarse, mask: ov && ov.mask, cover: ov && ov.cover },
       transfer
     );

@@ -12,6 +12,8 @@ import { decodeTerrarium, meshNodes, pxMetersFor, PX } from './heightgrid.js';
 import { buildRoads } from './roads.js';
 import { buildBuildings } from './buildings.js';
 import { buildWater } from './watersurface.js';
+import { surveyTileHeights, parseSurveyUrl } from './surveytile.js';
+import { SURVEY_PREFIX } from './placetiles.js';
 import { loadList, loadFootprint, turnFootprint } from './landmark_list.js';
 import { lonToMercX, latToMercY, wrapMercDx } from './geo.js';
 import { signedArea } from './earclip.js';
@@ -57,6 +59,10 @@ function elevationNodes(url, ez, y) {
   let p = cache.get(url);
   if (!p) {
     p = (async () => {
+      if (url.startsWith(SURVEY_PREFIX)) {
+        const t = parseSurveyUrl(url);
+        return meshNodes((await surveyTileHeights(t.z, t.x, t.y)).heights);
+      }
       const res = await cachedFetch(url, { mode: 'cors' });
       if (!res.ok) throw new Error('elevation HTTP ' + res.status);
       const bmp = await createImageBitmap(await res.blob());
@@ -183,6 +189,7 @@ export async function buildNearTile(spec) {
   const stats = buildBuildings(bLayer, g, bb, undefined,
     { ...(skyline ? { minHeight: skyMin, sunk: SKY_SUNK } : {}), mask, landuse: layers.landuse, pois: layers.poi, faces: style >= 1 && !skyline });
   stats.style = style;
+  stats.sgen = spec.sgen || 0;
   if (ovt) stats.overture = ovt;
   Object.assign(stats, counts);
   // For the K report: which landmark masks reached this tile, and whether the

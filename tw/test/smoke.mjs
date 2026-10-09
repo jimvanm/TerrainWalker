@@ -140,7 +140,7 @@ globalThis.Worker = class {
         rEnds: [6, 6, 6],
         // The new look (key 5) adds wall positions and style bytes.
         ...(m.style ? { bFac: new Float32Array(16), bSty: new Uint32Array(4).fill(0xff000000) } : {}),
-        stats: { seen: 1, kept: 1, dropped: 0, ends: [6, 6, 6], cover: 0.5, built: 0.5, style: m.style || 0 },
+        stats: { seen: 1, kept: 1, dropped: 0, ends: [6, 6, 6], cover: 0.5, built: 0.5, style: m.style || 0, sgen: m.sgen || 0 },
       } }), 0);
       return;
     }

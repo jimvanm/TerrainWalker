@@ -69,6 +69,7 @@ tiles are built on your own computer and are not in the repo (see
 | `V` `X` `B` `C` | toggle water, roads, built-up, land cover |
 | `T` | toggle landmarks (the list is `landmarks/index.json`) |
 | `F` | fog on/off (off by default) |
+| `J` | close-up ground in Canada: Canada's 1 m laser survey (HRDEM, the default) or the usual height tiles. The four finest ground levels (zoom 13 to 16) are built from the survey where it exists; gaps are filled from the usual tiles. Each piece of the survey is downloaded once and kept. |
 | `0` | water close by: a flat surface with a crisp shore and banks (default), or painted on the ground as before. Falling water (rapids, falls) is laid on the ground either way. |
 | `5` | building style: today's boxes, the new look (windows, house roofs, regional colours) on our map's buildings, or the new look on Overture's buildings (heights, roof shapes, domes and spires, materials). Close up only; the far skyline keeps today's style. |
 | `6` | building colours: real map colours on/off (where a mapper entered one) |

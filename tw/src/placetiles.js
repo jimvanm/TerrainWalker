@@ -9,6 +9,30 @@
 // place has tiles.
 
 import { TILE_URL } from './config.js';
+import { settings } from './settings.js';
+import { tileCentreMerc, mercXToLon, mercYToLat } from './geo.js';
+
+// Canada's laser survey (surveytile.js): with settings.survey on, tiles from
+// zoom 13 to 16 inside Canada are built from it in the helpers, asked for as
+// "hrdem:z/x/y". Where it has no data the helper uses the usual tile.
+export const SURVEY_PREFIX = 'hrdem:';
+export const SURVEY_MIN_Z = 13;
+let surveyGen = 0;
+// Goes up each time the survey is switched, so tiles built the old way can be
+// recognised and dropped.
+export const surveyGeneration = () => surveyGen;
+export const bumpSurveyGeneration = () => ++surveyGen;
+
+// Roughly southern Canada and the North: the survey's catalogue decides
+// exactly, and a helper finding nothing falls back to the usual tile. West of
+// Lake of the Woods the border is the 49th parallel.
+export function inSurveyArea(z, x, y) {
+  const c = tileCentreMerc(x, y, z), lat = mercYToLat(c.y), lon = mercXToLon(c.x);
+  if (lat < 41.6 || lat > 84 || lon < -141.1 || lon > -52) return false;
+  if (lon < -95.2 && lat < 48.95) return false;
+  return true;
+}
+const surveyed = (z, x, y) => settings.survey && z >= SURVEY_MIN_Z && inSurveyArea(z, x, y);
 
 const tiles = new Map();     // 'z/x/y' -> url of the place's tile
 const names = [];
@@ -46,12 +70,17 @@ export function addPlace(id, place, base) {
 
 export function clearPlaceTiles() { tiles.clear(); names.length = 0; }
 
-export const hasPlaceTile = (z, x, y) => tiles.has(z + '/' + x + '/' + y);
+// A tile for one of the finest levels (zoom 15 and 16): a place's own, or,
+// with the survey on, anywhere in Canada.
+export const hasPlaceTile = (z, x, y) => tiles.has(z + '/' + x + '/' + y) || surveyed(z, x, y);
 
 // The elevation tile to fetch for z/x/y: the place's own, or the usual one.
 export function elevationUrl(z, x, y) {
   return tiles.get(z + '/' + x + '/' + y) ||
-    TILE_URL.replace('{z}', z).replace('{x}', x).replace('{y}', y);
+    (surveyed(z, x, y) ? SURVEY_PREFIX + z + '/' + x + '/' + y : plainElevationUrl(z, x, y));
 }
+
+// The usual tile, never the survey (for code that reads tiles on the page).
+export const plainElevationUrl = (z, x, y) => TILE_URL.replace('{z}', z).replace('{x}', x).replace('{y}', y);
 
 export const placeNames = () => names.slice();

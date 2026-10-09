@@ -10,6 +10,7 @@ import { NF_Z, NF_WORKERS } from './config.js';
 import { TileLayer } from './tilelayer.js';
 import { settings } from './settings.js';
 import { OVERTURE_RELEASE, overtureUrl } from './overture.js';
+import { surveyGeneration } from './placetiles.js';
 
 const MAX_RING = 14;      // never draw tiles farther than this, in tiles
 const KEEP_TILES = 360;   // tiles held before the farthest unwanted ones are freed
@@ -130,14 +131,15 @@ export class NearLayer extends TileLayer {
   // Building style (settings.buildings, key 5) goes with every job; Overture's
   // file address too when that style is on.
   _jobOptions() {
-    const style = settings.buildings;
-    return style === 2 ? { style, ovtUrl: overtureUrl(OVERTURE_RELEASE) } : { style };
+    const style = settings.buildings, sgen = surveyGeneration();
+    return style === 2 ? { style, sgen, ovtUrl: overtureUrl(OVERTURE_RELEASE) } : { style, sgen };
   }
 
   // A tile built in a style that is no longer wanted is thrown away and asked
   // for again.
   _upload(spec, msg) {
     if (((msg.stats && msg.stats.style) || 0) !== settings.buildings) return;
+    if (((msg.stats && msg.stats.sgen) || 0) !== surveyGeneration()) return;
     super._upload(spec, msg);
   }
 

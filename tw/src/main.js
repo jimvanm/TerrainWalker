@@ -26,7 +26,7 @@ import { workerRunner } from './city.js';
 import { initPieces } from './pieces.js';
 import { searchMountains, traceMountain } from './mountains.js';
 import { cachedFetch } from './cache.js';
-import { elevationUrl } from './placetiles.js';
+import { plainElevationUrl, bumpSurveyGeneration } from './placetiles.js';
 import { LOOK, SETS } from './look.js';
 import { settings, LAYERS, layerOn, toggleLayer, BUILDING_STYLES } from './settings.js';
 import { helpHtml, bindKeys, MODES, modeName } from './ui/keys.js';
@@ -95,7 +95,7 @@ const landmarks = new Landmarks(gl, mesh);
 const dropper = new Dropper(landmarks);
 // The usual elevation tile as heights, for picking up a piece of ground.
 async function fetchHeights(z, x, y) {
-  const r = await cachedFetch(elevationUrl(z, x, y), { mode: 'cors' });
+  const r = await cachedFetch(plainElevationUrl(z, x, y), { mode: 'cors' });
   if (!r.ok) throw new Error('HTTP ' + r.status);
   const bmp = await createImageBitmap(await r.blob());
   const cv = new OffscreenCanvas(256, 256), cx = cv.getContext('2d', { willReadFrequently: true });
@@ -162,6 +162,17 @@ const favourites = initFavourites({
   },
 });
 
+// The credit line: Canada's survey is credited while it is in use, as its
+// licence asks.
+const CREDIT_BASE = document.getElementById('attrib') ? document.getElementById('attrib').innerHTML : '';
+function setCredit() {
+  const el = document.getElementById('attrib');
+  if (!el) return;
+  el.innerHTML = CREDIT_BASE + (settings.survey
+    ? ' &middot; Close-up ground in Canada: contains information licensed under the Open Government Licence &ndash; Canada (NRCan HRDEM)' : '');
+}
+setCredit();
+
 // Every key and button runs one of these. ui/keys.js says which key runs which.
 const actions = {
   toggleFly: () => { cam.fly = cam.fly ? 0 : 1; },
@@ -175,6 +186,13 @@ const actions = {
   debugFlat: () => { settings.debug = settings.debug === 2 ? 0 : 2; },
   freeze: () => { settings.frozen = !settings.frozen; },
   toggleMask: () => { settings.showMasked = !settings.showMasked; },
+  toggleSurvey: () => {
+    settings.survey = !settings.survey;
+    bumpSurveyGeneration();
+    terrain.dropSurveyLevels();
+    nearField.restyle();
+    setCredit();
+  },
   toggleFlatWater: () => { settings.flatWater = !settings.flatWater; },
   buildStyle: () => { settings.buildings = (settings.buildings + 1) % BUILDING_STYLES.length; nearField.restyle(); },
   grab: () => controls.grab(),

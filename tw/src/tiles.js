@@ -3,7 +3,7 @@
 // public good and does not deserve to be hammered.
 
 import { WORKERS, MAX_INFLIGHT, VECTOR_MAXZOOM } from './config.js';
-import { elevationUrl } from './placetiles.js';
+import { elevationUrl, surveyGeneration } from './placetiles.js';
 import { WorkerPool } from './pool.js';
 
 export const keyOf = (z, x, y) => z + '/' + x + '/' + y;
@@ -31,6 +31,7 @@ export class Loader {
         const vz = s.z - d, vx = s.x >> d, vy = s.y >> d;
         const vurl = this.vectorTemplate
           ? this.vectorTemplate.replace('{z}', vz).replace('{x}', vx).replace('{y}', vy) : null;
+        s.sgen = surveyGeneration();   // tiles built before the survey was switched are dropped (terrain.js)
         return {
           url: elevationUrl(s.z, s.x, s.y),
           vurl, vsub: d ? { s: 1 << d, ox: s.x - (vx << d), oy: s.y - (vy << d), vz } : null,

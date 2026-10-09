@@ -5,6 +5,8 @@ const { MeshProgram } = await import('../src/meshprogram.js');
 const { NearLayer } = await import('../src/near.js');
 const { Terrain } = await import('../src/terrain.js');
 const { mercToTile, tileToMerc } = await import('../src/geo.js');
+// This test checks the usual elevation tiles; Canada's survey (key J) is off.
+(await import('../src/settings.js')).settings.survey = false;
 
 const mesh = new MeshProgram(gl);
 const nf = new NearLayer(gl, mesh, TEMPLATE);
