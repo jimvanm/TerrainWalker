@@ -157,6 +157,29 @@ the new look on Overture's buildings.
       (church, museum...). Hand-built landmarks still hide what is under them.
 - [ ] **Walking**: the new buildings are not solid yet (see physics, next).
 
+## OpenStreetMap knows what things are; we do not use it yet (Jim, 8 October)
+
+OpenStreetMap tags a great many things by what they are, and the map shows
+them as icons. We draw almost none of it as itself. Example: at the Richard
+L. Hearn Generating Station (Toronto, Port Lands) and the newer plant just
+north-east of it, the smokestacks are mapped as chimneys, but the new look
+treats them as skyscrapers and gives them windows.
+
+- [ ] **Read what things are and draw each kind as itself.** Chimneys and
+      smokestacks (`man_made=chimney`), towers (`man_made=tower`, water
+      towers, communication towers), silos and storage tanks, cooling
+      towers, lighthouses, wind turbines, bridges, piers, lock gates, dams
+      and weirs, power lines and pylons, stadiums, monuments, fountains,
+      and so on: a plain shape per kind (no windows on a chimney), at the
+      mapped height. Many of the icons on openstreetmap.org map to one of
+      these.
+- [ ] **Where to get it.** Our map tiles drop most of these tags. Options:
+      Overture (buildings carry a class; also "places" with categories),
+      the full OpenStreetMap data through a tile service that keeps the tags,
+      or our own tiles. Must stay streamed live, nothing to download first.
+- [ ] Until then, at least: a tall, thin, round outline with no floors is a
+      chimney or a tower, not an office (no windows).
+
 ## Water close by: open ends (0.13.21)
 
 - [ ] **One level per water area, per map tile.** A canal drawn as one area
