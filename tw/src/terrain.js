@@ -318,7 +318,7 @@ export class Terrain {
       if (t.z < SURVEY_MIN_Z) continue;
       of++;
       if (t.survey && t.survey.surveyed > 0) n++;
-      else if (!why && t.survey && t.survey.note) why = t.survey.note;
+      if (!why && t.survey && t.survey.note) why = t.survey.note;
     }
     return { n, of, why };
   }

@@ -36,4 +36,17 @@ ok(same(await r.getData(), FILE.length - 50, FILE.length - 1), 'a range past the
 ok(asked.length === 2 && asked[1][0] === 5 * CHUNK, 'only the last piece was fetched');
 const p = parseSurveyUrl('hrdem:16/18821/23557');
 ok(p.z === 16 && p.x === 18821 && p.y === 23557, 'survey tile addresses read back');
+{
+  // A server that hides the size: no content-range in what the reader sees.
+  const hidden = async (url, init) => { const r = await fakeFetch(url, init); return { ...r, headers: { get: () => null } }; };
+  const c = new CachedRangeClient('https://x/g.tif', { fetch: hidden, store: Promise.resolve(null) });
+  const r = await c.request({ headers: { Range: `bytes=10-${CHUNK + 5}` } });
+  ok(r.getHeader('content-range') === null && same(await r.getData(), 10, CHUNK + 5), 'when the server hides the file size, the bytes still come back right, and no made-up size is passed on');
+}
 console.log('surveytile ok');
+{
+  const { whyFailed } = await import('../src/surveytile.js');
+  const inner = new Error('survey HTTP 403');
+  const agg = new AggregateError([inner], 'Request failed');
+  ok(whyFailed(agg) === 'Request failed: survey HTTP 403', 'the reason inside "Request failed" is shown: ' + whyFailed(agg));
+}

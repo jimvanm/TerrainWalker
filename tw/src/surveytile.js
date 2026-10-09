@@ -116,7 +116,9 @@ export class CachedRangeClient {
       ok: true, status: 206,
       getHeader: (name) => {
         const n = name.toLowerCase();
-        if (n === 'content-range') return `bytes ${a}-${end}/${total || '*'}`;
+        // Without the file's size (a server may hide it from web pages), say
+        // nothing, as the browser would: the reader copes with that.
+        if (n === 'content-range') return total ? `bytes ${a}-${end}/${total}` : null;
         if (n === 'content-type') return 'application/octet-stream';
         if (n === 'content-length') return String(out.length);
         return null;
@@ -150,20 +152,38 @@ async function pieceFor(z, x, y) {
   return p;
 }
 
-function openCached(href) {
-  if (!opened.has(href)) {
+// The real reason inside an error: the reader wraps failed downloads in an
+// error that only says "Request failed".
+export function whyFailed(e) {
+  let x = e, out = '';
+  for (let d = 0; x && d < 4; d++) {
+    const m = (x.message || String(x)).trim();
+    if (m && !out.includes(m)) out += (out ? ': ' : '') + m;
+    x = (x.errors && x.errors[0]) || x.cause;
+  }
+  return out || 'unknown';
+}
+
+// Opens a survey file. First through the piece-keeping reader; if reading
+// with it fails, through the library's own plain reader instead (nothing
+// kept, but the same ground). `plain` forces the plain one.
+function openCached(href, plain = false) {
+  const key = (plain ? 'plain:' : '') + href;
+  if (!opened.has(key)) {
     const p = (async () => {
       const G = await loadLib();
-      const client = new CachedRangeClient(href);
-      const tiff = await G.fromCustomClient(client, { allowFullFile: false, cacheSize: 64 });
+      const tiff = plain ? await G.fromUrl(href, { allowFullFile: false })
+        : await G.fromCustomClient(new CachedRangeClient(href), { allowFullFile: false, cacheSize: 64 });
       const survey = await describeSurvey(tiff, href);
-      return { survey, blocks: new SurveyBlocks(survey, SURVEY_BLOCKS_PER_HELPER), client };
+      return { survey, blocks: new SurveyBlocks(survey, SURVEY_BLOCKS_PER_HELPER), plain };
     })();
-    opened.set(href, p);
-    p.catch(() => opened.delete(href));
+    opened.set(key, p);
+    p.catch(() => opened.delete(key));
   }
-  return opened.get(href);
+  return opened.get(key);
 }
+let usePlain = false;      // set once the piece-keeping reader has failed in this helper
+let keptFailure = '';
 
 // ---- the usual tile, for whatever the survey does not cover -------------------
 
@@ -194,8 +214,11 @@ export async function surveyTileHeights(z, x, y) {
   let piece = null, opened2 = null, note = '';
   try {
     piece = await pieceFor(z, x, y);
-    if (piece) opened2 = await openCached(piece.href);
-  } catch (e) { note = String(e && e.message || e); }
+    if (piece) {
+      try { opened2 = await openCached(piece.href, usePlain); }
+      catch (e) { if (usePlain) throw e; usePlain = true; keptFailure = whyFailed(e); opened2 = await openCached(piece.href, true); }
+    }
+  } catch (e) { note = whyFailed(e); }
   if (!opened2) return { heights: await usual, surveyed: 0, cell: 0, note: note || 'no survey here' };
   const { survey, blocks } = opened2;
   const s = tileSizeMerc(z), nw = tileToMerc(x, y, z);
@@ -210,7 +233,12 @@ export async function surveyTileHeights(z, x, y) {
     X0 = Math.min(X0, X); X1 = Math.max(X1, X); Y0 = Math.min(Y0, Y); Y1 = Math.max(Y1, Y);
   }
   try { await blocks.ensure(li, X0, Y0, X1, Y1); }
-  catch (e) { return { heights: await usual, surveyed: 0, cell: 0, note: 'survey read failed: ' + (e && e.message || e) }; }
+  catch (e) {
+    if (opened2.plain) return { heights: await usual, surveyed: 0, cell: 0, note: 'survey read failed: ' + whyFailed(e) };
+    // The piece-keeping reader failed: try once more with the plain one.
+    usePlain = true; keptFailure = whyFailed(e);
+    return surveyTileHeights(z, x, y);
+  }
   const out = new Float32Array(PX * PX);
   let got = 0;
   for (let j = 0; j < PX; j++) {
@@ -228,5 +256,6 @@ export async function surveyTileHeights(z, x, y) {
     const u = await usual;
     for (let i = 0; i < out.length; i++) if (Number.isNaN(out[i])) out[i] = u[i];
   }
-  return { heights: out, surveyed: got / (PX * PX), cell: lvl.cell, note: '' };
+  return { heights: out, surveyed: got / (PX * PX), cell: lvl.cell,
+    note: opened2.plain ? 'plain reader, nothing kept (' + keptFailure + ')' : '' };
 }
