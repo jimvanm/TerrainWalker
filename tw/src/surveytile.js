@@ -12,7 +12,8 @@
 // in the browser's own storage (CachedRangeClient), shared by all the helpers
 // and kept between visits, so the same bytes are never downloaded twice.
 //
-// The GeoTIFF reader is a public library, loaded the first time it is needed.
+// The GeoTIFF reader is a public library (geotiff.js), shipped with the app in
+// vendor/ and loaded the first time it is needed.
 
 import { PX, decodeTerrarium, pxMetersFor, sample } from './heightgrid.js';
 import { tileToMerc, tileSizeMerc, mercXToLon, mercYToLat } from './geo.js';
@@ -22,7 +23,7 @@ import { cachedFetch } from './cache.js';
 import { findPiece, describeSurvey, levelFor, SurveyBlocks } from './hrdemsource.js';
 import { SURVEY_PREFIX } from './placetiles.js';
 
-export const GEOTIFF_URL = 'https://cdn.jsdelivr.net/npm/geotiff@2.1.3/+esm';
+export const GEOTIFF_URL = new URL('../vendor/geotiff-2.1.3.js', import.meta.url).href;
 export const SURVEY_BLOCKS_PER_HELPER = 32;    // decoded blocks kept in memory by each helper (about 1 MB each)
 
 export const parseSurveyUrl = (u) => {

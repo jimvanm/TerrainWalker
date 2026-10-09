@@ -216,8 +216,18 @@ tiles. Decided: leave it as is for now, come back with walking.
       lab showed the 1 m detail is worth having on foot.
 - [ ] **The survey storage has no size limit yet.** Check what it grows to
       after long trips; add a cap.
-- [ ] **The GeoTIFF reader comes from a public library site** (jsdelivr).
-      If it cannot be reached, survey tiles fall back to the usual ones.
+- [x] The GeoTIFF reader ships with the app (`vendor/geotiff-2.1.3.js`,
+      bundled with its dependencies; licences in `vendor/geotiff-LICENSE.txt`).
+      0.13.28 loaded it from jsdelivr, and on Jim's machine no tile came from
+      the survey ("survey 0/52").
+- [ ] **A river's level should follow its length.** Rivers fall gently (the
+      St. Clair between Huron and Erie); the flat-water patches (key 0) give
+      each piece of river one level per map tile, so a river becomes a
+      staircase, and each step is painted white as falling water. Work the
+      level out along the river's centre line (the map's waterway lines),
+      smoothly; paint white only for a big drop over a short stretch (real
+      falls and rapids). With survey ground, water painted on it is already
+      at the right levels, reach by reach.
 - [ ] Retire the flat-water patches (key 0) where the survey covers.
 - [ ] Other countries' surveys (US 3DEP, much of Europe), later.
 

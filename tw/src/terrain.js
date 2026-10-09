@@ -313,9 +313,14 @@ export class Terrain {
 
   // Of the tiles on screen, how many came from the survey, and how many could have.
   get surveyCount() {
-    let n = 0, of = 0;
-    for (const t of this.visible) { if (t.z < SURVEY_MIN_Z) continue; of++; if (t.survey && t.survey.surveyed > 0) n++; }
-    return { n, of };
+    let n = 0, of = 0, why = '';
+    for (const t of this.visible) {
+      if (t.z < SURVEY_MIN_Z) continue;
+      of++;
+      if (t.survey && t.survey.surveyed > 0) n++;
+      else if (!why && t.survey && t.survey.note) why = t.survey.note;
+    }
+    return { n, of, why };
   }
 
   get evicted() { return this._evicted || 0; }

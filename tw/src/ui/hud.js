@@ -62,7 +62,9 @@ export class Hud {
       [flyText + (settings.fog ? ' +fog' : '') + (settings.debug ? ' +dbg' + settings.debug : '') +
         (settings.frozen ? ' FROZEN' : '') + (settings.showMasked ? ' +unmasked' : '')],
       [`${terrain.visible.length}/${terrain.loaded} tiles`, loader.queued === 0 && terrain.holes === 0 && terrain.loaded > 0],
-      ...(settings.survey && terrain.surveyCount && terrain.surveyCount.of ? [[`survey ${terrain.surveyCount.n}/${terrain.surveyCount.of}`]] : []),
+      // How much close-up ground came from Canada's survey, and if none, why not.
+      ...(settings.survey && terrain.surveyCount && terrain.surveyCount.of
+        ? [[`survey ${terrain.surveyCount.n}/${terrain.surveyCount.of}` + (terrain.surveyCount.n ? '' : terrain.surveyCount.why ? ` (${terrain.surveyCount.why.slice(0, 80)})` : '')]] : []),
       [`L${view.minLevel}-${view.drawLevels - 1}`],
       [`holes ${terrain.holes}/${this.holePeak}`, terrain.holes === 0],
       [`evict ${terrain.evicted}`],
