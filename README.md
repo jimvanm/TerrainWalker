@@ -1,5 +1,10 @@
 # Terrain Walker
 
+** THIS PROJECT HAS BEEN REPLACED BY A SIMILAR PROJECT NAMED Gallivantage. **
+https://github.com/jimvanm/gallivantage
+
+
+## WHAT THIS WAS (might still work)
 Walk or fly across the real surface of the Earth, in a browser, with no install
 and no account.
 
